@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use traits::PersistentObject;
 
 mod math;
+mod matrix;
 mod serialization;
 mod traits;
 
@@ -38,6 +39,21 @@ impl SessionId {
         SessionId(random_bytes(rng))
     }
 }
+// /// Calculates the final session id from the list of session ids.
+// pub fn calculate_final_session_id(
+//     party_ids: impl IntoIterator<Item = usize>,
+//     sid_i_list: &[SessionId],
+// ) -> SessionId {
+//     let mut hasher = Sha256::new();
+
+//     party_ids
+//         .into_iter()
+//         .for_each(|pid| hasher.update((pid as u32).to_be_bytes()));
+
+//     sid_i_list.iter().for_each(|sid| hasher.update(sid));
+
+//     SessionId::new(hasher.finalize().into())
+// }
 
 /// Generate a random byte array
 pub fn random_bytes<const N: usize, R: CryptoRng + RngCore>(rng: &mut R) -> [u8; N] {

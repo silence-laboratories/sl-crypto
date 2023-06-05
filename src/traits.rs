@@ -5,12 +5,13 @@ use dryoc::{
     classic::{crypto_sign, crypto_sign_ed25519::Signature},
     constants::CRYPTO_SIGN_ED25519_BYTES,
 };
-use elliptic_curve::{bigint::Uint, scalar::FromUintUnchecked, Curve, Field, PrimeField};
-// use elliptic_curve::{bigint::U256, CurveArithmetic, Scalar};
-use k256::{
-    elliptic_curve::{bigint::NonZero, CurveArithmetic, Scalar},
-    Secp256k1, U256,
+use elliptic_curve::{bigint::U256, CurveArithmetic, Scalar};
+use elliptic_curve::{
+    bigint::{NonZero, Uint},
+    scalar::FromUintUnchecked,
+    Curve, Field, PrimeField,
 };
+
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Trait that defines an object that can be converted to and from an array of bytes.
@@ -51,21 +52,27 @@ pub trait HasFromParty {
     fn get_pid(&self) -> usize;
 }
 /// Trait that defines a way to convert this type to a [Scalar].
-pub trait ToScalar<S: PrimeField> {
+/// Only supports converting to [Scalar] of max size [U256] for now.
+pub trait ToScalar {
     /// Convert to [Scalar]
-    fn to_scalar(&self) -> S;
+    fn to_scalar<C: CurveArithmetic>(&self) -> C::Scalar
+    where
+        C: CurveArithmetic<Uint = elliptic_curve::bigint::Uint<4>>;
 }
 
-impl<S: PrimeField> ToScalar<S> for U256 {
-    fn to_scalar(&self) -> S {
-        match self.cmp(&S::MODULUS) {
-            Ordering::Less => S::from_uint_unchecked(*self),
-            Ordering::Equal => S::ZERO,
+impl ToScalar for U256 {
+    fn to_scalar<C: CurveArithmetic>(&self) -> C::Scalar
+    where
+        C: CurveArithmetic<Uint = elliptic_curve::bigint::Uint<4>>,
+    {
+        match self.cmp(&C::ORDER) {
+            Ordering::Less => C::Scalar::from_uint_unchecked(*self),
+            Ordering::Equal => C::Scalar::ZERO,
             Ordering::Greater => {
                 // We know order is non zero
-                let order = NonZero::new(Secp256k1::ORDER).unwrap();
+                let order = NonZero::new(C::ORDER).unwrap();
                 // SAFETY: We know the scalar is less than the order as we do bigint mod order.
-                S::from_uint_unchecked(self.rem(&order))
+                C::Scalar::from_uint_unchecked(self.rem(&order))
             }
         }
     }

@@ -1,46 +1,59 @@
 pub mod serde_projective_point {
-    use elliptic_curve::{group::Curve, Group};
+    use elliptic_curve::{group::Curve, CurveArithmetic};
     use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-    pub fn serialize<S, P: Group + Curve>(data: &P, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S, C: CurveArithmetic>(
+        data: &C::ProjectivePoint,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
-        P::AffineRepr: Serialize,
+        C::AffinePoint: Serialize,
     {
         data.to_affine().serialize(serializer)
     }
 
-    pub fn deserialize<'de, D, P: Group + Curve>(deserializer: D) -> Result<P, D::Error>
+    pub fn deserialize<'de, D, C: CurveArithmetic>(
+        deserializer: D,
+    ) -> Result<C::ProjectivePoint, D::Error>
     where
         D: serde::Deserializer<'de>,
-        P::AffineRepr: DeserializeOwned,
-        P: From<P::AffineRepr>,
+        C::AffinePoint: DeserializeOwned,
+        C::ProjectivePoint: From<C::AffinePoint>,
     {
-        let affine = P::AffineRepr::deserialize(deserializer)?;
-        Ok(P::from(affine))
+        let affine = C::AffinePoint::deserialize(deserializer)?;
+        Ok(C::ProjectivePoint::from(affine))
     }
 }
 
 pub mod serde_projective_point_vec {
-    use elliptic_curve::{group::Curve, Group};
+    use elliptic_curve::{group::Curve, CurveArithmetic};
     use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-    pub fn serialize<S, P: Group + Curve>(data: &[P], serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S, C: CurveArithmetic>(
+        data: &[C::ProjectivePoint],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
-        P::AffineRepr: Serialize,
+        C::AffinePoint: Serialize + Clone,
     {
-        let affine: Vec<P::AffineRepr> = data.iter().map(|p| p.to_affine()).collect();
+        let affine: Vec<C::AffinePoint> = data.iter().map(|p| p.to_affine()).collect();
         affine.serialize(serializer)
     }
 
-    pub fn deserialize<'de, D, P: Group + Curve>(deserializer: D) -> Result<Vec<P>, D::Error>
+    pub fn deserialize<'de, D, C: CurveArithmetic>(
+        deserializer: D,
+    ) -> Result<Vec<C::ProjectivePoint>, D::Error>
     where
         D: serde::Deserializer<'de>,
-        P::AffineRepr: DeserializeOwned,
-        P: From<P::AffineRepr>,
+        C::AffinePoint: DeserializeOwned + Clone,
+        C::ProjectivePoint: From<C::AffinePoint>,
     {
-        let affine: Vec<P::AffineRepr> = Vec::<P::AffineRepr>::deserialize(deserializer)?;
-        Ok(affine.iter().map(|p| P::from(*p)).collect())
+        let affine: Vec<C::AffinePoint> = Vec::<C::AffinePoint>::deserialize(deserializer)?;
+        Ok(affine
+            .iter()
+            .map(|p| C::ProjectivePoint::from(*p))
+            .collect())
     }
 }

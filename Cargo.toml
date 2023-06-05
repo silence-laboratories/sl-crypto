@@ -10,8 +10,13 @@ serde = {version ="1", features = ["derive"]}
 bincode = "1"
 rand = "0.8"
 elliptic-curve = {version ="0.13", features=["serde"]}
-k256 = {version = "0.13", features = ["serde", "ecdsa"]}
 dryoc = {version = "0.5.0", features=["serde"] }
+rayon = '1'
+
+
+[dev-dependencies]
+k256 = {version = "0.13", features = ["serde", "ecdsa"]}
+
 
 # [features]
 # nacl = ["dryoc"]

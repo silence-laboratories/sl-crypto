@@ -8,18 +8,24 @@ use elliptic_curve::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{serialization::serde_projective_point_vec, traits::ToScalar};
+use crate::{matrix::matrix_inverse, serialization::serde_projective_point_vec, traits::ToScalar};
 
 /// A polynomial with coefficients of type `Scalar`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Polynomial<S: PrimeField> {
+pub struct Polynomial<C: CurveArithmetic>
+where
+    C::Scalar: Serialize + DeserializeOwned,
+{
     /// The coefficients of the polynomial.
-    pub coeffs: Vec<S>,
+    pub coeffs: Vec<C::Scalar>,
 }
 
-impl<S: PrimeField> Polynomial<S> {
+impl<C: CurveArithmetic> Polynomial<C>
+where
+    C::Scalar: Serialize + DeserializeOwned,
+{
     /// Create a new polynomial with the given coefficients.
-    pub fn new(coeffs: Vec<S>) -> Self {
+    pub fn new(coeffs: Vec<C::Scalar>) -> Self {
         Self { coeffs }
     }
 
@@ -28,25 +34,25 @@ impl<S: PrimeField> Polynomial<S> {
         let mut coeffs = Vec::with_capacity(degree + 1);
         for _ in 0..=degree {
             // TODO: Is this random constant time?
-            coeffs.push(S::random(rng));
+            coeffs.push(C::Scalar::random(&mut *rng));
         }
         Self { coeffs }
     }
 
     /// Evaluate the polynomial at 0 (the constant term).
-    pub fn get_constant(&self) -> S {
+    pub fn get_constant(&self) -> C::Scalar {
         self.coeffs[0]
     }
 
     /// Commit to this polynomial by multiplying each coefficient by the generator.
-    pub fn commit<P: Group<Scalar = S> + Curve>(&self, base_point: P) -> GroupPolynomial<P>
+    pub fn commit(&self, base_point: C::ProjectivePoint) -> GroupPolynomial<C>
     where
-        P::AffineRepr: Serialize + DeserializeOwned,
-        P: From<P::AffineRepr>,
+        C::AffinePoint: Serialize + DeserializeOwned,
+        C::ProjectivePoint: From<C::AffinePoint>,
     {
         let mut points = Vec::with_capacity(self.coeffs.len());
         for coeff in &self.coeffs {
-            points.push(P::generator() * coeff);
+            points.push(C::ProjectivePoint::generator() * coeff);
         }
         GroupPolynomial::new(points)
     }
@@ -56,46 +62,75 @@ impl<S: PrimeField> Polynomial<S> {
     ///
     /// `x`: point at which to compute the derivative.
     /// Arithmetic is done modulo the curve order
-    pub fn derivative_at<P: Group>(&self, n: usize, x: &S) -> S
+    pub fn derivative_at(&self, n: usize, x: &C::Scalar) -> C::Scalar
     where
-        P: Group<Scalar = S>,
+        C: CurveArithmetic<Uint = U256>,
     {
         (n..self.coeffs.len())
             .map(|i| {
                 let num: U256 = factorial_range(i - n, i);
-                let scalar_num: P::Scalar = num.to_scalar();
+                let scalar_num: C::Scalar = num.to_scalar::<C>();
                 let coeff = self.coeffs[i];
                 let result = x.pow_vartime([(i - n) as u64]);
                 scalar_num * coeff * result
             })
-            .fold(S::ZERO, |acc, x| acc + x)
+            .fold(C::Scalar::ZERO, |acc, x| acc + x)
     }
 }
 
 /// A polynomial with coefficients of type `ProjectivePoint`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct GroupPolynomial<P: Group + Curve>
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupPolynomial<C: CurveArithmetic>
 where
-    P::AffineRepr: Serialize + DeserializeOwned,
-    P: From<P::AffineRepr>,
+    C::AffinePoint: Serialize + DeserializeOwned,
+    C::ProjectivePoint: From<C::AffinePoint>,
 {
     /// The coefficients of the polynomial.
-    #[serde(with = "serde_projective_point_vec")]
-    pub coeffs: Vec<P>,
+    pub coeffs: Vec<C::ProjectivePoint>,
 }
 
-impl<P: Group + Curve> GroupPolynomial<P>
+impl<C: CurveArithmetic> Serialize for GroupPolynomial<C>
 where
-    P::AffineRepr: Serialize + DeserializeOwned,
-    P: From<P::AffineRepr>,
+    C::AffinePoint: Serialize + DeserializeOwned,
+    C::ProjectivePoint: From<C::AffinePoint>,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+        C::AffinePoint: Serialize + Clone,
+    {
+        let affine: Vec<C::AffinePoint> = self.iter().map(|p| p.to_affine()).collect();
+        affine.serialize(serializer)
+    }
+}
+
+impl<'de, C: CurveArithmetic> Deserialize<'de> for GroupPolynomial<C>
+where
+    C::AffinePoint: Serialize + DeserializeOwned,
+    C::ProjectivePoint: From<C::AffinePoint>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<GroupPolynomial<C>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let affine: Vec<C::AffinePoint> = Vec::deserialize(deserializer)?;
+        let coeffs: Vec<C::ProjectivePoint> = affine.iter().map(|p| p.clone().into()).collect();
+        Ok(GroupPolynomial::new(coeffs))
+    }
+}
+
+impl<C: CurveArithmetic> GroupPolynomial<C>
+where
+    C::AffinePoint: Serialize + DeserializeOwned,
+    C::ProjectivePoint: From<C::AffinePoint>,
 {
     /// Create a new polynomial with the given coefficients.
-    pub fn new(coeffs: Vec<P>) -> Self {
+    pub fn new(coeffs: Vec<C::ProjectivePoint>) -> Self {
         Self { coeffs }
     }
 
     /// Evaluate the polynomial at 0 (the constant term).
-    pub fn get_constant(&self) -> P {
+    pub fn get_constant(&self) -> C::ProjectivePoint {
         self.coeffs[0]
     }
 
@@ -111,34 +146,40 @@ where
             });
     }
     /// Get the coeffs of the polynomial derivative
-    pub fn derivative_coeffs(&self, n: usize) -> Vec<P> {
+    pub fn derivative_coeffs(&self, n: usize) -> Vec<C::ProjectivePoint>
+    where
+        C: CurveArithmetic<Uint = U256>,
+    {
         let (_, sub_v) = self.coeffs.split_at(n);
 
         sub_v
             .iter()
             .enumerate()
             .map(|(position, u_i)| {
-                let num: P::Scalar = factorial_range(position, position + n).to_scalar();
+                let num: C::Scalar = factorial_range(position, position + n).to_scalar::<C>();
                 *u_i * &num
             })
             .collect()
     }
 }
 
-impl<S: PrimeField> Deref for Polynomial<S> {
-    type Target = [S];
+impl<C: CurveArithmetic> Deref for Polynomial<C>
+where
+    C::Scalar: Serialize + DeserializeOwned,
+{
+    type Target = [C::Scalar];
 
     fn deref(&self) -> &Self::Target {
         &self.coeffs
     }
 }
 
-impl<P: Group + Curve> Deref for GroupPolynomial<P>
+impl<C: CurveArithmetic> Deref for GroupPolynomial<C>
 where
-    P::AffineRepr: Serialize + DeserializeOwned,
-    P: From<P::AffineRepr>,
+    C::AffinePoint: Serialize + DeserializeOwned,
+    C::ProjectivePoint: From<C::AffinePoint>,
 {
-    type Target = [P];
+    type Target = [C::ProjectivePoint];
 
     fn deref(&self) -> &Self::Target {
         &self.coeffs
@@ -205,14 +246,17 @@ pub fn polynomial_coeff_multipliers<C: CurveArithmetic>(
     x_i: &NonZeroScalar<C>,
     n_i: usize,
     n: usize,
-) -> Vec<C::Scalar> {
+) -> Vec<C::Scalar>
+where
+    C: CurveArithmetic<Uint = U256>,
+{
     let mut v = vec![C::Scalar::ZERO; n];
     v.iter_mut()
         .enumerate()
         .take(n)
         .skip(n_i)
         .for_each(|(idx, vi)| {
-            let num: C::Scalar = factorial_range(idx - n_i, idx).to_scalar();
+            let num: C::Scalar = factorial_range(idx - n_i, idx).to_scalar::<C>();
             let exponent = [(idx - n_i) as u64];
             let result = x_i.pow_vartime(exponent);
             *vi = num * result;
@@ -224,8 +268,9 @@ pub fn polynomial_coeff_multipliers<C: CurveArithmetic>(
 /// Get the birkhoff coefficients
 pub fn birkhoff_coeffs<C: CurveArithmetic>(params: &[(NonZeroScalar<C>, usize)]) -> Vec<C::Scalar>
 where
-    std::vec::Vec<std::vec::Vec<C::Scalar>>:
+    Vec<Vec<C::Scalar>>:
         std::iter::FromIterator<std::vec::Vec<<C as elliptic_curve::CurveArithmetic>::Scalar>>,
+    C: CurveArithmetic<Uint = U256>,
 {
     let n = params.len();
 
@@ -234,7 +279,7 @@ where
         .map(|(x_i, n_i)| polynomial_coeff_multipliers(x_i, *n_i, n))
         .collect();
 
-    let matrix_inv = matrix_inverse(matrix, n);
+    let matrix_inv = matrix_inverse::<C>(matrix, n);
 
     matrix_inv[0].clone()
 }
