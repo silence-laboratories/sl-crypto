@@ -181,6 +181,15 @@ pub struct EncryptedData {
     /// The nonce used for encryption
     pub nonce: StackByteArray<CRYPTO_BOX_NONCEBYTES>,
 }
+#[cfg(feature = "nacl")]
+impl HasFromParty for EncryptedData {
+    fn get_pid(&self) -> usize {
+        self.from_party
+    }
+}
+
+#[cfg(feature = "nacl")]
+impl PersistentObject for EncryptedData {}
 
 /// Coordinator module
 pub mod cooridinator {
