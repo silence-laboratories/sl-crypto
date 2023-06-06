@@ -125,6 +125,26 @@ pub fn encode_batch<T: AsRef<[u8]>>(msgs: &[T]) -> Option<Vec<u8>> {
     bincode::serialize(&msgs).ok()
 }
 
+#[macro_export]
+/// Macro to implement the HasFromParty and HasSignature traits for a message types.
+macro_rules! impl_basemessage {
+    ($($type:ty),*) => {
+        $(
+            impl $crate::common::HasFromParty for $type {
+                fn get_pid(&self) -> usize {
+                    self.from_party
+                }
+            }
+
+            impl $crate::common::HasSignature for $type {
+                fn get_signature(&self) -> &Signature {
+                    &self.signature
+                }
+            }
+        )*
+    }
+}
+
 /// Sign a message using the given signing key.
 #[cfg(feature = "nacl")]
 pub fn sign_message(
