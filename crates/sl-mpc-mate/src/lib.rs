@@ -130,13 +130,13 @@ pub fn encode_batch<T: AsRef<[u8]>>(msgs: &[T]) -> Option<Vec<u8>> {
 macro_rules! impl_basemessage {
     ($($type:ty),*) => {
         $(
-            impl sl_mpc_mate::traits::HasFromParty for $type {
+            impl $crate::traits::HasFromParty for $type {
                 fn get_pid(&self) -> usize {
                     self.from_party
                 }
             }
 
-            impl sl_mpc_mate::traits::HasSignature for $type {
+            impl $crate::traits::HasSignature for $type {
                 fn get_signature(&self) -> &Signature {
                     &self.signature
                 }
@@ -182,7 +182,7 @@ pub struct EncryptedData {
     pub nonce: StackByteArray<CRYPTO_BOX_NONCEBYTES>,
 }
 #[cfg(feature = "nacl")]
-impl HasFromParty for EncryptedData {
+impl crate::traits::HasFromParty for EncryptedData {
     fn get_pid(&self) -> usize {
         self.from_party
     }
