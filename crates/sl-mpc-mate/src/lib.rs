@@ -10,7 +10,6 @@ use dryoc::{
 };
 
 use elliptic_curve::subtle::{Choice, ConditionallySelectable};
-use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use traits::PersistentObject;
 
@@ -18,6 +17,7 @@ pub mod math;
 pub mod matrix;
 pub mod serialization;
 pub mod traits;
+pub use rand::{CryptoRng, RngCore};
 
 /// Session ID
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
