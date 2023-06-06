@@ -18,7 +18,7 @@ pub mod utils {
     use elliptic_curve::{bigint::Encoding, sec1::ToEncodedPoint};
     use k256::{ProjectivePoint, Secp256k1, U256};
     use merlin::Transcript;
-    use sl_mpc_mate::{traits::ToScalar, SessionId};
+    use sl_mpc_mate::{traits::ToScalar, EncryptedData, SessionId};
 
     /// Compute the double blake hash of a byte array.
     pub fn double_blake_hash(data: &[u8]) -> [u8; 32] {
@@ -100,5 +100,11 @@ pub mod utils {
             let mask = 1 << (8 - bit_idx - 1);
             (byte & mask) != 0
         }
+    }
+
+    /// Message that contains an encrypted vsot message
+    pub trait HasVsotMsg {
+        /// Returns the VSOT message for a party
+        fn get_vsot_msg(&self, party_id: usize) -> &EncryptedData;
     }
 }
