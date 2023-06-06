@@ -4,11 +4,11 @@ use std::ops::Deref;
 
 use elliptic_curve::{
     bigint::U256, group::Curve, rand_core::CryptoRngCore, CurveArithmetic, Field, Group,
-    NonZeroScalar, PrimeField, ProjectivePoint, Scalar,
+    NonZeroScalar, ProjectivePoint, Scalar,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{matrix::matrix_inverse, serialization::serde_projective_point_vec, traits::ToScalar};
+use crate::{matrix::matrix_inverse, traits::ToScalar};
 
 /// A polynomial with coefficients of type `Scalar`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -45,7 +45,7 @@ where
     }
 
     /// Commit to this polynomial by multiplying each coefficient by the generator.
-    pub fn commit(&self, base_point: C::ProjectivePoint) -> GroupPolynomial<C>
+    pub fn commit(&self) -> GroupPolynomial<C>
     where
         C::AffinePoint: Serialize + DeserializeOwned,
         C::ProjectivePoint: From<C::AffinePoint>,
@@ -114,7 +114,7 @@ where
         D: serde::Deserializer<'de>,
     {
         let affine: Vec<C::AffinePoint> = Vec::deserialize(deserializer)?;
-        let coeffs: Vec<C::ProjectivePoint> = affine.iter().map(|p| p.clone().into()).collect();
+        let coeffs: Vec<C::ProjectivePoint> = affine.iter().map(|p| (*p).into()).collect();
         Ok(GroupPolynomial::new(coeffs))
     }
 }
@@ -157,7 +157,7 @@ where
             .enumerate()
             .map(|(position, u_i)| {
                 let num: C::Scalar = factorial_range(position, position + n).to_scalar::<C>();
-                *u_i * &num
+                *u_i * num
             })
             .collect()
     }
@@ -229,7 +229,7 @@ pub fn feldman_verify<C: CurveArithmetic>(
         let val = x_i.pow([i as u64]);
 
         // x_i^i * coeff mod p
-        point += *coeff * &val;
+        point += *coeff * val;
     }
 
     let expected_point = *g * f_i_value;

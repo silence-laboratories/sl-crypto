@@ -5,12 +5,8 @@ use dryoc::{
     classic::{crypto_sign, crypto_sign_ed25519::Signature},
     constants::CRYPTO_SIGN_ED25519_BYTES,
 };
-use elliptic_curve::{bigint::U256, CurveArithmetic, Scalar};
-use elliptic_curve::{
-    bigint::{NonZero, Uint},
-    scalar::FromUintUnchecked,
-    Curve, Field, PrimeField,
-};
+use elliptic_curve::{bigint::NonZero, scalar::FromUintUnchecked, Field};
+use elliptic_curve::{bigint::U256, CurveArithmetic};
 
 use serde::{de::DeserializeOwned, Serialize};
 

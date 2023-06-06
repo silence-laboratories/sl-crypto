@@ -7,10 +7,10 @@ use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use traits::PersistentObject;
 
-mod math;
-mod matrix;
-mod serialization;
-mod traits;
+pub mod math;
+pub mod matrix;
+pub mod serialization;
+pub mod traits;
 
 /// Session ID
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
