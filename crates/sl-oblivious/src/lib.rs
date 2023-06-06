@@ -11,7 +11,7 @@ pub mod soft_spoken;
 // TODO: Can we remove this?
 pub mod serialization;
 
-mod zkproofs;
+pub mod zkproofs;
 
 /// Utility functions
 pub mod utils {
