@@ -130,13 +130,13 @@ pub fn encode_batch<T: AsRef<[u8]>>(msgs: &[T]) -> Option<Vec<u8>> {
 macro_rules! impl_basemessage {
     ($($type:ty),*) => {
         $(
-            impl $crate::common::HasFromParty for $type {
+            impl sl_mpc_mate::traits::HasFromParty for $type {
                 fn get_pid(&self) -> usize {
                     self.from_party
                 }
             }
 
-            impl $crate::common::HasSignature for $type {
+            impl sl_mpc_mate::traits::HasSignature for $type {
                 fn get_signature(&self) -> &Signature {
                     &self.signature
                 }
