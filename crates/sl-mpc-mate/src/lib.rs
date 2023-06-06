@@ -15,7 +15,6 @@ use traits::PersistentObject;
 
 pub mod math;
 pub mod matrix;
-pub mod serialization;
 pub mod traits;
 pub use rand::{CryptoRng, RngCore};
 

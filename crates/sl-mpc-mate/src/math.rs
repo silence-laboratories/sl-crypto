@@ -82,10 +82,9 @@ where
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroupPolynomial<C: CurveArithmetic>
 where
-    C::AffinePoint: Serialize + DeserializeOwned,
+    C::AffinePoint: Serialize + DeserializeOwned + Clone,
     C::ProjectivePoint: From<C::AffinePoint>,
 {
-    /// The coefficients of the polynomial.
     pub coeffs: Vec<C::ProjectivePoint>,
 }
 
