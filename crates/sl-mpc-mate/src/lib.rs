@@ -1,7 +1,14 @@
 use std::ops::Deref;
 
 use cooridinator::Coordinator;
-use dryoc::{constants::CRYPTO_BOX_NONCEBYTES, dryocbox::VecBox, types::StackByteArray};
+#[cfg(feature = "nacl")]
+use dryoc::{
+    classic::{crypto_sign, crypto_sign_ed25519::Signature},
+    constants::{CRYPTO_BOX_NONCEBYTES, CRYPTO_SIGN_ED25519_BYTES},
+    dryocbox::VecBox,
+    types::StackByteArray,
+};
+
 use elliptic_curve::subtle::{Choice, ConditionallySelectable};
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -109,7 +116,29 @@ pub fn encode_batch<T: AsRef<[u8]>>(msgs: &[T]) -> Option<Vec<u8>> {
     bincode::serialize(&msgs).ok()
 }
 
+/// Sign a message using the given signing key.
+#[cfg(feature = "nacl")]
+pub fn sign_message(
+    signing_key: &dryoc::classic::crypto_sign::SecretKey,
+    message: &[u8],
+) -> Result<Signature, dryoc::Error> {
+    let mut signed_message: Signature = [0u8; CRYPTO_SIGN_ED25519_BYTES];
+    crypto_sign::crypto_sign_detached(&mut signed_message, message, signing_key)?;
+    Ok(signed_message)
+}
+
+/// Verify signature and check if the signed message is correct
+#[cfg(feature = "nacl")]
+pub fn verify_signature(
+    message_hash: &[u8],
+    signature: &Signature,
+    verify_key: &crypto_sign::PublicKey,
+) -> Result<(), dryoc::Error> {
+    crypto_sign::crypto_sign_verify_detached(signature, message_hash, verify_key)
+}
+
 /// Data that was encrypted using authenticated encryption.
+#[cfg(feature = "nacl")]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EncryptedData {
     // TODO: Should we omit from_party and to_party?

@@ -1,10 +1,5 @@
 use std::cmp::Ordering;
 
-#[cfg(feature = "nacl")]
-use dryoc::{
-    classic::{crypto_sign, crypto_sign_ed25519::Signature},
-    constants::CRYPTO_SIGN_ED25519_BYTES,
-};
 use elliptic_curve::{bigint::NonZero, scalar::FromUintUnchecked, Field};
 use elliptic_curve::{bigint::U256, CurveArithmetic};
 
@@ -78,29 +73,7 @@ impl ToScalar for U256 {
 #[cfg(feature = "nacl")]
 pub trait HasSignature {
     /// Returns the signature of this message
-    fn get_signature(&self) -> &Signature;
-}
-
-// #[cfg(feature = "nacl")]
-/// Sign a message using the given signing key.
-#[cfg(feature = "nacl")]
-pub fn sign_message(
-    signing_key: &dryoc::classic::crypto_sign::SecretKey,
-    message: &[u8],
-) -> Result<Signature, dryoc::Error> {
-    let mut signed_message: Signature = [0u8; CRYPTO_SIGN_ED25519_BYTES];
-    crypto_sign::crypto_sign_detached(&mut signed_message, message, signing_key)?;
-    Ok(signed_message)
-}
-
-#[cfg(feature = "nacl")]
-/// Verify signature and check if the signed message is correct
-pub fn verify_signature(
-    message_hash: &[u8],
-    signature: &Signature,
-    verify_key: &crypto_sign::PublicKey,
-) -> Result<(), dryoc::Error> {
-    crypto_sign::crypto_sign_verify_detached(signature, message_hash, verify_key)
+    fn get_signature(&self) -> &dryoc::classic::crypto_sign_ed25519::Signature;
 }
 
 // Make this part of OT crate
