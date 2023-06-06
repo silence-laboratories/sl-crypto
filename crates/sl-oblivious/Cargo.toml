@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 thiserror = "1"
-sl-mpc-mate = {path = "../sl-mpc-mate", features =["nacl"]}
+sl-mpc-mate = {git = "https://gitlab.com/com.silencelaboratories/sl-crypto.git", features =["nacl"]}
 blake3 = { version = "1.3.3", features = ["pure"] }
 serde = {version = "1", features = ["derive"]}
 merlin = "3.0.0"
