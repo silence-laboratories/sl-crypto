@@ -58,8 +58,8 @@ pub struct PPRFOutput {
 ///Implements BuildPPRF and ProvePPRF functionality of
 /// https://eprint.iacr.org/2022/192.pdf p.22, fig. 13
 pub fn build_pprf(
-    session_id: SessionId,
-    sender_ot_seed: SenderOutput,
+    session_id: &SessionId,
+    sender_ot_seed: &SenderOutput,
     batch: u32,
     k: u8,
 ) -> (SenderOTSeed, Vec<PPRFOutput>) {
@@ -153,8 +153,8 @@ pub fn build_pprf(
 }
 
 pub fn eval_pprf(
-    session_id: SessionId,
-    receiver_ot_seed: ReceiverOutput,
+    session_id: &SessionId,
+    receiver_ot_seed: &ReceiverOutput,
     batch: u32,
     k: u8,
     output: Vec<PPRFOutput>,
@@ -267,7 +267,6 @@ pub fn eval_pprf(
             return Err("Invalid proof".into());
         }
 
-        // Compute the output
         all_but_one_receiver_seed.random_choices.push(y_star);
         all_but_one_receiver_seed
             .one_time_pad_dec_keys
@@ -293,9 +292,9 @@ mod test {
         let session_id = SessionId::random(&mut rng);
 
         let (_all_but_one_sender_seed2, output_2) =
-            build_pprf(session_id, sender_ot_seed, batch_size, 2);
+            build_pprf(&session_id, &sender_ot_seed, batch_size, 2);
 
         let _all_but_one_receiver_seed2 =
-            eval_pprf(session_id, receiver_ot_seed, batch_size, 2, output_2).unwrap();
+            eval_pprf(&session_id, &receiver_ot_seed, batch_size, 2, output_2).unwrap();
     }
 }

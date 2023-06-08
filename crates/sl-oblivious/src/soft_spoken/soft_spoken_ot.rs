@@ -1,5 +1,3 @@
-use crate::vsot::OneTimePadEncryptionKeys;
-
 use super::DIGEST_SIZE;
 
 #[derive(Debug, Default)]
