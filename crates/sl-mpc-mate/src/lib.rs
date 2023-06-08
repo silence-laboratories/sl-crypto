@@ -213,7 +213,7 @@ macro_rules! impl_basemessage {
                 }
             }
 
-            impl $crate::traits::HasSignature for $type {
+            impl $crate::nacl::HasSignature for $type {
                 fn get_signature(&self) -> &Signature {
                     &self.signature
                 }
