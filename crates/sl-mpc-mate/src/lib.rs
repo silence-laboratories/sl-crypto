@@ -14,8 +14,8 @@ pub mod traits;
 pub mod nacl {
     use crate::traits::PersistentObject;
     use dryoc::classic::crypto_sign;
+    pub use dryoc::classic::crypto_sign::crypto_sign_seed_keypair;
     pub use dryoc::classic::crypto_sign::{PublicKey as SignPubkey, SecretKey as SignPrivKey};
-
     pub use dryoc::classic::crypto_sign_ed25519::Signature;
     use dryoc::constants::{CRYPTO_BOX_NONCEBYTES, CRYPTO_SIGN_ED25519_BYTES};
     use dryoc::dryocbox::{DryocBox, Nonce, VecBox};
