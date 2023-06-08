@@ -1,13 +1,6 @@
 use std::ops::Deref;
 
 use cooridinator::Coordinator;
-#[cfg(feature = "nacl")]
-use dryoc::{
-    classic::{crypto_sign, crypto_sign_ed25519::Signature},
-    constants::{CRYPTO_BOX_NONCEBYTES, CRYPTO_SIGN_ED25519_BYTES},
-    dryocbox::VecBox,
-    types::StackByteArray,
-};
 
 use elliptic_curve::subtle::{Choice, ConditionallySelectable};
 use serde::{Deserialize, Serialize};
@@ -16,6 +9,88 @@ use traits::PersistentObject;
 pub mod math;
 pub mod matrix;
 pub mod traits;
+
+#[cfg(feature = "nacl")]
+pub mod nacl {
+    use crate::traits::PersistentObject;
+    use dryoc::classic::crypto_sign::{self, PublicKey as SignPubkey, SecretKey as SignPrivKey};
+    pub use dryoc::classic::crypto_sign_ed25519::Signature;
+    use dryoc::constants::{CRYPTO_BOX_NONCEBYTES, CRYPTO_SIGN_ED25519_BYTES};
+    use dryoc::dryocbox::{DryocBox, Nonce, VecBox};
+    pub use dryoc::dryocbox::{KeyPair, PublicKey as BoxPubkey, SecretKey as BoxPrivKey};
+    use dryoc::types::{NewByteArray, StackByteArray};
+    pub use dryoc::Error;
+
+    use serde::{Deserialize, Serialize};
+
+    /// Sign a message using the given signing key.
+    pub fn sign_message(
+        signing_key: &SignPrivKey,
+        message: &[u8],
+    ) -> Result<Signature, dryoc::Error> {
+        let mut signed_message: Signature = [0u8; CRYPTO_SIGN_ED25519_BYTES];
+        crypto_sign::crypto_sign_detached(&mut signed_message, message, signing_key)?;
+        Ok(signed_message)
+    }
+
+    /// Verify signature and check if the signed message is correct
+    #[cfg(feature = "nacl")]
+    pub fn verify_signature(
+        message_hash: &[u8],
+        signature: &Signature,
+        verify_key: &SignPubkey,
+    ) -> Result<(), dryoc::Error> {
+        crypto_sign::crypto_sign_verify_detached(signature, message_hash, verify_key)
+    }
+
+    /// Encrypt data using the given public key, secret key.
+    pub fn encrypt_data<D: AsRef<[u8]>>(
+        data: D,
+        ek: &BoxPubkey,
+        sk: &BoxPrivKey,
+        to_party: usize,
+        from_party: usize,
+    ) -> Result<EncryptedData, dryoc::Error> {
+        let nonce = Nonce::gen();
+        let enc_data = DryocBox::encrypt_to_vecbox(data.as_ref(), &nonce, ek, sk)?;
+        let enc_vsot_msg = EncryptedData {
+            to_party,
+            from_party,
+            enc_data,
+            nonce,
+        };
+
+        Ok(enc_vsot_msg)
+    }
+
+    /// Data that was encrypted using authenticated encryption.
+    #[derive(Serialize, Deserialize, Clone, Debug)]
+    pub struct EncryptedData {
+        // TODO: Should we omit from_party and to_party?
+        // We can calculate them from the message pid and the party id list.
+        /// The party to which this part is encrypted for.
+        pub to_party: usize,
+        /// The party who encrypted this part.
+        pub from_party: usize,
+        /// The encrypted data.
+        pub enc_data: VecBox,
+        /// The nonce used for encryption
+        pub nonce: StackByteArray<CRYPTO_BOX_NONCEBYTES>,
+    }
+    impl crate::traits::HasFromParty for EncryptedData {
+        fn get_pid(&self) -> usize {
+            self.from_party
+        }
+    }
+
+    impl PersistentObject for EncryptedData {}
+    /// Message that has a signature
+    pub trait HasSignature {
+        /// Returns the signature of this message
+        fn get_signature(&self) -> &Signature;
+    }
+}
+
 pub use rand::{CryptoRng, RngCore};
 
 /// Session ID
@@ -144,52 +219,6 @@ macro_rules! impl_basemessage {
         )*
     }
 }
-
-/// Sign a message using the given signing key.
-#[cfg(feature = "nacl")]
-pub fn sign_message(
-    signing_key: &dryoc::classic::crypto_sign::SecretKey,
-    message: &[u8],
-) -> Result<Signature, dryoc::Error> {
-    let mut signed_message: Signature = [0u8; CRYPTO_SIGN_ED25519_BYTES];
-    crypto_sign::crypto_sign_detached(&mut signed_message, message, signing_key)?;
-    Ok(signed_message)
-}
-
-/// Verify signature and check if the signed message is correct
-#[cfg(feature = "nacl")]
-pub fn verify_signature(
-    message_hash: &[u8],
-    signature: &Signature,
-    verify_key: &crypto_sign::PublicKey,
-) -> Result<(), dryoc::Error> {
-    crypto_sign::crypto_sign_verify_detached(signature, message_hash, verify_key)
-}
-
-/// Data that was encrypted using authenticated encryption.
-#[cfg(feature = "nacl")]
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct EncryptedData {
-    // TODO: Should we omit from_party and to_party?
-    // We can calculate them from the message pid and the party id list.
-    /// The party to which this part is encrypted for.
-    pub to_party: usize,
-    /// The party who encrypted this part.
-    pub from_party: usize,
-    /// The encrypted data.
-    pub enc_data: VecBox,
-    /// The nonce used for encryption
-    pub nonce: StackByteArray<CRYPTO_BOX_NONCEBYTES>,
-}
-#[cfg(feature = "nacl")]
-impl crate::traits::HasFromParty for EncryptedData {
-    fn get_pid(&self) -> usize {
-        self.from_party
-    }
-}
-
-#[cfg(feature = "nacl")]
-impl PersistentObject for EncryptedData {}
 
 /// Coordinator module
 pub mod cooridinator {

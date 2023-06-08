@@ -69,13 +69,6 @@ impl ToScalar for U256 {
     }
 }
 
-/// Message that has a signature
-#[cfg(feature = "nacl")]
-pub trait HasSignature {
-    /// Returns the signature of this message
-    fn get_signature(&self) -> &dryoc::classic::crypto_sign_ed25519::Signature;
-}
-
 // Make this part of OT crate
 // /// Message that contains an encrypted vsot message
 // pub trait HasVsotMsg {
