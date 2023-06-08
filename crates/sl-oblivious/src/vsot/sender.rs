@@ -15,7 +15,7 @@ use super::{VSOTError, VSOTMsg1, VSOTMsg2, VSOTMsg4};
 /// Sender of the VSOT protocol.
 pub struct VSOTSender<T> {
     session_id: SessionId,
-    batch_size: u64,
+    batch_size: u32,
     secret_key: Scalar,
     /// Public key of the sender.
     pub public_key: ProjectivePoint,
@@ -40,7 +40,7 @@ impl VSOTSender<InitSender> {
     // TODO: u64 for batch size?
     pub fn new<R: CryptoRng + RngCore>(
         session_id: SessionId,
-        batch_size: u64,
+        batch_size: u32,
         rng: &mut R,
     ) -> Result<Self, VSOTError> {
         if batch_size % 8 != 0 {
@@ -62,7 +62,7 @@ impl VSOTSender<InitSender> {
 
     pub(crate) fn new_with_context(
         session_id: SessionId,
-        batch_size: u64,
+        batch_size: u32,
         secret_key: Scalar,
         dlog_proof: DLogProof,
     ) -> Result<Self, VSOTError> {
@@ -226,14 +226,16 @@ pub struct ChallengeOpening {
 }
 
 /// The one time pad encryption keys for a single choice.
+#[derive(Serialize, Deserialize, Default)]
 pub struct OneTimePadEncryptionKeys {
-    rho_0: [u8; 32],
-    rho_1: [u8; 32],
+    pub rho_0: [u8; 32],
+    pub rho_1: [u8; 32],
 }
 
 /// The output of the VSOT receiver.
+#[derive(Serialize, Deserialize, Default)]
 pub struct SenderOutput {
-    one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>,
+    pub one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>,
 }
 
 impl SenderOutput {

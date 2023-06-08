@@ -18,7 +18,7 @@ use super::{VSOTError, VSOTMsg1, VSOTMsg3, VSOTMsg5};
 /// VSOTReceiver
 pub struct VSOTReceiver<T> {
     session_id: SessionId,
-    batch_size: u64,
+    batch_size: u32,
     state: T,
 }
 
@@ -48,7 +48,7 @@ impl VSOTReceiver<InitRec> {
     /// Create a new instance of the VSOT receiver.
     pub fn new<R: CryptoRng + RngCore>(
         session_id: SessionId,
-        batch_size: u64,
+        batch_size: u32,
         rng: &mut R,
     ) -> Result<Self, VSOTError> {
         if batch_size % 8 != 0 {
@@ -250,9 +250,10 @@ impl Round for VSOTReceiver<RecR2> {
 
 /// The output of the VSOT receiver.
 
+#[derive(Clone, Debug, Default)]
 pub struct ReceiverOutput {
-    packed_random_choice_bits: Vec<u8>,
-    one_time_pad_decryption_keys: Vec<[u8; 32]>,
+    pub(crate) packed_random_choice_bits: Vec<u8>,
+    pub(crate) one_time_pad_decryption_keys: Vec<[u8; 32]>,
 }
 
 impl ReceiverOutput {
