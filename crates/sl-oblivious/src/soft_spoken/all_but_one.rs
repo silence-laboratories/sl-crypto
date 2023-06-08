@@ -1,10 +1,11 @@
 use elliptic_curve::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use rand::{thread_rng, Rng};
+use serde::{Deserialize, Serialize};
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
     Shake256,
 };
-use sl_mpc_mate::{random_bytes, HashBytes, SessionId};
+use sl_mpc_mate::{random_bytes, traits::PersistentObject, HashBytes, SessionId};
 
 pub const DIGEST_SIZE: usize = 32;
 
@@ -48,13 +49,15 @@ fn generate_seed_ot_for_test(n: usize) -> (SenderOutput, ReceiverOutput) {
     (sender_ot_seed, receiver_ot_seed)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PPRFOutput {
     pub t: Vec<[[u8; DIGEST_SIZE]; 2]>,
+    #[serde(with = "serde_arrays")]
     pub s_tilda: [u8; DIGEST_SIZE * 2],
+    #[serde(with = "serde_arrays")]
     pub t_tilda: [u8; DIGEST_SIZE * 2],
 }
-
+impl PersistentObject for PPRFOutput {}
 ///Implements BuildPPRF and ProvePPRF functionality of
 /// https://eprint.iacr.org/2022/192.pdf p.22, fig. 13
 pub fn build_pprf(

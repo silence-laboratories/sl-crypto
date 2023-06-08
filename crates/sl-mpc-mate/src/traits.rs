@@ -68,10 +68,3 @@ impl ToScalar for U256 {
         }
     }
 }
-
-// Make this part of OT crate
-// /// Message that contains an encrypted vsot message
-// pub trait HasVsotMsg {
-//     /// Returns the VSOT message for a party
-//     fn get_vsot_msg(&self, party_id: usize) -> &EncryptedData;
-// }

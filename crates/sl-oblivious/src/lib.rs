@@ -101,10 +101,4 @@ pub mod utils {
             (byte & mask) != 0
         }
     }
-
-    /// Message that contains an encrypted vsot message
-    pub trait HasVsotMsg {
-        /// Returns the VSOT message for a party
-        fn get_vsot_msg(&self, party_id: usize) -> &EncryptedData;
-    }
 }
