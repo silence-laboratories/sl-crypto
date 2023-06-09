@@ -26,6 +26,7 @@ pub trait PersistentObject: Serialize + DeserializeOwned + Send + 'static {
 }
 
 impl PersistentObject for Vec<u8> {}
+impl<T: PersistentObject> PersistentObject for Vec<T> {}
 
 /// Trait that defines a state transition for any round based protocol.
 pub trait Round {
