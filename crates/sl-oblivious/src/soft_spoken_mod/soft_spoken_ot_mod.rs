@@ -4,6 +4,7 @@ use elliptic_curve::{
 };
 use k256::{Scalar, Secp256k1, U256};
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
     Shake256,
@@ -40,14 +41,16 @@ pub const KAPPA_DIV_SOFT_SPOKEN_K: usize = KAPPA / SOFT_SPOKEN_K;
 pub const RAND_EXTENSION_SIZE: usize = COT_EXTENDED_BLOCK_SIZE_BYTES - COT_BATCH_SIZE_BYTES;
 pub const SOFT_SPOKEN_LABEL: &[u8] = b"SL-SOFT-SPOKEN-OT";
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Round1Output {
     pub u: [[u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
     pub w_prime: [u8; SOFT_SPOKEN_S_BYTES],
     pub v_prime: [[u8; SOFT_SPOKEN_S_BYTES]; KAPPA],
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Round2Output {
+    #[serde(with = "serde_arrays")]
     pub tau: [[Scalar; OT_WIDTH]; ETA],
 }
 
