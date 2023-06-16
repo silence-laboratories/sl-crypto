@@ -6,6 +6,7 @@ use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
 use rand::Rng;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use serde::{Deserialize, Serialize};
 use sl_mpc_mate::{traits::Round, xor_byte_arrays, CryptoRng, HashBytes, RngCore, SessionId};
 
 use crate::{
@@ -16,6 +17,7 @@ use crate::{
 use super::{VSOTError, VSOTMsg1, VSOTMsg3, VSOTMsg5};
 
 /// VSOTReceiver
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VSOTReceiver<T> {
     session_id: SessionId,
     batch_size: u32,
@@ -38,6 +40,7 @@ pub struct RecR1 {
 }
 
 /// State of Receiver after processing Message 3.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecR2 {
     rho_w_hashes: Vec<[u8; 32]>,
     rho_w_vec: Vec<[u8; 32]>,

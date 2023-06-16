@@ -7,6 +7,8 @@ pub mod vsot;
 /// Soft spoken Oblivious Transfer
 pub mod soft_spoken;
 
+pub mod soft_spoken_mod;
+
 /// Serialization for ProjectivePoint
 // TODO: Can we remove this?
 pub mod serialization;
@@ -99,6 +101,27 @@ pub mod utils {
             let byte = self[byte_idx];
             let mask = 1 << (8 - bit_idx - 1);
             (byte & mask) != 0
+        }
+    }
+
+    impl<const N: usize> ExtractBit for [u8; N] {
+        fn extract_bit(&self, idx: usize) -> bool {
+            let byte_idx = idx >> 3;
+            let bit_idx = idx & 0x7;
+            let byte = self[byte_idx];
+            let mask = 1 << (8 - bit_idx - 1);
+            (byte & mask) != 0
+        }
+    }
+
+    pub fn bit_to_bit_mask(bit: u8) -> u8 {
+        if bit == 1 {
+            255
+        } else if bit == 0 {
+            0
+        } else {
+            // TODO: Better error handling
+            panic!("bit must be 0 or 1")
         }
     }
 }

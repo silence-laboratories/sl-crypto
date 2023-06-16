@@ -170,6 +170,39 @@ impl ConditionallySelectable for HashBytes {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct ByteArray<const T: usize>(pub [u8; T]);
+
+impl<const T: usize> ConditionallySelectable for ByteArray<T> {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        let mut res = [0u8; T];
+        res.iter_mut()
+            .enumerate()
+            .for_each(|(idx, x)| *x = u8::conditional_select(&a.0[idx], &b.0[idx], choice));
+
+        Self(res)
+    }
+}
+
+impl<const T: usize> AsRef<[u8]> for ByteArray<T> {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+impl<const T: usize> Deref for ByteArray<T> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<const T: usize> ByteArray<T> {
+    pub fn new(b: [u8; T]) -> Self {
+        Self(b)
+    }
+}
+
 impl AsRef<[u8]> for HashBytes {
     fn as_ref(&self) -> &[u8] {
         &self.0
