@@ -68,7 +68,7 @@ pub struct RecR1 {
 }
 
 impl SoftSpokenOTRec<RecR0> {
-    fn new<R: CryptoRngCore>(
+    pub fn new<R: CryptoRngCore>(
         session_id: SessionId,
         seed_ot_results: SenderOTSeed,
         rng: &mut R,
