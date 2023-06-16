@@ -24,6 +24,8 @@ pub mod utils {
     use merlin::Transcript;
     use sl_mpc_mate::{traits::ToScalar, SessionId};
 
+    pub use blake3::Hasher;
+
     /// Compute the double blake hash of a byte array.
     pub fn double_blake_hash(data: &[u8]) -> [u8; 32] {
         let mut hasher = blake3::Hasher::new();
