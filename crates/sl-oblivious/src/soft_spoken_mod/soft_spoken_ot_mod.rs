@@ -42,13 +42,13 @@ pub const SOFT_SPOKEN_LABEL: &[u8] = b"SL-SOFT-SPOKEN-OT";
 
 #[derive(Debug)]
 pub struct Round1Output {
-    u: [[u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
-    w_prime: [u8; SOFT_SPOKEN_S_BYTES],
-    v_prime: [[u8; SOFT_SPOKEN_S_BYTES]; KAPPA],
+    pub u: [[u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
+    pub w_prime: [u8; SOFT_SPOKEN_S_BYTES],
+    pub v_prime: [[u8; SOFT_SPOKEN_S_BYTES]; KAPPA],
 }
 
 pub struct Round2Output {
-    tau: [[Scalar; OT_WIDTH]; ETA],
+    pub tau: [[Scalar; OT_WIDTH]; ETA],
 }
 
 // TODO: Expose SOFT_SPOKEN_K const as two options (2 and 4) for the user.
