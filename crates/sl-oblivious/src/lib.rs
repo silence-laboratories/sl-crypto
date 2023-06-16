@@ -22,7 +22,7 @@ pub mod utils {
     use elliptic_curve::{bigint::Encoding, sec1::ToEncodedPoint};
     use k256::{ProjectivePoint, Secp256k1, U256};
     use merlin::Transcript;
-    use sl_mpc_mate::{nacl::EncryptedData, traits::ToScalar, SessionId};
+    use sl_mpc_mate::{traits::ToScalar, SessionId};
 
     /// Compute the double blake hash of a byte array.
     pub fn double_blake_hash(data: &[u8]) -> [u8; 32] {
