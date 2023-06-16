@@ -57,24 +57,46 @@ pub struct SoftSpokenOTRec<T> {
     seed_ot_results: SenderOTSeed,
     state: T,
 }
+
+pub struct RecR0 {
+    number_random_bytes: [u8; RAND_EXTENSION_SIZE],
+}
+
 pub struct RecR1 {
     psi: [[u8; KAPPA_BYTES]; L_PRIME],
     extended_packed_choices: [u8; COT_EXTENDED_BLOCK_SIZE_BYTES],
 }
 
-impl SoftSpokenOTRec<RecR1> {
-    pub fn init<R: CryptoRngCore>(
+impl SoftSpokenOTRec<RecR0> {
+    fn new<R: CryptoRngCore>(
         session_id: SessionId,
         seed_ot_results: SenderOTSeed,
-        choices: [u8; COT_BATCH_SIZE_BYTES],
         rng: &mut R,
-    ) -> (Self, Round1Output) {
+    ) -> Self {
         let number_random_bytes: [u8; RAND_EXTENSION_SIZE] = random_bytes(rng);
-        let extended_packed_choices: [u8; COT_EXTENDED_BLOCK_SIZE_BYTES] =
-            [choices.as_slice(), number_random_bytes.as_slice()]
-                .concat()
-                .try_into()
-                .expect("Invalid length of extended_packed_choices");
+        Self {
+            session_id,
+            seed_ot_results,
+            state: RecR0 {
+                number_random_bytes,
+            },
+        }
+    }
+}
+
+impl Round for SoftSpokenOTRec<RecR0> {
+    type Input = [u8; COT_BATCH_SIZE_BYTES];
+
+    type Output = (SoftSpokenOTRec<RecR1>, Round1Output);
+
+    fn process(self, choices: Self::Input) -> Self::Output {
+        let extended_packed_choices: [u8; COT_EXTENDED_BLOCK_SIZE_BYTES] = [
+            choices.as_slice(),
+            self.state.number_random_bytes.as_slice(),
+        ]
+        .concat()
+        .try_into()
+        .expect("Invalid length of extended_packed_choices");
 
         let mut r_x =
             [[[0u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K]; SOFT_SPOKEN_Q];
@@ -84,9 +106,9 @@ impl SoftSpokenOTRec<RecR1> {
         for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
             for (j, r_x_j) in r_x.iter_mut().enumerate() {
                 let mut shake = Shake256::default();
-                shake.update(session_id.as_ref());
+                shake.update(self.session_id.as_ref());
                 shake.update(SOFT_SPOKEN_LABEL);
-                shake.update(seed_ot_results.one_time_pad_enc_keys[i][j].as_ref());
+                shake.update(self.seed_ot_results.one_time_pad_enc_keys[i][j].as_ref());
                 shake.finalize_xof().read(&mut r_x_j[i]);
             }
 
@@ -173,9 +195,9 @@ impl SoftSpokenOTRec<RecR1> {
             u,
         };
 
-        let state = Self {
-            session_id,
-            seed_ot_results,
+        let state = SoftSpokenOTRec {
+            session_id: self.session_id,
+            seed_ot_results: self.seed_ot_results,
             state: RecR1 {
                 psi,
                 extended_packed_choices,
@@ -502,10 +524,10 @@ mod tests {
             .collect::<Vec<_>>();
 
         let sender = SoftSpokenOTSender::new(session_id, receiver_ot_results);
+        let receiver = SoftSpokenOTRec::new(session_id, sender_ot_results, &mut rng);
 
         // let start = std::time::Instant::now();
-        let (receiver, round1) =
-            SoftSpokenOTRec::init(session_id, sender_ot_results, choices, &mut rng);
+        let (receiver, round1) = receiver.process(choices);
         // println!("Round1: {:?}", start.elapsed());
 
         // let start = std::time::Instant::now();
