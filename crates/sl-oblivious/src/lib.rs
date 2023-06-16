@@ -17,6 +17,8 @@ pub mod zkproofs;
 
 /// Utility functions
 pub mod utils {
+    use std::ops::Index;
+
     use elliptic_curve::{bigint::Encoding, sec1::ToEncodedPoint};
     use k256::{ProjectivePoint, Secp256k1, U256};
     use merlin::Transcript;
@@ -89,30 +91,19 @@ pub mod utils {
     }
 
     /// Simple trait to extract a bit from a byte array.
-    pub trait ExtractBit {
-        /// Extract a bit at given index from a byte array.
-        fn extract_bit(&self, idx: usize) -> bool;
-    }
-
-    impl ExtractBit for Vec<u8> {
+    pub trait ExtractBit: Index<usize, Output = u8> {
+        /// Extract a bit at given index (in little endian order) from a byte array.
         fn extract_bit(&self, idx: usize) -> bool {
             let byte_idx = idx >> 3;
             let bit_idx = idx & 0x7;
             let byte = self[byte_idx];
-            let mask = 1 << (8 - bit_idx - 1);
+            let mask = 1 << bit_idx;
             (byte & mask) != 0
         }
     }
 
-    impl<const N: usize> ExtractBit for [u8; N] {
-        fn extract_bit(&self, idx: usize) -> bool {
-            let byte_idx = idx >> 3;
-            let bit_idx = idx & 0x7;
-            let byte = self[byte_idx];
-            let mask = 1 << (8 - bit_idx - 1);
-            (byte & mask) != 0
-        }
-    }
+    impl ExtractBit for Vec<u8> {}
+    impl<const T: usize> ExtractBit for [u8; T] {}
 
     pub fn bit_to_bit_mask(bit: u8) -> u8 {
         if bit == 1 {

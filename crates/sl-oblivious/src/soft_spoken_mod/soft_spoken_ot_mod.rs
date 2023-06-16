@@ -41,6 +41,7 @@ pub const SOFT_SPOKEN_M: usize = ETA / SOFT_SPOKEN_S; // SOFT_SPOKEN_S;
 pub const KAPPA_DIV_SOFT_SPOKEN_K: usize = KAPPA / SOFT_SPOKEN_K;
 pub const RAND_EXTENSION_SIZE: usize = COT_EXTENDED_BLOCK_SIZE_BYTES - COT_BATCH_SIZE_BYTES;
 
+#[derive(Debug)]
 pub struct Round1Output {
     u: [[u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
     w_prime: [u8; SOFT_SPOKEN_S_BYTES],
@@ -85,7 +86,7 @@ impl SoftSpokenOTRec<RecR1> {
             for (j, r_x_j) in r_x.iter_mut().enumerate() {
                 let mut shake = Shake256::default();
                 shake.update(session_id.as_ref());
-                shake.update(b"SL-SOFT-SPOKEN-OT");
+                shake.update(b"SilenceLaboratories_DKLs_SoftSpokenOT");
                 shake.update(seed_ot_results.one_time_pad_enc_keys[i][j].as_ref());
                 shake.finalize_xof().read(&mut r_x_j[i]);
             }
@@ -199,7 +200,7 @@ impl Round for SoftSpokenOTRec<RecR1> {
             .for_each(|(j, additive_shares_j)| {
                 let mut shake = Shake256::default();
                 shake.update(self.session_id.as_ref());
-                shake.update(b"SL-SOFT-SPOKEN-OT");
+                shake.update(b"SilenceLaboratories_DKLs_SoftSpokenOT");
                 shake.update(&(j as u16).to_be_bytes());
                 shake.update(self.state.psi[j].as_ref());
                 let mut column = [0u8; DIGEST_SIZE * OT_WIDTH];
@@ -281,7 +282,7 @@ impl Round for SoftSpokenOTSender<Init> {
                 } else {
                     let mut shake = Shake256::default();
                     shake.update(self.session_id.as_ref());
-                    shake.update(b"SL-SOFT-SPOKEN-OT");
+                    shake.update(b"SilenceLaboratories_DKLs_SoftSpokenOT");
                     shake.update(self.seed_ot_results.one_time_pad_dec_keys[i][j].as_ref());
                     let mut r_x_ij = [0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
                     shake.finalize_xof().read(&mut r_x_ij);
@@ -341,7 +342,6 @@ impl Round for SoftSpokenOTSender<Init> {
         let from_index = SOFT_SPOKEN_M * SOFT_SPOKEN_S_BYTES;
         let to_index = (SOFT_SPOKEN_M + 1) * SOFT_SPOKEN_S_BYTES;
 
-        let mut results = vec![];
         for (i, w_matrix_i) in w_matrix.iter().enumerate() {
             let mut q_row = [0u8; SOFT_SPOKEN_S_BYTES];
             for (j, chi_j) in chi_matrix.iter().enumerate() {
@@ -359,11 +359,10 @@ impl Round for SoftSpokenOTSender<Init> {
             }
 
             // check
+
             let bit = packed_nabla.extract_bit(i);
-            println!("bit: {}", bit);
 
             let bit_mask = bit_to_bit_mask(bit as u8);
-            println!("bit_to_bit_mask {}", bit_mask);
 
             let mut t_i_plus_delta_i_times_x = [0u8; SOFT_SPOKEN_S_BYTES];
 
@@ -374,24 +373,10 @@ impl Round for SoftSpokenOTSender<Init> {
                     *x = message.0.v_prime[i][k] ^ (bit_mask & message.0.w_prime[k]);
                 });
 
-            println!("q_row: {:?}", q_row);
-            println!("t_i_plus_delta_i_times_x: {:?}", t_i_plus_delta_i_times_x);
             if q_row != t_i_plus_delta_i_times_x {
-                println!(
-                    "{}:{}",
-                    "Consistency check failed for bit_mask".red(),
-                    bit_mask
-                );
-
-                results.push(0);
-                // return Err("Consistency check failed".into());
-            } else {
-                println!("{}", "Consistency check passed".green());
-                results.push(1);
+                return Err("Consistency check failed".into());
             }
         }
-
-        println!("results: {:?}", results);
 
         let mut zeta = transpose_bool_matrix(w_matrix);
 
@@ -400,7 +385,7 @@ impl Round for SoftSpokenOTSender<Init> {
         for j in 0..ETA {
             let mut shake = Shake256::default();
             shake.update(self.session_id.as_ref());
-            shake.update(b"SL-SOFT-SPOKEN-OT");
+            shake.update(b"SilenceLaboratories_DKLs_SoftSpokenOT");
             shake.update(&(j as u16).to_be_bytes());
             shake.update(&zeta[j]);
             let mut column = [0u8; DIGEST_SIZE * OT_WIDTH];
@@ -422,7 +407,7 @@ impl Round for SoftSpokenOTSender<Init> {
 
             let mut shake = Shake256::default();
             shake.update(self.session_id.as_ref());
-            shake.update(b"SL-SOFT-SPOKEN-OT");
+            shake.update(b"SilenceLaboratories_DKLs_SoftSpokenOT");
             shake.update(&(j as u16).to_be_bytes());
             shake.update(&zeta[j]);
             let mut column = [0u8; DIGEST_SIZE * OT_WIDTH];
@@ -475,31 +460,40 @@ fn generate_all_but_one_seed_ot(mut rng: impl CryptoRngCore) -> (SenderOTSeed, R
 
 #[cfg(test)]
 mod tests {
+    use std::{fs::File, io::Write};
+
     use k256::Scalar;
     use rand::{rngs::StdRng, RngCore};
-    use sl_mpc_mate::{traits::Round, SessionId};
+    use serde::{Deserialize, Serialize};
+    use sl_mpc_mate::{random_bytes, traits::Round, SessionId};
 
     use crate::utils::ExtractBit;
 
     use super::{
         generate_all_but_one_seed_ot, SoftSpokenOTRec, SoftSpokenOTSender, COT_BATCH_SIZE_BYTES,
-        COT_EXTENDED_BLOCK_SIZE_BYTES, ETA, OT_WIDTH,
+        COT_EXTENDED_BLOCK_SIZE_BYTES, ETA, OT_WIDTH, RAND_EXTENSION_SIZE,
     };
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct RandomValues {
+        ot_sender_msgs: Vec<Vec<[u8; 32]>>,
+        random_choices: Vec<u8>,
+        session_id: SessionId,
+        #[serde(with = "serde_arrays")]
+        choices: [u8; 64],
+        input_data: Vec<[Scalar; 3]>,
+        number_random_bytes: [u8; RAND_EXTENSION_SIZE],
+    }
 
     #[test]
     fn test_soft_spoken() {
-        let mut rng: StdRng = rand::SeedableRng::seed_from_u64(69);
-        let (sender_ot_results, receiver_ot_results) = generate_all_but_one_seed_ot(&mut rng);
-        // let session_id = SessionId::random(&mut rng);
-        let session_id = SessionId::new([0u8; 32]);
+        let mut rng = rand::thread_rng();
 
+        let (sender_ot_results, receiver_ot_results) = generate_all_but_one_seed_ot(&mut rng);
+
+        let session_id = SessionId::random(&mut rng);
         let mut choices = [0u8; COT_BATCH_SIZE_BYTES];
         rng.fill_bytes(&mut choices);
-        println!("choices: {}", hex::encode(choices));
-
-        let sender = SoftSpokenOTSender::new(session_id, receiver_ot_results);
-        let (receiver, round1) =
-            SoftSpokenOTRec::init(session_id, sender_ot_results, choices, &mut rng);
 
         let input_data = (0..ETA)
             .map(|_| {
@@ -510,12 +504,22 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        println!("Here ");
+        let sender = SoftSpokenOTSender::new(session_id, receiver_ot_results);
+
+        let start = std::time::Instant::now();
+        let (receiver, round1) =
+            SoftSpokenOTRec::init(session_id, sender_ot_results, choices, &mut rng);
+        println!("Round1: {:?}", start.elapsed());
+
+        let start = std::time::Instant::now();
         let (t_a, round2) = sender
             .process((round1, input_data.clone().try_into().unwrap()))
             .unwrap();
+        println!("Round2: {:?}", start.elapsed());
 
+        let start = std::time::Instant::now();
         let t_b = receiver.process(round2);
+        println!("Round3: {:?}", start.elapsed());
 
         for i in 0..ETA {
             let bit = choices.extract_bit(i);
@@ -524,13 +528,10 @@ mod tests {
                 let a = t_a[i][k];
                 let b = t_b[i][k];
                 let temp = a + b;
-
                 if bit {
-                    println!("Here");
                     assert_eq!(&temp, &input_data[i][k]);
                 } else {
                     assert_eq!(temp, Scalar::ZERO);
-                    println!("Here toooo")
                 }
             }
         }
