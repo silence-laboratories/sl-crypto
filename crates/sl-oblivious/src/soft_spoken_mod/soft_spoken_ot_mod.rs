@@ -451,7 +451,7 @@ impl Round for SoftSpokenOTSender<Init> {
     }
 }
 
-fn generate_all_but_one_seed_ot(mut rng: impl CryptoRngCore) -> (SenderOTSeed, ReceiverOTSeed) {
+pub fn generate_all_but_one_seed_ot(mut rng: impl CryptoRngCore) -> (SenderOTSeed, ReceiverOTSeed) {
     let mut one_time_pad_enc_keys = Vec::new();
     let mut one_time_pad_dec_keys = Vec::new();
     for _ in 0..(KAPPA_DIV_SOFT_SPOKEN_K) {
