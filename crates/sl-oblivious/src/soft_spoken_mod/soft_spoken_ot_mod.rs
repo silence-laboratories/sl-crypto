@@ -1,4 +1,5 @@
 use elliptic_curve::{
+    generic_array::GenericArray,
     rand_core::CryptoRngCore,
     subtle::{Choice, ConditionallySelectable},
 };
@@ -11,11 +12,12 @@ use sha3::{
 };
 use sl_mpc_mate::{
     random_bytes,
-    traits::{Round, ToScalar},
+    traits::{PersistentObject, Round, ToScalar},
     SessionId,
 };
 
 use crate::{
+    serialization::serde_u_array,
     soft_spoken::{ReceiverOTSeed, SenderOTSeed, DIGEST_SIZE},
     utils::{bit_to_bit_mask, ExtractBit},
 };
@@ -41,18 +43,23 @@ pub const KAPPA_DIV_SOFT_SPOKEN_K: usize = KAPPA / SOFT_SPOKEN_K;
 pub const RAND_EXTENSION_SIZE: usize = COT_EXTENDED_BLOCK_SIZE_BYTES - COT_BATCH_SIZE_BYTES;
 pub const SOFT_SPOKEN_LABEL: &[u8] = b"SL-SOFT-SPOKEN-OT";
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Round1Output {
+    #[serde(with = "serde_u_array")]
     pub u: [[u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
     pub w_prime: [u8; SOFT_SPOKEN_S_BYTES],
+    #[serde(with = "serde_arrays")]
     pub v_prime: [[u8; SOFT_SPOKEN_S_BYTES]; KAPPA],
 }
+
+impl PersistentObject for Round1Output {}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Round2Output {
     #[serde(with = "serde_arrays")]
     pub tau: [[Scalar; OT_WIDTH]; ETA],
 }
+impl PersistentObject for Round2Output {}
 
 // TODO: Expose SOFT_SPOKEN_K const as two options (2 and 4) for the user.
 pub struct SoftSpokenOTRec<T> {
@@ -195,7 +202,7 @@ impl Round for SoftSpokenOTRec<RecR0> {
         let output = Round1Output {
             w_prime,
             v_prime,
-            u,
+            u: u.into(),
         };
 
         let state = SoftSpokenOTRec {
