@@ -43,8 +43,12 @@ pub trait HasFromParty {
     /// Get party's ID of a message
     fn get_pid(&self) -> usize;
 }
+pub trait HasToParty {
+    /// Get the receipient of this message
+    fn get_receiver(&self) -> usize;
+}
 /// Trait that defines a way to convert this type to a [Scalar].
-/// Only supports converting to [Scalar] of max size [U256] for now.
+/// Only supports converting to [Scalar]'s in curves that have a 256 bit scalars
 pub trait ToScalar {
     /// Convert to [Scalar]
     fn to_scalar<C: CurveArithmetic>(&self) -> C::Scalar
