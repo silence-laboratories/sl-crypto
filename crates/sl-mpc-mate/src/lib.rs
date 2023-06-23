@@ -93,7 +93,7 @@ pub mod nacl {
     }
 }
 
-pub use elliptic_curve::bigint::U256;
+pub use elliptic_curve::bigint::{ArrayDecoding, ArrayEncoding, Encoding, U256};
 pub use rand::{CryptoRng, RngCore};
 /// Session ID
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
