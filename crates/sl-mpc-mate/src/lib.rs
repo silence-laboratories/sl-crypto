@@ -93,8 +93,8 @@ pub mod nacl {
     }
 }
 
+pub use elliptic_curve::bigint::U256;
 pub use rand::{CryptoRng, RngCore};
-
 /// Session ID
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SessionId(pub [u8; 32]);
