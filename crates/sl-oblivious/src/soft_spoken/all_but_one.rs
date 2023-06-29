@@ -17,6 +17,7 @@ use crate::{
 
 use super::ReceiverOTSeed;
 
+#[allow(dead_code)]
 fn generate_seed_ot_for_test(n: usize) -> (SenderOutput, ReceiverOutput) {
     let mut sender_ot_seed = SenderOutput::default();
     let mut rng = thread_rng();

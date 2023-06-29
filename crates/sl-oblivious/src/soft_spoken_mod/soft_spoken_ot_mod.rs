@@ -284,6 +284,7 @@ fn transpose_bool_matrix(
     output
 }
 
+// TODO: State is not required
 pub struct SoftSpokenOTSender<T> {
     session_id: SessionId,
     seed_ot_results: ReceiverOTSeed,
