@@ -90,6 +90,7 @@ pub mod serde_u_array {
                 A: SeqAccess<'de>,
             {
                 let mut array = [[0; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K];
+
                 for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
                     for j in 0..COT_EXTENDED_BLOCK_SIZE_BYTES {
                         array[i][j] = seq.next_element()?.ok_or_else(|| {
@@ -97,6 +98,7 @@ pub mod serde_u_array {
                         })?;
                     }
                 }
+
                 Ok(array)
             }
         }

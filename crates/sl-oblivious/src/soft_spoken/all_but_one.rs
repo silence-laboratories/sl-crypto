@@ -1,53 +1,20 @@
 use elliptic_curve::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
     Shake256,
 };
-use sl_mpc_mate::{random_bytes, traits::PersistentObject, HashBytes, SessionId};
+use sl_mpc_mate::{traits::PersistentObject, SessionId};
 
 pub const DIGEST_SIZE: usize = 32;
 
 use crate::{
     soft_spoken::SenderOTSeed,
     utils::ExtractBit,
-    vsot::{OneTimePadEncryptionKeys, ReceiverOutput, SenderOutput},
+    vsot::{ReceiverOutput, SenderOutput},
 };
 
 use super::ReceiverOTSeed;
-
-fn generate_seed_ot_for_test(n: usize) -> (SenderOutput, ReceiverOutput) {
-    let mut sender_ot_seed = SenderOutput::default();
-    let mut rng = thread_rng();
-
-    for _ in 0..n {
-        let rho_0 = random_bytes(&mut rng);
-        let rho_1 = random_bytes(&mut rng);
-        let ot_sender_messages = OneTimePadEncryptionKeys { rho_0, rho_1 };
-        sender_ot_seed
-            .one_time_pad_enc_keys
-            .push(ot_sender_messages);
-    }
-
-    let random_choices = (0..n / 8).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
-
-    let mut receiver_ot_seed = ReceiverOutput::new(random_choices.clone(), vec![]);
-
-    for i in 0..n {
-        let choice = random_choices.extract_bit(i);
-
-        let msg = HashBytes::conditional_select(
-            &HashBytes(sender_ot_seed.one_time_pad_enc_keys[i].rho_0),
-            &HashBytes(sender_ot_seed.one_time_pad_enc_keys[i].rho_1),
-            Choice::from(choice as u8),
-        );
-
-        receiver_ot_seed.one_time_pad_decryption_keys.push(msg.0);
-    }
-
-    (sender_ot_seed, receiver_ot_seed)
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PPRFOutput {
@@ -281,7 +248,41 @@ pub fn eval_pprf(
 
 #[cfg(test)]
 mod test {
+    use rand::{thread_rng, Rng};
+
     use sl_mpc_mate::SessionId;
+
+    fn generate_seed_ot_for_test(n: usize) -> (SenderOutput, ReceiverOutput) {
+        let mut sender_ot_seed = SenderOutput::default();
+        let mut rng = thread_rng();
+
+        for _ in 0..n {
+            let rho_0 = random_bytes(&mut rng);
+            let rho_1 = random_bytes(&mut rng);
+            let ot_sender_messages = OneTimePadEncryptionKeys { rho_0, rho_1 };
+            sender_ot_seed
+                .one_time_pad_enc_keys
+                .push(ot_sender_messages);
+        }
+
+        let random_choices = (0..n / 8).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
+
+        let mut receiver_ot_seed = ReceiverOutput::new(random_choices.clone(), vec![]);
+
+        for i in 0..n {
+            let choice = random_choices.extract_bit(i);
+
+            let msg = HashBytes::conditional_select(
+                &HashBytes(sender_ot_seed.one_time_pad_enc_keys[i].rho_0),
+                &HashBytes(sender_ot_seed.one_time_pad_enc_keys[i].rho_1),
+                Choice::from(choice as u8),
+            );
+
+            receiver_ot_seed.one_time_pad_decryption_keys.push(msg.0);
+        }
+
+        (sender_ot_seed, receiver_ot_seed)
+    }
 
     use super::{build_pprf, eval_pprf, generate_seed_ot_for_test};
 
