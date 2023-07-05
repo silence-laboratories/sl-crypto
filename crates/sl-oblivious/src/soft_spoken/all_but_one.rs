@@ -284,7 +284,7 @@ mod test {
         (sender_ot_seed, receiver_ot_seed)
     }
 
-    use super::{build_pprf, eval_pprf, generate_seed_ot_for_test};
+    use super::{build_pprf, eval_pprf}; //, generate_seed_ot_for_test};
 
     #[test]
     fn test_pprf() {
