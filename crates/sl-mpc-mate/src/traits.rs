@@ -47,16 +47,35 @@ pub trait HasToParty {
     /// Get the receipient of this message
     fn get_receiver(&self) -> usize;
 }
-/// Trait that defines a way to convert this type to a [Scalar].
-/// Only supports converting to [Scalar]'s in curves that have a 256 bit scalars
-pub trait ToScalar {
+/// Trait that defines a way to convert this type to a Scalar of an elliptic curve.
+pub trait ToScalar<const T: usize> {
     /// Convert to [Scalar]
     fn to_scalar<C: CurveArithmetic>(&self) -> C::Scalar
     where
-        C: CurveArithmetic<Uint = elliptic_curve::bigint::Uint<4>>;
+        C: CurveArithmetic<Uint = elliptic_curve::bigint::Uint<T>>;
 }
 
-impl ToScalar for U256 {
+#[cfg(target_pointer_width = "32")]
+impl ToScalar<8> for U256 {
+    fn to_scalar<C: CurveArithmetic>(&self) -> C::Scalar
+    where
+        C: CurveArithmetic<Uint = elliptic_curve::bigint::Uint<8>>,
+    {
+        match self.cmp(&C::ORDER) {
+            Ordering::Less => C::Scalar::from_uint_unchecked(*self),
+            Ordering::Equal => C::Scalar::ZERO,
+            Ordering::Greater => {
+                // We know order is non zero
+                let order = NonZero::new(C::ORDER).unwrap();
+                // SAFETY: We know the scalar is less than the order as we do bigint mod order.
+                C::Scalar::from_uint_unchecked(self.rem(&order))
+            }
+        }
+    }
+}
+
+#[cfg(target_pointer_width = "64")]
+impl ToScalar<4> for U256 {
     fn to_scalar<C: CurveArithmetic>(&self) -> C::Scalar
     where
         C: CurveArithmetic<Uint = elliptic_curve::bigint::Uint<4>>,

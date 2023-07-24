@@ -139,7 +139,13 @@ impl SoftSpokenOTRec<RecR0> {
 
             for (j, choice) in extended_packed_choices.iter().enumerate() {
                 for r_x_k in &r_x {
+                    if r_x_k[i][j] == 0 {
+                        continue;
+                    }
                     u[i][j] ^= r_x_k[i][j];
+                }
+                if choice == &0u8 {
+                    continue;
                 }
                 u[i][j] ^= choice;
             }

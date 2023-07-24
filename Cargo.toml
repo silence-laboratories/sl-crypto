@@ -1,5 +1,10 @@
 [workspace]
 members = [
-	"crates/sl-mpc-mate",
-	"crates/sl-oblivious",
+        "crates/sl-mpc-mate",
+        "crates/sl-oblivious",
+        "crates/sl-primes",
+        "crates/sl-paillier"
 ]
+
+[profile.bench]
+debug = true
