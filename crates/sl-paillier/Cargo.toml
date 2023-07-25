@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 crypto-bigint = { version = "0.5.2", default-features = false, features = ["rand_core"] }
-crypto-primes = "0.2"
+crypto-primes = "0.4"
 rand_core = "0.6.4"
 
 [dev-dependencies]

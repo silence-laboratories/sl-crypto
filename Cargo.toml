@@ -2,7 +2,6 @@
 members = [
         "crates/sl-mpc-mate",
         "crates/sl-oblivious",
-        "crates/sl-primes",
         "crates/sl-paillier"
 ]
 
