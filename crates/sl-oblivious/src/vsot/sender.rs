@@ -1,7 +1,7 @@
 use elliptic_curve::{sec1::ToEncodedPoint, subtle::ConstantTimeEq};
 use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
-use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+// use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use sl_mpc_mate::{traits::Round, xor_byte_arrays, CryptoRng, RngCore, SessionId};
 
@@ -120,7 +120,7 @@ impl Round for VSOTSender<SendR1> {
 
         let (challenges, pad_enc_keys): (Vec<[u8; 32]>, Vec<OneTimePadEncryptionKeys>) = msg2
             .encoded_choice_bits
-            .par_iter()
+            .iter()
             .enumerate()
             .map(|(idx, encoded_choice)| {
                 let rho_0_prehash = encoded_choice * &self.secret_key;
@@ -191,7 +191,7 @@ impl Round for VSOTSender<SendR2> {
         // TODO: Will this be constant time?
         let challenge_openings = msg4
             .challenge_responses
-            .par_iter()
+            .iter()
             .zip(&self.state.pad_enc_keys)
             .map(|(challenge_response, pad_end_key)| {
                 let rho_0_hash: [u8; 32] = blake3::hash(pad_end_key.rho_0.as_ref()).into();

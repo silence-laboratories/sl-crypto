@@ -4,7 +4,7 @@
 ///     https://link.springer.com/book/10.1007/b97644
 ///     multiplication part: Algorithm 2.34, "Right-to-left comb method for polynomial multiplication"
 ///     reduction part: variant of the idea of Figure 2.9
-pub fn binary_field_multiply_gf_2_128(a_data: [u8; 16], b_data: [u8; 16]) -> [u8; 16] {
+pub fn binary_field_multiply_gf_2_128(a_data: &[u8; 16], b_data: &[u8; 16]) -> [u8; 16] {
     const W: usize = 8;
     const T: usize = 16;
     let mut c = [0u8; T * 2];
@@ -15,7 +15,8 @@ pub fn binary_field_multiply_gf_2_128(a_data: [u8; 16], b_data: [u8; 16]) -> [u8
 
     for k in 0..W {
         for j in 0..T {
-            let mask = if (a[j] >> k) & 0x01 == 1 { 0xFF } else { 0x00 };
+            //let mask = if (a[j] >> k) & 0x01 == 1 { 0xFF } else { 0x00 };
+            let mask = -((a[j] >> k & 0x01) as i8) as u8;
             for i in 0..T + 1 {
                 c[j + i] ^= b[i] & mask;
             }
@@ -48,7 +49,7 @@ mod tests {
             let mut temp = rand_num;
 
             for _ in 0..128 {
-                temp = super::binary_field_multiply_gf_2_128(temp, temp);
+                temp = super::binary_field_multiply_gf_2_128(&temp, &temp);
             }
 
             assert_eq!(temp, rand_num);

@@ -108,13 +108,8 @@ pub mod utils {
     impl<const T: usize> ExtractBit for [u8; T] {}
 
     pub fn bit_to_bit_mask(bit: u8) -> u8 {
-        if bit == 1 {
-            255
-        } else if bit == 0 {
-            0
-        } else {
-            // TODO: Better error handling
-            panic!("bit must be 0 or 1")
-        }
+        // constant time
+        // outputs 0x00 if `bit == 0` and 0xFF if `bit == 1`
+        -(bit as i8) as u8
     }
 }

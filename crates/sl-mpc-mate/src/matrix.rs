@@ -1,7 +1,7 @@
 use std::ops::Sub;
 
 use elliptic_curve::{CurveArithmetic, Field};
-use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+// use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 /// Compute minor of a matrix.
 pub fn matrix_minor<C: CurveArithmetic>(
@@ -108,10 +108,10 @@ pub fn matrix_inverse<C: CurveArithmetic>(
     }
 
     let cofactors = matrix
-        .par_iter()
+        .iter()
         .enumerate()
         .map(|(r, row)| {
-            row.par_iter()
+            row.iter()
                 .enumerate()
                 .map(|(c, _)| {
                     let mut minor = matrix_minor::<C>(&matrix, r, c);
