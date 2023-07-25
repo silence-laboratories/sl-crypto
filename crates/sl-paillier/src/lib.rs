@@ -4,7 +4,7 @@ use crypto_bigint::modular::runtime_mod::{DynResidue, DynResidueParams};
 use crypto_bigint::{Encoding, NonZero, RandomMod, Split, Uint};
 use crypto_bigint::{U1024, U2048, U4096};
 
-use crypto_primes::prime_with_rng;
+use crypto_primes::generate_prime_with_rng;
 
 use rand_core::CryptoRngCore;
 
@@ -86,8 +86,8 @@ where
     Uint<M>: Encoding + Split<Output = Uint<P>>,
 {
     pub fn gen_pq(rng: &mut impl CryptoRngCore) -> (Uint<P>, Uint<P>) {
-        let q = prime_with_rng::<P>(rng, Uint::<P>::BITS);
-        let p = prime_with_rng::<P>(rng, Uint::<P>::BITS);
+        let q = generate_prime_with_rng(rng, None);
+        let p = generate_prime_with_rng(rng, None);
 
         (p, q)
     }
@@ -567,7 +567,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn gen() {
         let mut rng = rand::thread_rng();
 
