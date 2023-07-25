@@ -248,9 +248,12 @@ pub fn eval_pprf(
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     use rand::{thread_rng, Rng};
 
-    use sl_mpc_mate::SessionId;
+    use crate::vsot::OneTimePadEncryptionKeys;
+    use sl_mpc_mate::{random_bytes, HashBytes, SessionId};
 
     fn generate_seed_ot_for_test(n: usize) -> (SenderOutput, ReceiverOutput) {
         let mut sender_ot_seed = SenderOutput::default();

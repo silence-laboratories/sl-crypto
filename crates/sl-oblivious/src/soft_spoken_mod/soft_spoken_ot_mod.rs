@@ -536,7 +536,7 @@ mod tests {
 
     use k256::Scalar;
     use rand::RngCore;
-    use sl_mpc_mate::{traits::Round, SessionId};
+    use sl_mpc_mate::SessionId;
 
     use crate::utils::ExtractBit;
 
@@ -566,14 +566,12 @@ mod tests {
         let mut choices = [0u8; COT_BATCH_SIZE_BYTES];
         rng.fill_bytes(&mut choices);
 
-        let input_data = (0..ETA)
-            .map(|_| {
-                let scalars = (0..OT_WIDTH)
-                    .map(|_| Scalar::generate_biased(&mut rng))
-                    .collect::<Vec<_>>();
-                scalars.try_into().unwrap()
-            })
-            .collect::<Vec<_>>();
+        let input_data: [[Scalar; OT_WIDTH]; ETA] = std::array::from_fn(|_| {
+            let scalars = (0..OT_WIDTH)
+                .map(|_| Scalar::generate_biased(&mut rng))
+                .collect::<Vec<_>>();
+            scalars.try_into().unwrap()
+        });
 
         let sender = SoftSpokenOTSender::new(session_id, receiver_ot_results);
         let receiver = SoftSpokenOTRec::new(session_id, &sender_ot_results, &mut rng);
@@ -583,9 +581,7 @@ mod tests {
         // println!("Round1: {:?}", start.elapsed());
 
         // let start = std::time::Instant::now();
-        let (t_a, round2) = sender
-            .process((&round1, &input_data))
-            .unwrap();
+        let (t_a, round2) = sender.process((&round1, &input_data)).unwrap();
         // println!("Round2: {:?}", start.elapsed());
 
         // let start = std::time::Instant::now();
