@@ -1,10 +1,24 @@
-use elliptic_curve::{subtle::ConstantTimeEq, Field};
+use elliptic_curve::{
+    group::GroupEncoding, subtle::ConstantTimeEq, Field, PrimeField,
+};
 use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
-use sl_mpc_mate::{traits::PersistentObject, CryptoRng, RngCore};
+use sl_mpc_mate::{
+    bincode::{
+        de::Decoder,
+        enc::Encoder,
+        error::{DecodeError, EncodeError},
+        Decode, Encode,
+    },
+    message::*,
+    traits::PersistentObject,
+    CryptoRng, RngCore,
+};
 
-use crate::{serialization::serde_projective_point, utils::TranscriptProtocol};
+use crate::{
+    serialization::serde_projective_point, utils::TranscriptProtocol,
+};
 
 /// Non-interactive Proof of knowledge of discrete logarithm with Fiat-Shamir transform.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -65,13 +79,38 @@ impl DLogProof {
 
 impl PersistentObject for DLogProof {}
 
+impl Encode for DLogProof {
+    fn encode<E: Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), EncodeError> {
+        FixedArray(self.t.to_bytes()).encode(encoder)?;
+        FixedArray(self.s.to_bytes()).encode(encoder)?;
+        Ok(())
+    }
+}
+
+impl Decode for DLogProof {
+    fn decode<D: Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        let t =
+            ProjectivePoint::from_bytes(&FixedArray::decode(decoder)?)
+                .unwrap();
+        let s =
+            Scalar::from_repr(FixedArray::decode(decoder)?).unwrap();
+
+        Ok(DLogProof { t, s })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use k256::{ProjectivePoint, Scalar};
     use merlin::Transcript;
     use rand::thread_rng;
 
-    use crate::zkproofs::dlog_proof::DLogProof;
+    use super::DLogProof;
 
     #[test]
     pub fn test_dlog_proof() {
@@ -86,7 +125,8 @@ mod tests {
         let base_point = ProjectivePoint::GENERATOR;
         let y = base_point * x;
 
-        let proof = DLogProof::prove(&x, base_point, &mut transcript, &mut rng);
+        let proof =
+            DLogProof::prove(&x, base_point, &mut transcript, &mut rng);
 
         let mut verify_transcript = Transcript::new(b"test-dlog-proof");
 
@@ -103,7 +143,12 @@ mod tests {
         let wrong_scalar = Scalar::generate_biased(&mut rng);
         let y = base_point * x;
 
-        let proof = DLogProof::prove(&wrong_scalar, base_point, &mut transcript, &mut rng);
+        let proof = DLogProof::prove(
+            &wrong_scalar,
+            base_point,
+            &mut transcript,
+            &mut rng,
+        );
 
         let mut verify_transcript = Transcript::new(b"test-dlog-proof");
 
@@ -122,9 +167,11 @@ mod tests {
         let base_point = ProjectivePoint::GENERATOR;
         let y = base_point * x;
 
-        let proof = DLogProof::prove(&x, base_point, &mut transcript, &mut rng);
+        let proof =
+            DLogProof::prove(&x, base_point, &mut transcript, &mut rng);
 
-        let mut verify_transcript = Transcript::new(b"test-dlog-proof-wrong");
+        let mut verify_transcript =
+            Transcript::new(b"test-dlog-proof-wrong");
 
         assert!(
             !proof.verify(&y, base_point, &mut verify_transcript),

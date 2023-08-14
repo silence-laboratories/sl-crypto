@@ -3,9 +3,11 @@ use std::ops::Deref;
 // use k256::elliptic_curve::CurveArithmetic;
 
 use elliptic_curve::{
-    bigint::U256, group::Curve, rand_core::CryptoRngCore, CurveArithmetic, Field, Group,
-    NonZeroScalar, ProjectivePoint, Scalar,
+    bigint::U256, group::Curve, rand_core::CryptoRngCore,
+    CurveArithmetic, Field, Group, NonZeroScalar, ProjectivePoint,
+    Scalar,
 };
+
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{matrix::matrix_inverse, traits::ToScalar};
@@ -56,6 +58,7 @@ where
         }
         GroupPolynomial::new(points)
     }
+
     /// Computes the n_i derivative of a polynomial with coefficients u_i_k at the point x
     ///
     /// `n`: order of the derivative
@@ -98,7 +101,8 @@ where
         S: serde::Serializer,
         C::AffinePoint: Serialize + Clone,
     {
-        let affine: Vec<C::AffinePoint> = self.iter().map(|p| p.to_affine()).collect();
+        let affine: Vec<C::AffinePoint> =
+            self.iter().map(|p| p.to_affine()).collect();
         affine.serialize(serializer)
     }
 }
@@ -108,12 +112,16 @@ where
     C::AffinePoint: Serialize + DeserializeOwned,
     C::ProjectivePoint: From<C::AffinePoint>,
 {
-    fn deserialize<D>(deserializer: D) -> Result<GroupPolynomial<C>, D::Error>
+    fn deserialize<D>(
+        deserializer: D,
+    ) -> Result<GroupPolynomial<C>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let affine: Vec<C::AffinePoint> = Vec::deserialize(deserializer)?;
-        let coeffs: Vec<C::ProjectivePoint> = affine.iter().map(|p| (*p).into()).collect();
+        let affine: Vec<C::AffinePoint> =
+            Vec::deserialize(deserializer)?;
+        let coeffs: Vec<C::ProjectivePoint> =
+            affine.iter().map(|p| (*p).into()).collect();
         Ok(GroupPolynomial::new(coeffs))
     }
 }
@@ -155,7 +163,9 @@ where
             .iter()
             .enumerate()
             .map(|(position, u_i)| {
-                let num: C::Scalar = factorial_range(position, position + n).to_scalar::<C>();
+                let num: C::Scalar =
+                    factorial_range(position, position + n)
+                        .to_scalar::<C>();
                 *u_i * num
             })
             .collect()
@@ -255,7 +265,8 @@ where
         .take(n)
         .skip(n_i)
         .for_each(|(idx, vi)| {
-            let num: C::Scalar = factorial_range(idx - n_i, idx).to_scalar::<C>();
+            let num: C::Scalar =
+                factorial_range(idx - n_i, idx).to_scalar::<C>();
             let exponent = [(idx - n_i) as u64];
             let result = x_i.pow_vartime(exponent);
             *vi = num * result;
@@ -265,10 +276,13 @@ where
 }
 
 /// Get the birkhoff coefficients
-pub fn birkhoff_coeffs<C: CurveArithmetic>(params: &[(NonZeroScalar<C>, usize)]) -> Vec<C::Scalar>
+pub fn birkhoff_coeffs<C: CurveArithmetic>(
+    params: &[(NonZeroScalar<C>, usize)],
+) -> Vec<C::Scalar>
 where
-    Vec<Vec<C::Scalar>>:
-        std::iter::FromIterator<std::vec::Vec<<C as elliptic_curve::CurveArithmetic>::Scalar>>,
+    Vec<Vec<C::Scalar>>: std::iter::FromIterator<
+        std::vec::Vec<<C as elliptic_curve::CurveArithmetic>::Scalar>,
+    >,
     C: CurveArithmetic<Uint = U256>,
 {
     let n = params.len();

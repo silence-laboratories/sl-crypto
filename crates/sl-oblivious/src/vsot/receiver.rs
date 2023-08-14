@@ -1,3 +1,5 @@
+use std::array;
+
 use elliptic_curve::{
     sec1::ToEncodedPoint,
     subtle::{Choice, ConditionallySelectable},
@@ -5,13 +7,15 @@ use elliptic_curve::{
 use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
 use rand::Rng;
-// use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+// use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use sl_mpc_mate::{traits::Round, xor_byte_arrays, CryptoRng, HashBytes, RngCore, SessionId};
+use sl_mpc_mate::{
+    xor_byte_arrays, CryptoRng, HashBytes, RngCore, SessionId,
+};
 
 use crate::{
     utils::{double_blake_hash_inter, ExtractBit},
-    vsot::{VSOTMsg2, VSOTMsg4},
+    vsot::{VSOTMsg2, VSOTMsg4, BATCH_SIZE, BATCH_SIZE_BITS},
 };
 
 use super::{VSOTError, VSOTMsg1, VSOTMsg3, VSOTMsg5};
@@ -20,77 +24,58 @@ use super::{VSOTError, VSOTMsg1, VSOTMsg3, VSOTMsg5};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VSOTReceiver<T> {
     session_id: SessionId,
-    batch_size: u32,
     state: T,
 }
 
 /// Initial state of a party.
 pub struct InitRec {
     // TODO: Const generics?
-    a_vec: Vec<Scalar>,
-    packed_choice_bits: Vec<u8>,
+    a_vec: [Scalar; BATCH_SIZE],
+    packed_choice_bits: [u8; BATCH_SIZE_BITS],
 }
 
 // TODO: Zeroize state after protocol execution
 
 /// State of Receiver after processing Message 1.
 pub struct RecR1 {
-    rho_w_vec: Vec<[u8; 32]>,
-    packed_choice_bits: Vec<u8>,
+    rho_w_vec: [[u8; 32]; BATCH_SIZE],
+    packed_choice_bits: [u8; BATCH_SIZE_BITS],
 }
 
 /// State of Receiver after processing Message 3.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RecR2 {
-    rho_w_hashes: Vec<[u8; 32]>,
-    rho_w_vec: Vec<[u8; 32]>,
-    packed_choice_bits: Vec<u8>,
+    rho_w_hashes: [[u8; 32]; BATCH_SIZE],
+    rho_w_vec: [[u8; 32]; BATCH_SIZE],
+    packed_choice_bits: [u8; BATCH_SIZE_BITS],
 }
 
 impl VSOTReceiver<InitRec> {
     /// Create a new instance of the VSOT receiver.
     pub fn new<R: CryptoRng + RngCore>(
         session_id: SessionId,
-        batch_size: u32,
         rng: &mut R,
-    ) -> Result<Self, VSOTError> {
-        if batch_size % 8 != 0 {
-            return Err(VSOTError::InvalidBatchSize);
-        }
-        let a_vec = (0..batch_size)
-            .map(|_| Scalar::generate_biased(rng))
-            .collect();
-
-        // divide batch_size by 8 to get the number of bytes
-        let batch_size_bytes = batch_size >> 3;
-
-        let packed_choice_bits = (0..batch_size_bytes)
-            .map(|_| rng.gen::<u8>())
-            .collect::<Vec<u8>>();
-
-        let state = InitRec {
-            a_vec,
-            packed_choice_bits,
-        };
-
-        Ok(Self {
+    ) -> Self {
+        Self {
             session_id,
-            batch_size,
-            state,
-        })
+            state: InitRec {
+                a_vec: array::from_fn(|_| Scalar::generate_biased(rng)),
+                packed_choice_bits: rng.gen(),
+            },
+        }
     }
 }
 
 /// Step 3 of the VSOT (protocol 7 DKLs18).
-impl Round for VSOTReceiver<InitRec> {
-    type Input = VSOTMsg1;
-
-    type Output = Result<(VSOTReceiver<RecR1>, VSOTMsg2), VSOTError>;
-
-    fn process(self, msg1: Self::Input) -> Self::Output {
+impl VSOTReceiver<InitRec> {
+    pub fn process(
+        self,
+        msg1: VSOTMsg1,
+    ) -> Result<(VSOTReceiver<RecR1>, VSOTMsg2), VSOTError> {
         let mut transcript = Transcript::new(b"SL-VSOT");
 
-        transcript.append_message(b"session_id", self.session_id.as_ref());
+        transcript
+            .append_message(b"session_id", self.session_id.as_ref());
 
         msg1.proof
             .verify(
@@ -101,7 +86,7 @@ impl Round for VSOTReceiver<InitRec> {
             .then_some(())
             .ok_or(VSOTError::InvalidDLogProof)?;
 
-        let sender_pubkey = msg1.public_key;
+        let sender_pubkey = &msg1.public_key;
 
         let mut hasher = blake3::Hasher::new();
 
@@ -109,38 +94,40 @@ impl Round for VSOTReceiver<InitRec> {
         hasher.update(self.session_id.as_ref());
         hasher.update(b"Random-Oracle-Salt");
 
-        let session_id: SessionId = hasher.finalize().as_bytes().to_owned().into();
+        let session_id: SessionId =
+            hasher.finalize().as_bytes().to_owned().into();
 
-        let (encoded_choice_bits, rho_w_vec): (Vec<ProjectivePoint>, Vec<[u8; 32]>) = self
-            .state
-            .a_vec
-            .iter()
-            .enumerate()
-            .map(|(idx, a)| {
-                let option_0 = ProjectivePoint::GENERATOR * a;
-                let option_1 = option_0 + sender_pubkey;
+        let mut encoded_choice_bits =
+            [ProjectivePoint::IDENTITY; BATCH_SIZE];
 
-                let random_choice_bit = self.state.packed_choice_bits.extract_bit(idx);
+        let mut rho_w_vec = [[0u8; 32]; BATCH_SIZE];
 
-                let rho_w_prehash = sender_pubkey * a;
+        self.state.a_vec.iter().enumerate().for_each(|(idx, a)| {
+            let option_0 = ProjectivePoint::GENERATOR * a;
+            let option_1 = option_0 + sender_pubkey;
 
-                let mut hasher = blake3::Hasher::new();
-                hasher.update(b"SL-Seed-VSOT");
-                hasher.update(session_id.as_ref());
-                hasher.update((idx as u64).to_be_bytes().as_slice());
-                hasher.update(rho_w_prehash.to_encoded_point(true).as_bytes());
+            let random_choice_bit =
+                self.state.packed_choice_bits.extract_bit(idx);
 
-                let rho_w: [u8; 32] = hasher.finalize().into();
+            let rho_w_prehash = sender_pubkey * a;
 
-                let final_option = ProjectivePoint::conditional_select(
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(b"SL-Seed-VSOT");
+            hasher.update(session_id.as_ref());
+            hasher.update((idx as u64).to_be_bytes().as_slice());
+            hasher.update(
+                rho_w_prehash.to_encoded_point(true).as_bytes(),
+            );
+
+            rho_w_vec[idx] = hasher.finalize().into();
+
+            encoded_choice_bits[idx] =
+                ProjectivePoint::conditional_select(
                     &option_0,
                     &option_1,
                     Choice::from(random_choice_bit as u8),
                 );
-
-                (final_option, rho_w)
-            })
-            .unzip();
+        });
 
         let msg2 = VSOTMsg2 {
             encoded_choice_bits,
@@ -151,49 +138,42 @@ impl Round for VSOTReceiver<InitRec> {
             packed_choice_bits: self.state.packed_choice_bits,
         };
 
-        Ok((
-            VSOTReceiver {
-                batch_size: self.batch_size,
-                session_id,
-                state,
-            },
-            msg2,
-        ))
+        Ok((VSOTReceiver { session_id, state }, msg2))
     }
 }
 
-impl Round for VSOTReceiver<RecR1> {
-    type Input = VSOTMsg3;
-
-    type Output = Result<(VSOTReceiver<RecR2>, VSOTMsg4), VSOTError>;
-
+impl VSOTReceiver<RecR1> {
     /// Step 6 of the VSOT (protocol 7 DKLs18).
-    fn process(self, msg3: Self::Input) -> Self::Output {
-        if msg3.challenges.len() != self.batch_size as usize {
-            return Err(VSOTError::InvalidDataCount);
-        }
+    pub fn process(
+        self,
+        msg3: VSOTMsg3,
+    ) -> Result<(VSOTReceiver<RecR2>, VSOTMsg4), VSOTError> {
+        let mut responses = [[0; 32]; BATCH_SIZE];
+        let mut rho_w_hashes = [[0; 32]; BATCH_SIZE];
 
-        let (responses, rho_w_hashes): (Vec<[u8; 32]>, Vec<[u8; 32]>) = self
-            .state
+        self.state
             .rho_w_vec
             .iter()
             .zip(msg3.challenges)
             .enumerate()
-            .map(|(idx, (rho_w, challenge))| {
+            .for_each(|(idx, (rho_w, challenge))| {
                 // Reusing rho_w hashes to reduce the number of hashes
-                let (rho_w_hash, option_0) = double_blake_hash_inter(rho_w);
-                let option_1 = xor_byte_arrays(option_0, challenge);
-                let random_choice_bit = self.state.packed_choice_bits.extract_bit(idx);
+                let (rho_w_hashe, option_0) =
+                    double_blake_hash_inter(rho_w);
 
-                let final_option = HashBytes::conditional_select(
+                rho_w_hashes[idx] = rho_w_hashe;
+
+                let option_1 = xor_byte_arrays(&option_0, &challenge);
+                let random_choice_bit =
+                    self.state.packed_choice_bits.extract_bit(idx);
+
+                responses[idx] = HashBytes::conditional_select(
                     &HashBytes(option_0),
                     &HashBytes(option_1),
                     (random_choice_bit as u8).into(),
-                );
-
-                (final_option.0, rho_w_hash)
-            })
-            .unzip();
+                )
+                .0;
+            });
 
         let next_msg = VSOTMsg4 {
             challenge_responses: responses,
@@ -208,7 +188,6 @@ impl Round for VSOTReceiver<RecR1> {
         Ok((
             VSOTReceiver {
                 session_id: self.session_id,
-                batch_size: self.batch_size,
                 state: next_state,
             },
             next_msg,
@@ -216,22 +195,15 @@ impl Round for VSOTReceiver<RecR1> {
     }
 }
 
-impl Round for VSOTReceiver<RecR2> {
-    type Input = VSOTMsg5;
-
-    type Output = Result<ReceiverOutput, VSOTError>;
-
-    fn process(self, msg5: Self::Input) -> Self::Output {
-        if msg5.challenge_openings.len() != self.batch_size as usize {
-            return Err(VSOTError::InvalidDataCount);
-        }
-
+impl VSOTReceiver<RecR2> {
+    pub fn process(self, msg5: VSOTMsg5) -> Result<ReceiverOutput, VSOTError> {
         msg5.challenge_openings
             .iter()
             .enumerate()
             .map(|(idx, opening)| {
-                let rho_w_hash = self.state.rho_w_hashes[idx];
-                let random_bit_choice = self.state.packed_choice_bits.extract_bit(idx);
+                let rho_w_hash = &self.state.rho_w_hashes[idx];
+                let random_bit_choice =
+                    self.state.packed_choice_bits.extract_bit(idx);
 
                 let final_option = HashBytes::conditional_select(
                     &HashBytes(opening.rho_0_hash),
@@ -239,11 +211,12 @@ impl Round for VSOTReceiver<RecR2> {
                     (random_bit_choice as u8).into(),
                 );
 
-                (final_option.0 == rho_w_hash)
+                (&final_option.0 == rho_w_hash)
                     .then_some(())
                     .ok_or(VSOTError::InvalidRhoHash)
             })
             .collect::<Result<Vec<_>, VSOTError>>()?;
+
         Ok(ReceiverOutput::new(
             self.state.packed_choice_bits,
             self.state.rho_w_vec,
@@ -253,17 +226,17 @@ impl Round for VSOTReceiver<RecR2> {
 
 /// The output of the VSOT receiver.
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ReceiverOutput {
-    pub(crate) packed_random_choice_bits: Vec<u8>,
-    pub(crate) one_time_pad_decryption_keys: Vec<[u8; 32]>,
+    pub(crate) packed_random_choice_bits: [u8; BATCH_SIZE_BITS], // batch_size bits
+    pub(crate) one_time_pad_decryption_keys: [[u8; 32]; BATCH_SIZE], // batch_size X 32 bytes
 }
 
 impl ReceiverOutput {
     /// Create a new `ReceiverOutput`.
     pub fn new(
-        packed_random_choice_bits: Vec<u8>,
-        one_time_pad_decryption_keys: Vec<[u8; 32]>,
+        packed_random_choice_bits: [u8; BATCH_SIZE_BITS],
+        one_time_pad_decryption_keys: [[u8; 32]; BATCH_SIZE],
     ) -> Self {
         Self {
             packed_random_choice_bits,

@@ -1,27 +1,43 @@
 use std::cmp::Ordering;
 
-use elliptic_curve::{bigint::NonZero, scalar::FromUintUnchecked, Field};
+use elliptic_curve::{
+    bigint::NonZero, scalar::FromUintUnchecked, Field,
+};
 use elliptic_curve::{bigint::U256, CurveArithmetic};
 
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Trait that defines an object that can be converted to and from an array of bytes.
-pub trait PersistentObject: Serialize + DeserializeOwned + Send + 'static {
+pub trait PersistentObject:
+    Serialize + DeserializeOwned + Send + 'static
+{
     ///  Serialize
     fn to_bytes(&self) -> Option<Vec<u8>> {
-        bincode::serialize(self).ok()
+        bincode::serde::encode_to_vec(self, bincode::config::legacy())
+            .ok()
     }
 
     /// Deserialize
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        bincode::deserialize(bytes).ok()
+        bincode::serde::decode_from_slice(
+            bytes,
+            bincode::config::legacy(),
+        )
+        .map(|(val, _)| val)
+        .ok()
     }
 
     /// Deserialize batch of messages
-    fn decode_batch(bytes: &[u8]) -> Option<Vec<Self>> {
-        let msgs: Vec<&[u8]> = bincode::deserialize(bytes).ok()?;
+    fn decode_batch(_bytes: &[u8]) -> Option<Vec<Self>> {
+        todo!()
+        // let msgs: Vec<&[u8]> = bincode::serde::decode_from_slice(
+        //     bytes,
+        //     bincode::config::legacy(),
+        // )
+        // .map(|(val, _)| val)
+        // .ok()?;
 
-        msgs.into_iter().map(Self::from_bytes).collect()
+        // msgs.into_iter().map(Self::from_bytes).collect()
     }
 }
 

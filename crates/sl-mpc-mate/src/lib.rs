@@ -1,25 +1,39 @@
 use std::ops::Deref;
 
-use cooridinator::Coordinator;
-
 use elliptic_curve::subtle::{Choice, ConditionallySelectable};
+use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use traits::PersistentObject;
+
+use cooridinator::Coordinator;
 
 pub mod math;
 pub mod matrix;
 pub mod traits;
+
+pub mod coord;
+pub mod message;
+pub mod state;
+
+/// Reexport bincode
+pub use bincode;
 
 #[cfg(feature = "nacl")]
 pub mod nacl {
     use crate::traits::PersistentObject;
     use dryoc::classic::crypto_sign;
     pub use dryoc::classic::crypto_sign::crypto_sign_seed_keypair;
-    pub use dryoc::classic::crypto_sign::{PublicKey as SignPubkey, SecretKey as SignPrivKey};
+    pub use dryoc::classic::crypto_sign::{
+        PublicKey as SignPubkey, SecretKey as SignPrivKey,
+    };
     pub use dryoc::classic::crypto_sign_ed25519::Signature;
-    use dryoc::constants::{CRYPTO_BOX_NONCEBYTES, CRYPTO_SIGN_ED25519_BYTES};
+    use dryoc::constants::{
+        CRYPTO_BOX_NONCEBYTES, CRYPTO_SIGN_ED25519_BYTES,
+    };
     use dryoc::dryocbox::{DryocBox, Nonce, VecBox};
-    pub use dryoc::dryocbox::{KeyPair, PublicKey as BoxPubkey, SecretKey as BoxPrivKey};
+    pub use dryoc::dryocbox::{
+        KeyPair, PublicKey as BoxPubkey, SecretKey as BoxPrivKey,
+    };
     use dryoc::types::{NewByteArray, StackByteArray};
     pub use dryoc::Error;
 
@@ -30,8 +44,13 @@ pub mod nacl {
         signing_key: &SignPrivKey,
         message: &[u8],
     ) -> Result<Signature, dryoc::Error> {
-        let mut signed_message: Signature = [0u8; CRYPTO_SIGN_ED25519_BYTES];
-        crypto_sign::crypto_sign_detached(&mut signed_message, message, signing_key)?;
+        let mut signed_message: Signature =
+            [0u8; CRYPTO_SIGN_ED25519_BYTES];
+        crypto_sign::crypto_sign_detached(
+            &mut signed_message,
+            message,
+            signing_key,
+        )?;
         Ok(signed_message)
     }
 
@@ -42,7 +61,11 @@ pub mod nacl {
         signature: &Signature,
         verify_key: &SignPubkey,
     ) -> Result<(), dryoc::Error> {
-        crypto_sign::crypto_sign_verify_detached(signature, message_hash, verify_key)
+        crypto_sign::crypto_sign_verify_detached(
+            signature,
+            message_hash,
+            verify_key,
+        )
     }
 
     /// Encrypt data using the given public key, secret key.
@@ -54,7 +77,8 @@ pub mod nacl {
         from_party: usize,
     ) -> Result<EncryptedData, dryoc::Error> {
         let nonce = Nonce::gen();
-        let enc_data = DryocBox::encrypt_to_vecbox(data.as_ref(), &nonce, ek, sk)?;
+        let enc_data =
+            DryocBox::encrypt_to_vecbox(data.as_ref(), &nonce, ek, sk)?;
         let enc_vsot_msg = EncryptedData {
             to_party,
             from_party,
@@ -79,6 +103,7 @@ pub mod nacl {
         /// The nonce used for encryption
         pub nonce: StackByteArray<CRYPTO_BOX_NONCEBYTES>,
     }
+
     impl crate::traits::HasFromParty for EncryptedData {
         fn get_pid(&self) -> usize {
             self.from_party
@@ -86,6 +111,7 @@ pub mod nacl {
     }
 
     impl PersistentObject for EncryptedData {}
+
     /// Message that has a signature
     pub trait HasSignature {
         /// Returns the signature of this message
@@ -93,12 +119,26 @@ pub mod nacl {
     }
 }
 
-pub use elliptic_curve::bigint::{ArrayDecoding, ArrayEncoding, Encoding, U256};
+pub use elliptic_curve::bigint::{
+    ArrayDecoding, ArrayEncoding, Encoding, U256,
+};
 pub use rand_core::{CryptoRng, RngCore};
+
 /// Session ID
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    bincode::Encode,
+    bincode::Decode,
+)]
 pub struct SessionId(pub [u8; 32]);
 
+// impl Distribution<T> for
 impl AsRef<[u8]> for SessionId {
     fn as_ref(&self) -> &[u8] {
         &self.0
@@ -118,8 +158,8 @@ impl SessionId {
     }
 
     /// Function to generate a random session id which is a 32 byte array.
-    pub fn random<R: CryptoRng + RngCore>(rng: &mut R) -> SessionId {
-        SessionId(random_bytes(rng))
+    pub fn random<R: CryptoRng + Rng>(rng: &mut R) -> SessionId {
+        SessionId(rng.gen())
     }
 }
 // /// Calculates the final session id from the list of session ids.
@@ -139,32 +179,42 @@ impl SessionId {
 // }
 
 /// XOR two byte arrays.
-pub fn xor_byte_arrays<const T: usize>(a: [u8; T], b: [u8; T]) -> [u8; T] {
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| x ^ y)
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap()
+pub fn xor_byte_arrays<const T: usize>(
+    a: &[u8; T],
+    b: &[u8; T],
+) -> [u8; T] {
+    std::array::from_fn(|i| a[i] ^ b[i])
 }
 
 /// Generate a random byte array
-pub fn random_bytes<const N: usize, R: CryptoRng + RngCore>(rng: &mut R) -> [u8; N] {
+pub fn random_bytes<const N: usize, R: CryptoRng + RngCore>(
+    rng: &mut R,
+) -> [u8; N] {
     let mut buf = [0u8; N];
     rng.fill_bytes(&mut buf);
     buf
 }
 
 // Wrapper around a byte array of 32 bytes.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    bincode::Encode,
+    bincode::Decode,
+)]
 pub struct HashBytes(pub [u8; 32]);
 
 impl ConditionallySelectable for HashBytes {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
         let mut res = [0u8; 32];
-        res.iter_mut()
-            .enumerate()
-            .for_each(|(idx, x)| *x = u8::conditional_select(&a.0[idx], &b.0[idx], choice));
+        res.iter_mut().enumerate().for_each(|(idx, x)| {
+            *x = u8::conditional_select(&a.0[idx], &b.0[idx], choice)
+        });
 
         Self(res)
     }
@@ -176,9 +226,9 @@ pub struct ByteArray<const T: usize>(pub [u8; T]);
 impl<const T: usize> ConditionallySelectable for ByteArray<T> {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
         let mut res = [0u8; T];
-        res.iter_mut()
-            .enumerate()
-            .for_each(|(idx, x)| *x = u8::conditional_select(&a.0[idx], &b.0[idx], choice));
+        res.iter_mut().enumerate().for_each(|(idx, x)| {
+            *x = u8::conditional_select(&a.0[idx], &b.0[idx], choice)
+        });
 
         Self(res)
     }
@@ -225,14 +275,17 @@ impl From<[u8; 32]> for HashBytes {
 
 /// Receive a batch broadcast from the coordinator.
 /// Only used internally for testing.
-pub fn recv_broadcast<M: PersistentObject>(coord: &mut Coordinator, round: usize) -> Vec<M> {
+pub fn recv_broadcast<M: PersistentObject>(
+    coord: &mut Coordinator,
+    round: usize,
+) -> Vec<M> {
     M::decode_batch(&coord.broadcast(round).unwrap()).unwrap()
 }
 
 /// Prepare batch of messages
 pub fn encode_batch<T: AsRef<[u8]>>(msgs: &[T]) -> Option<Vec<u8>> {
     let msgs: Vec<&[u8]> = msgs.iter().map(AsRef::as_ref).collect();
-    bincode::serialize(&msgs).ok()
+    bincode::serde::encode_to_vec(&msgs, bincode::config::legacy()).ok()
 }
 
 #[macro_export]
@@ -297,7 +350,11 @@ pub mod cooridinator {
         }
 
         /// Receive a message from a party for a given round.
-        pub fn send(&mut self, round: usize, msg: Msg) -> Result<usize, Error> {
+        pub fn send(
+            &mut self,
+            round: usize,
+            msg: Msg,
+        ) -> Result<usize, Error> {
             let len = self.store.len();
 
             if len == self.store.capacity() {

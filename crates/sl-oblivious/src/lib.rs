@@ -45,6 +45,7 @@ pub mod utils {
 
         (hash.into(), double_hash.into())
     }
+
     /// Custom extension trait for the merlin transcript.
     pub trait TranscriptProtocol {
         /// Append a point to the transcript.
