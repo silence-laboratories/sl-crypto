@@ -242,7 +242,7 @@ mod tests {
     pub fn test_session(sess: &mut Session) {
         let mut e = DummyEnv;
         loop {
-            sess.step(&mut e, &mut []);
+            sess.step(&mut e, &mut Message::from_buffer(&mut []).unwrap());
         }
     }
 

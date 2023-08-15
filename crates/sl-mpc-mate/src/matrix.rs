@@ -1,7 +1,7 @@
 use std::ops::Sub;
 
 use elliptic_curve::{CurveArithmetic, Field};
-// use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+// use rayon::prelude::*;
 
 /// Compute minor of a matrix.
 pub fn matrix_minor<C: CurveArithmetic>(
@@ -24,9 +24,12 @@ pub fn matrix_minor<C: CurveArithmetic>(
 }
 
 /// Transpose a matrix
-pub fn transpose<C: CurveArithmetic>(v: Vec<Vec<C::Scalar>>) -> Vec<Vec<C::Scalar>> {
+pub fn transpose<C: CurveArithmetic>(
+    v: Vec<Vec<C::Scalar>>,
+) -> Vec<Vec<C::Scalar>> {
     let len = v[0].len();
-    let mut iters: Vec<_> = v.into_iter().map(|n| n.into_iter()).collect();
+    let mut iters: Vec<_> =
+        v.into_iter().map(|n| n.into_iter()).collect();
     (0..len)
         .map(|_| {
             iters
@@ -36,9 +39,10 @@ pub fn transpose<C: CurveArithmetic>(v: Vec<Vec<C::Scalar>>) -> Vec<Vec<C::Scala
         })
         .collect()
 }
+
 /// Get the matrix determinant
 pub fn mod_bareiss_determinant<C: CurveArithmetic>(
-    matrix: &mut Vec<Vec<C::Scalar>>,
+    mut matrix: Vec<Vec<C::Scalar>>,
     rows: usize,
 ) -> Result<C::Scalar, &'static str>
 where
@@ -77,7 +81,8 @@ where
                     if inv.is_none().into() {
                         return Err("Modular inverse does not exist while computing determinant, Given ranks setup might not be valid");
                     }
-                    matrix[j][k] = matrix[j][k] * matrix[i - 1][i - 1].invert().unwrap()
+                    matrix[j][k] = matrix[j][k]
+                        * matrix[i - 1][i - 1].invert().unwrap()
                 }
             }
         }
@@ -93,7 +98,8 @@ pub fn matrix_inverse<C: CurveArithmetic>(
     rows: usize,
 ) -> Vec<Vec<C::Scalar>> {
     let determinant =
-        mod_bareiss_determinant::<C>(&mut matrix.clone(), rows).expect("Error while finding det");
+        mod_bareiss_determinant::<C>(matrix.clone(), rows)
+            .expect("Error while finding det");
     let determinant_inv = determinant.invert().unwrap();
     let n = matrix.len();
 
@@ -114,11 +120,11 @@ pub fn matrix_inverse<C: CurveArithmetic>(
             row.iter()
                 .enumerate()
                 .map(|(c, _)| {
-                    let mut minor = matrix_minor::<C>(&matrix, r, c);
+                    let minor = matrix_minor::<C>(&matrix, r, c);
                     let minor_rows = minor.len();
                     let exponentiation = minus_one.pow([((r + c) as u64)]);
                     let value: C::Scalar = exponentiation
-                        * mod_bareiss_determinant::<C>(&mut minor, minor_rows)
+                        * mod_bareiss_determinant::<C>(minor, minor_rows)
                             .expect("Error while finding det for minor, Given ranks setup might not be valid");
                     value
                 })
@@ -130,18 +136,20 @@ pub fn matrix_inverse<C: CurveArithmetic>(
 
     transposed
         .into_iter()
-        .map(|row| row.into_iter().map(|x| x * determinant_inv).collect())
+        .map(|row| {
+            row.into_iter().map(|x| x * determinant_inv).collect()
+        })
         .collect::<Vec<_>>()
 }
 
 #[cfg(test)]
 mod tests {
-
-    use k256::{Scalar, Secp256k1, U256};
-
-    use crate::traits::ToScalar;
-
     use super::*;
+
+    use elliptic_curve::{bigint::U256, ops::Reduce};
+    use k256::Secp256k1;
+
+    type Scalar = elliptic_curve::Scalar<Secp256k1>;
 
     #[test]
     fn test_minor() {
@@ -149,18 +157,22 @@ mod tests {
             vec![Scalar::from(1_u64), Scalar::from(2_u64)],
             vec![Scalar::from(3_u64), Scalar::from(4_u64)],
         ];
-        let minor = matrix_minor::<Secp256k1>(matrix.as_slice(), 0, 0);
+        let minor = matrix_minor::<Secp256k1>(&matrix, 0, 0);
         assert_eq!(minor, vec![vec![Scalar::from(4_u64)]]);
     }
+
     #[test]
     fn test_determinant() {
-        let mut matrix = vec![
+        let matrix = vec![
             vec![Scalar::from(1_u64), Scalar::from(2_u64)],
             vec![Scalar::from(3_u64), Scalar::from(4_u64)],
         ];
-        let minor = mod_bareiss_determinant::<Secp256k1>(&mut matrix, 2).unwrap();
+        let minor =
+            mod_bareiss_determinant::<Secp256k1>(matrix, 2)
+                .unwrap();
         assert_eq!(minor, Scalar::ZERO.sub(&Scalar::from(2_u64)));
     }
+
     #[test]
     fn test_transpose() {
         let matrix = vec![
@@ -177,6 +189,7 @@ mod tests {
             ]
         );
     }
+
     #[test]
     fn test_inverse() {
         let matrix = vec![
@@ -196,41 +209,40 @@ mod tests {
                 Scalar::from(10_u64),
             ],
         ];
+
+        fn reduce<C: CurveArithmetic>(uint: C::Uint) -> C::Scalar {
+            <C::Scalar as Reduce<C::Uint>>::reduce(uint)
+        }
+
         let inverse = matrix_inverse::<Secp256k1>(matrix, 3);
 
         // Known correct value
-        let expected = vec![
+        let expected: Vec<Vec<Scalar>> = vec![
             vec![
-                U256::from_be_hex(
+                reduce::<Secp256k1>(U256::from_be_hex(
                     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA9D1C9E899CA306AD27FE1945DE0242B80",
-                )
-                .to_scalar::<Secp256k1>(),
-                U256::from_be_hex(
+                )),
+                reduce::<Secp256k1>(U256::from_be_hex(
                     "55555555555555555555555555555554E8E4F44CE51835693FF0CA2EF01215BF",
-                )
-                .to_scalar::<Secp256k1>(),
+                )),
                 Scalar::ONE,
             ],
             vec![
-                U256::from_be_hex(
+                reduce::<Secp256k1>(U256::from_be_hex(
                     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA9D1C9E899CA306AD27FE1945DE0242B80",
-                )
-                .to_scalar::<Secp256k1>(),
-                U256::from_be_hex(
+                )),
+                reduce::<Secp256k1>(U256::from_be_hex(
                     "55555555555555555555555555555554E8E4F44CE51835693FF0CA2EF01215C4",
-                )
-                .to_scalar::<Secp256k1>(),
-                U256::from_be_hex(
+                )),
+                reduce::<Secp256k1>(U256::from_be_hex(
                     "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD036413F",
-                )
-                .to_scalar::<Secp256k1>(),
+                ))
             ],
             vec![
                 Scalar::ONE,
-                U256::from_be_hex(
+                reduce::<Secp256k1>(U256::from_be_hex(
                     "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD036413F",
-                )
-                .to_scalar::<Secp256k1>(),
+                )),
                 Scalar::ONE,
             ],
         ];
