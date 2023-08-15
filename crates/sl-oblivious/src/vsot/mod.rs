@@ -48,8 +48,8 @@ mod test {
     fn test_vsot() {
         let mut rng = rand::thread_rng();
         let session_id = SessionId::random(&mut rng);
-        let sender = VSOTSender::new(session_id, &mut rng);
-        let (sender, msg1) = sender.process();
+
+        let (sender, msg1) = VSOTSender::new(session_id, &mut rng);
 
         let rec = VSOTReceiver::new(session_id, &mut rng);
         let (rec, msg2) = rec.process(msg1).unwrap();

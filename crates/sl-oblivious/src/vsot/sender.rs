@@ -21,10 +21,6 @@ pub struct VSOTSender<T> {
     state: T,
 }
 
-/// Initial state of the sender.
-pub struct InitSender {
-    dlog_proof: DLogProof,
-}
 /// State of the sender after generating Message 1.
 pub struct SendR1;
 
@@ -34,13 +30,13 @@ pub struct SendR2 {
     pad_enc_keys: [OneTimePadEncryptionKeys; BATCH_SIZE],
 }
 
-impl VSOTSender<InitSender> {
+impl VSOTSender<SendR1> {
     /// Create a new instance of the VSOT sender.
     // TODO: u64 for batch size?
     pub fn new<R: CryptoRng + RngCore>(
         session_id: SessionId,
         rng: &mut R,
-    ) -> Self {
+    ) -> (Self, VSOTMsg1) {
         let secret_key = Scalar::generate_biased(rng);
         let mut transcript = Transcript::new(b"SL-VSOT");
         transcript.append_message(b"session_id", session_id.as_ref());
@@ -54,28 +50,18 @@ impl VSOTSender<InitSender> {
 
         let public_key = ProjectivePoint::GENERATOR * secret_key;
 
-        VSOTSender {
-            session_id,
-            secret_key,
-            public_key,
-            state: InitSender { dlog_proof },
-        }
-    }
-
-    /// Generate the 1st message of the protocol.
-    /// Accepts unit type as input.
-    pub fn process(self) -> (VSOTSender<SendR1>, VSOTMsg1) {
         let msg = VSOTMsg1 {
-            proof: self.state.dlog_proof,
-            public_key: self.public_key,
+            proof: dlog_proof,
+            public_key,
         };
 
         let next_state = VSOTSender {
-            session_id: self.session_id,
-            secret_key: self.secret_key,
-            public_key: self.public_key,
-            state: SendR1 {},
+            session_id,
+            secret_key,
+            public_key,
+            state: SendR1,
         };
+
         (next_state, msg)
     }
 }
