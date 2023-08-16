@@ -2,10 +2,6 @@ use std::ops::Deref;
 
 use elliptic_curve::subtle::{Choice, ConditionallySelectable};
 use rand::prelude::*;
-use serde::{Deserialize, Serialize};
-use traits::PersistentObject;
-
-use cooridinator::Coordinator;
 
 pub mod math;
 pub mod matrix;
@@ -17,6 +13,9 @@ pub mod state;
 
 /// Reexport bincode
 pub use bincode;
+
+use cooridinator::Coordinator;
+use traits::PersistentObject;
 
 #[cfg(feature = "nacl")]
 pub mod nacl {
@@ -125,43 +124,10 @@ pub use elliptic_curve::bigint::{
 pub use rand_core::{CryptoRng, RngCore};
 
 /// Session ID
-#[derive(
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    bincode::Encode,
-    bincode::Decode,
-)]
-pub struct SessionId(pub [u8; 32]);
+pub type SessionId = ByteArray<32>;
 
-// impl Distribution<T> for
-impl AsRef<[u8]> for SessionId {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
+pub type HashBytes = ByteArray<32>;
 
-impl From<[u8; 32]> for SessionId {
-    fn from(b: [u8; 32]) -> Self {
-        SessionId(b)
-    }
-}
-
-impl SessionId {
-    /// Create a new session id from a byte array.
-    pub fn new(b: [u8; 32]) -> Self {
-        SessionId(b)
-    }
-
-    /// Function to generate a random session id which is a 32 byte array.
-    pub fn random<R: CryptoRng + Rng>(rng: &mut R) -> SessionId {
-        SessionId(rng.gen())
-    }
-}
 // /// Calculates the final session id from the list of session ids.
 // pub fn calculate_final_session_id(
 //     party_ids: impl IntoIterator<Item = usize>,
@@ -196,41 +162,13 @@ pub fn random_bytes<const N: usize, R: CryptoRng + RngCore>(
 }
 
 // Wrapper around a byte array of 32 bytes.
-#[derive(
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    bincode::Encode,
-    bincode::Decode,
-)]
-pub struct HashBytes(pub [u8; 32]);
 
-impl ConditionallySelectable for HashBytes {
-    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
-        let mut res = [0u8; 32];
-        res.iter_mut().enumerate().for_each(|(idx, x)| {
-            *x = u8::conditional_select(&a.0[idx], &b.0[idx], choice)
-        });
-
-        Self(res)
-    }
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct ByteArray<const T: usize>(pub [u8; T]);
 
 impl<const T: usize> ConditionallySelectable for ByteArray<T> {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
-        let mut res = [0u8; T];
-        res.iter_mut().enumerate().for_each(|(idx, x)| {
-            *x = u8::conditional_select(&a.0[idx], &b.0[idx], choice)
-        });
-
-        Self(res)
+        Self(<[u8; T]>::conditional_select(&a.0, &b.0, choice))
     }
 }
 
@@ -239,6 +177,7 @@ impl<const T: usize> AsRef<[u8]> for ByteArray<T> {
         &self.0
     }
 }
+
 impl<const T: usize> Deref for ByteArray<T> {
     type Target = [u8];
 
@@ -251,25 +190,24 @@ impl<const T: usize> ByteArray<T> {
     pub fn new(b: [u8; T]) -> Self {
         Self(b)
     }
-}
 
-impl AsRef<[u8]> for HashBytes {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
+    /// Function to generate a random session id which is a 32 byte array.
+    pub fn random<R: CryptoRng + Rng>(rng: &mut R) -> Self {
+        let mut bytes = [0; T];
+        rng.fill_bytes(&mut bytes);
+        ByteArray(bytes)
     }
 }
 
-impl Deref for HashBytes {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl<const N: usize> From<[u8; N]> for ByteArray<N> {
+    fn from(b: [u8; N]) -> Self {
+        ByteArray(b)
     }
 }
 
-impl From<[u8; 32]> for HashBytes {
-    fn from(b: [u8; 32]) -> Self {
-        Self(b)
+impl<const N: usize> From<&[u8; N]> for ByteArray<N> {
+    fn from(b: &[u8; N]) -> Self {
+        ByteArray(*b)
     }
 }
 

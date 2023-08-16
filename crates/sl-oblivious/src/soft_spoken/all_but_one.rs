@@ -292,10 +292,10 @@ mod test {
             let choice = random_choices.extract_bit(i);
 
             let msg = HashBytes::conditional_select(
-                &HashBytes(
+                &HashBytes::new(
                     sender_ot_seed.one_time_pad_enc_keys[i].rho_0,
                 ),
-                &HashBytes(
+                &HashBytes::new(
                     sender_ot_seed.one_time_pad_enc_keys[i].rho_1,
                 ),
                 Choice::from(choice as u8),

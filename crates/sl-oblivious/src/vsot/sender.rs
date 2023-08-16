@@ -16,6 +16,7 @@ use crate::{
 pub struct VSOTSender<T> {
     session_id: SessionId,
     secret_key: Scalar,
+
     /// Public key of the sender.
     public_key: ProjectivePoint,
     state: T,
@@ -32,7 +33,6 @@ pub struct SendR2 {
 
 impl VSOTSender<SendR1> {
     /// Create a new instance of the VSOT sender.
-    // TODO: u64 for batch size?
     pub fn new<R: CryptoRng + RngCore>(
         session_id: SessionId,
         rng: &mut R,
@@ -52,7 +52,7 @@ impl VSOTSender<SendR1> {
 
         let msg = VSOTMsg1 {
             proof: dlog_proof,
-            public_key,
+            public_key: public_key.into(),
         };
 
         let next_state = VSOTSender {
@@ -75,22 +75,21 @@ impl VSOTSender<SendR1> {
         let mut hasher = blake3::Hasher::new();
 
         hasher.update(b"SL-Seed-VSOT");
-        hasher.update(self.session_id.as_ref());
+        hasher.update(&self.session_id);
         hasher.update(b"Random-Oracle-Salt");
         let session_id: SessionId =
             hasher.finalize().as_bytes().to_owned().into();
 
         let mut challenges = [[0; 32]; BATCH_SIZE];
-        let mut pad_enc_keys: [OneTimePadEncryptionKeys; BATCH_SIZE] =
-            [OneTimePadEncryptionKeys {
-                rho_0: [0; 32],
-                rho_1: [0; 32],
-            }; BATCH_SIZE];
+        let mut pad_enc_keys = [OneTimePadEncryptionKeys {
+            rho_0: [0; 32],
+            rho_1: [0; 32],
+        }; BATCH_SIZE];
 
         msg2.encoded_choice_bits.iter().enumerate().for_each(
             |(idx, encoded_choice)| {
-                let rho_0_prehash = encoded_choice * &self.secret_key;
-                let rho_1_prehash = (encoded_choice - &self.public_key)
+                let rho_0_prehash = encoded_choice.0 * &self.secret_key;
+                let rho_1_prehash = (encoded_choice.0 - &self.public_key)
                     * &self.secret_key;
                 let mut hasher = blake3::Hasher::new();
 
@@ -194,6 +193,7 @@ impl VSOTSender<SendR2> {
 
 /// Challenge opening for a single choice.
 #[derive(Default, Copy, Clone)]
+#[derive(bincode::Encode, bincode::Decode)]
 pub struct ChallengeOpening {
     /// H(rho_0)
     pub rho_0_hash: [u8; 32],
@@ -203,6 +203,7 @@ pub struct ChallengeOpening {
 
 /// The one time pad encryption keys for a single choice.
 #[derive(Default, Clone, Copy)]
+#[derive(bincode::Encode, bincode::Decode)]
 pub struct OneTimePadEncryptionKeys {
     pub rho_0: [u8; 32],
     pub rho_1: [u8; 32],
@@ -210,6 +211,7 @@ pub struct OneTimePadEncryptionKeys {
 
 /// The output of the VSOT receiver.
 #[derive(Clone, Copy)]
+#[derive(bincode::Encode, bincode::Decode)]
 pub struct SenderOutput {
     pub one_time_pad_enc_keys: [OneTimePadEncryptionKeys; BATCH_SIZE],
 }

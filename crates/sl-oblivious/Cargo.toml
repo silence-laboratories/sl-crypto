@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bincode = { version = "2.0.0-rc.3", features = ["serde"] }
 thiserror = "1"
 sl-mpc-mate = {path ="../sl-mpc-mate", features =["nacl"]}
 blake3 = { version = "1.4", features = ["pure"] }
@@ -17,8 +18,8 @@ k256 = {version = "0.13", features = ["serde", "ecdsa"]}
 rand = "0.8"
 sha3 = "0.10.8"
 serde_arrays = "0.1.0"
+
+[dev-dependencies]
 colored = "2.0.0"
 hex = "0.4.3"
 serde_json = "1.0.97"
-
-[dev-dependencies]

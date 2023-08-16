@@ -4,39 +4,39 @@
 //! To create a new message use [Builder].
 use std::borrow::Borrow;
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut, Mul, Add};
 use std::time::Duration;
 
 use aead::{
     consts::U10,
     generic_array::{typenum::Unsigned, ArrayLength, GenericArray},
-    AeadCore,
-    AeadInPlace,
-    KeyInit,
-    Nonce,
-    Tag,
+    AeadCore, AeadInPlace, KeyInit, Nonce, Tag,
 };
+
 use bincode::{
     de::{
         read::{BorrowReader, Reader, SliceReader},
-        Decoder,
+        BorrowDecode, BorrowDecoder, Decoder,
     },
     enc::{
         write::{SliceWriter, Writer},
         Encoder,
     },
     error::{DecodeError, EncodeError},
-    Encode,
+    Decode, Encode,
 };
 
 use chacha20::hchacha;
 use chacha20poly1305::ChaCha20Poly1305;
 use digest::Digest;
 use ed25519_dalek::{Signature, Signer, Verifier};
-use elliptic_curve::group::GroupEncoding;
+use elliptic_curve::{group::GroupEncoding, PrimeField};
 use sha2::Sha256;
 
 pub use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
 pub use x25519_dalek::{PublicKey, ReusableSecret};
+
+use crate::ByteArray;
 
 type AEAD = ChaCha20Poly1305;
 
@@ -120,7 +120,7 @@ impl MsgId {
                 .chain_update(
                     receiver_pk.unwrap_or(&[0; PUBLIC_KEY_LENGTH]),
                 )
-                .chain_update(&instance.0)
+                .chain_update(instance.0)
                 .finalize()
                 .into(),
         )
@@ -217,13 +217,34 @@ pub trait UnderConstruction {
     }
 }
 
+pub trait IntoPayloadSize {
+    fn payload_size(&self) -> usize;
+}
+
+impl IntoPayloadSize for usize {
+    fn payload_size(&self) -> usize {
+        *self
+    }
+}
+
+impl<D: Encode> IntoPayloadSize for &D {
+    fn payload_size(&self) -> usize {
+        Message::payload_size(self)
+    }
+}
+
 impl Builder<Signed> {
     pub fn allocate(
         id: &MsgId,
         ttl: u32,
-        payload: usize,
+        payload: impl IntoPayloadSize,
     ) -> Builder<Signed> {
-        Self::allocate_inner(id, ttl, payload, Signature::BYTE_SIZE)
+        Self::allocate_inner(
+            id,
+            ttl,
+            payload.payload_size(),
+            Signature::BYTE_SIZE,
+        )
     }
 
     /// Sign the message with passed signing_key return underlying buffer.
@@ -258,9 +279,14 @@ impl Builder<Encrypted> {
     pub fn allocate(
         id: &MsgId,
         ttl: u32,
-        payload: usize,
+        payload: impl IntoPayloadSize,
     ) -> Builder<Encrypted> {
-        Self::allocate_inner(id, ttl, payload, TAG_SIZE + NONCE_SIZE)
+        Self::allocate_inner(
+            id,
+            ttl,
+            payload.payload_size(),
+            TAG_SIZE + NONCE_SIZE,
+        )
     }
 
     pub fn encrypt(
@@ -336,6 +362,9 @@ pub struct Message<'a> {
 }
 
 impl<'a> Message<'a> {
+    pub const HDR_SIZE: usize = MESSAGE_HEADER_SIZE;
+    pub const SIGN_SIZE: usize = Signature::BYTE_SIZE;
+
     pub fn from_buffer(
         buffer: &'a mut [u8],
     ) -> Result<Self, InvalidMessage> {
@@ -357,9 +386,8 @@ impl<'a> Message<'a> {
         &self,
         verify_key: &VerifyingKey,
     ) -> Result<SliceReader, InvalidMessage> {
-        let (msg, sign) = self
-            .buffer
-            .split_at(self.buffer.len() - Signature::BYTE_SIZE);
+        let (msg, sign) =
+            self.buffer.split_at(self.buffer.len() - Self::SIGN_SIZE);
         let sign = Signature::from_slice(sign)
             .map_err(|_| InvalidMessage::InvalidSignature)?;
 
@@ -367,7 +395,7 @@ impl<'a> Message<'a> {
             .verify(msg, &sign)
             .map_err(|_| InvalidMessage::InvalidSignature)?;
 
-        Ok(SliceReader::new(&self.buffer[MESSAGE_HEADER_SIZE..]))
+        Ok(SliceReader::new(&self.buffer[Self::HDR_SIZE..]))
     }
 
     pub fn decrypt(
@@ -398,10 +426,23 @@ impl<'a> Message<'a> {
         let cipher = AEAD::new(&key);
 
         cipher
-            .decrypt_in_place_detached(&nonce, data, ciphertext, &tag)
+            .decrypt_in_place_detached(nonce, data, ciphertext, tag)
             .map_err(|_| InvalidMessage::InvalidTag)?;
 
         Ok(SliceReader::new(ciphertext))
+    }
+
+    pub fn payload_size<D: Encode>(value: &D) -> usize {
+        let mut encoder = bincode::enc::EncoderImpl::new(
+            bincode::enc::write::SizeWriter::default(),
+            bincode::config::standard(),
+        );
+
+        value
+            .encode(&mut encoder)
+            .expect("cant measure size of message");
+
+        encoder.into_writer().bytes_written
     }
 }
 
@@ -419,18 +460,205 @@ impl MessageReader {
         );
         D::borrow_decode(&mut decoder)
     }
+
+    pub fn decode<D, R>(src: R) -> Result<D, DecodeError>
+    where
+        R: Reader,
+        D: bincode::de::Decode,
+    {
+        let mut decoder = bincode::de::DecoderImpl::new(
+            src,
+            bincode::config::standard(),
+        );
+        D::decode(&mut decoder)
+    }
 }
 
-pub struct EncodeWrapper<T>(pub T);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Opaque<T, K = ()>(pub T, pub PhantomData<K>);
 
-pub trait Encodable {
+impl<K, R, T: Mul<R>> Mul<R> for Opaque<T, K> {
+    type Output = T::Output;
+
+    fn mul(self, rhs: R) -> T::Output {
+        self.0.mul(rhs)
+    }
+}
+
+impl<K, R, T: Add<R>> Add<R> for Opaque<T, K> {
+    type Output = T::Output;
+
+    fn add(self, rhs: R) -> T::Output {
+        self.0.add(rhs)
+    }
+}
+
+impl<T, K> Opaque<T, K> {
+    pub fn from_inner<F: From<T>>(self) -> F {
+        F::from(self.0)
+    }
+}
+
+impl<T, K> From<T> for Opaque<T, K> {
+    fn from(v: T) -> Self {
+        Self(v, PhantomData)
+    }
+}
+
+impl<T, K> Deref for Opaque<T, K> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T, K> DerefMut for Opaque<T, K> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<U: ArrayLength<u8>> Encode for Opaque<GenericArray<u8, U>> {
     fn encode<E: Encoder>(
         &self,
         encoder: &mut E,
-    ) -> Result<(), EncodeError>;
+    ) -> Result<(), EncodeError> {
+        encoder.writer().write(&self.0)
+    }
 }
 
-impl<T: GroupEncoding> Encodable for EncodeWrapper<T> {
+impl<U: ArrayLength<u8>> Decode for Opaque<GenericArray<u8, U>> {
+    fn decode<D: Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        let mut array = GenericArray::default();
+
+        decoder.claim_bytes_read(U::USIZE)?;
+        decoder.reader().read(array.as_mut())?;
+
+        Ok(Opaque(array, PhantomData))
+    }
+}
+
+impl<const N: usize> Encode for Opaque<[u8; N]> {
+    fn encode<E: Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), EncodeError> {
+        encoder.writer().write(&self.0)
+    }
+}
+
+impl<const N: usize> Decode for Opaque<[u8; N]> {
+    fn decode<D: Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        let mut array = [0; N];
+
+        decoder.claim_bytes_read(N)?;
+        decoder.reader().read(&mut array)?;
+
+        Ok(Opaque(array, PhantomData))
+    }
+}
+
+impl<const N: usize> Encode for Opaque<&[u8; N]> {
+    fn encode<E: Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), EncodeError> {
+        encoder.writer().write(self.0)
+    }
+}
+
+impl<'de, const N: usize> BorrowDecode<'de> for Opaque<&'de [u8; N]> {
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        let array = decoder.borrow_reader().take_bytes(N)?;
+
+        Ok(Opaque(
+            unsafe { &*(array.as_ptr() as *const [u8; N]) },
+            PhantomData,
+        ))
+    }
+}
+
+impl<const N: usize> Encode for Opaque<ByteArray<N>> {
+    fn encode<E: Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), EncodeError> {
+        encoder.writer().write(&self.0)
+    }
+}
+
+impl<const N: usize> Encode for Opaque<&ByteArray<N>> {
+    fn encode<E: Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), EncodeError> {
+        encoder.writer().write(&self.0)
+    }
+}
+
+impl<const N: usize> Decode for Opaque<ByteArray<N>> {
+    fn decode<D: Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        let mut array = [0; N];
+
+        decoder.claim_bytes_read(N)?;
+        decoder.reader().read(&mut array)?;
+
+        Ok(Opaque(ByteArray(array), PhantomData))
+    }
+}
+
+impl<'de, const N: usize> BorrowDecode<'de>
+    for Opaque<&'de ByteArray<N>>
+{
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        let array = decoder.borrow_reader().take_bytes(N)?;
+
+        Ok(Opaque(
+            unsafe { &*(array.as_ptr() as *const ByteArray<N>) },
+            PhantomData,
+        ))
+    }
+}
+
+impl<U: ArrayLength<u8>> Encode for Opaque<&GenericArray<u8, U>> {
+    fn encode<E: Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), EncodeError> {
+        encoder.writer().write(&self.0)
+    }
+}
+
+impl<'de, U: ArrayLength<u8>> BorrowDecode<'de>
+    for Opaque<&'de GenericArray<u8, U>>
+{
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        let array = decoder.borrow_reader().take_bytes(U::USIZE)?;
+
+        Ok(Opaque(array.into(), PhantomData))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GR;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PF;
+
+impl<T: GroupEncoding> Encode for Opaque<T, GR> {
     fn encode<E: Encoder>(
         &self,
         encoder: &mut E,
@@ -439,42 +667,86 @@ impl<T: GroupEncoding> Encodable for EncodeWrapper<T> {
     }
 }
 
-pub struct FixedArray<U: ArrayLength<u8>>(pub GenericArray<u8, U>);
-
-impl<U: ArrayLength<u8>> From<GenericArray<u8, U>> for FixedArray<U> {
-    fn from(data: GenericArray<u8, U>) -> Self {
-        Self(data)
-    }
-}
-
-impl<U: ArrayLength<u8>> FixedArray<U> {
-    pub fn encode<E: Encoder>(
+impl<T: PrimeField> Encode for Opaque<T, PF> {
+    fn encode<E: Encoder>(
         &self,
         encoder: &mut E,
     ) -> Result<(), EncodeError> {
-        encoder.writer().write(&self.0)
-    }
-
-    pub fn decode<D: Decoder>(
-        decoder: &mut D,
-    ) -> Result<GenericArray<u8, U>, DecodeError> {
-        let mut array = GenericArray::default();
-
-        decoder.claim_bytes_read(U::USIZE)?;
-        decoder.reader().read(array.as_mut())?;
-
-        Ok(array)
+        encoder.writer().write(self.0.to_repr().as_ref())
     }
 }
 
-// pub fn as_array<U: ArrayLength<u8>>(g: GenericArray<u8, U>) -> [u8; U::USIZE] {
-// }
+impl<T: GroupEncoding> Decode for Opaque<T, GR> {
+    fn decode<D: Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        let mut array = T::Repr::default();
 
-// impl<'de> MessageReader<'de> for SliceReader<'de> {}
+        decoder.reader().read(array.as_mut())?;
+
+        let value = T::from_bytes(&array);
+
+        if bool::from(value.is_some()) {
+            Ok(Opaque(value.unwrap(), PhantomData))
+        } else {
+            Err(DecodeError::Other("bad group element"))
+        }
+    }
+}
+
+impl<T: PrimeField> Decode for Opaque<T, PF> {
+    fn decode<D: Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        let mut array = T::Repr::default();
+
+        decoder.reader().read(array.as_mut())?;
+
+        let value = T::from_repr(array);
+
+        if bool::from(value.is_some()) {
+            Ok(Opaque(value.unwrap(), PhantomData))
+        } else {
+            Err(DecodeError::Other("bad group element"))
+        }
+    }
+}
+
+impl<'de, T: GroupEncoding> BorrowDecode<'de> for Opaque<T, GR> {
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        Self::decode(decoder)
+    }
+}
+
+impl<'de, T: PrimeField> BorrowDecode<'de> for Opaque<T, PF> {
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        Self::decode(decoder)
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use crate::SessionId;
+
     use super::*;
+
+    #[test]
+    fn opaque_into() {
+        let buf = [0u8; 32];
+
+        let o1: Opaque<&[u8; 32]> = Opaque::from(&buf);
+
+        let o2: Opaque<[u8; 32]> = Opaque::from([0u8; 32]);
+
+        let s1: SessionId = o1.from_inner();
+        let s2: SessionId = o2.from_inner();
+
+        assert_eq!(s1, s2);
+    }
 
     #[test]
     fn sign_message() {

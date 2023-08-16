@@ -116,8 +116,8 @@ impl CoordInner {
 
             let Expire(_, id, kind) = self.expire.pop().unwrap();
 
-            match self.messages.entry(id) {
-                Entry::Occupied(ocp) => match ocp.get() {
+            if let Entry::Occupied(ocp) = self.messages.entry(id) {
+                match ocp.get() {
                     MsgEntry::Ready(_) => {
                         if matches!(kind, Kind::Pub) {
                             ocp.remove();
@@ -129,10 +129,7 @@ impl CoordInner {
                             ocp.remove();
                         }
                     }
-                },
-
-                // FIXME: report error?
-                _ => {}
+                }
             }
         }
     }
@@ -267,9 +264,10 @@ mod tests {
 
         let config = bincode::config::standard();
 
-        let payload: [u8; 8] = bincode::decode_from_reader(&mut reader, config).unwrap();
+        let payload: [u8; 8] =
+            bincode::decode_from_reader(&mut reader, config).unwrap();
 
-//        let payload: [u8; 8] = msg.decode().unwrap();
+        //        let payload: [u8; 8] = msg.decode().unwrap();
 
         assert_eq!(payload, [1; 8]);
     }

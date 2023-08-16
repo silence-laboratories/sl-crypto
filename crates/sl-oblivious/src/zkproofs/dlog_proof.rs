@@ -1,33 +1,20 @@
-use elliptic_curve::{
-    group::GroupEncoding, subtle::ConstantTimeEq, Field, PrimeField,
-};
+use elliptic_curve::{subtle::ConstantTimeEq, Field};
 use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
-use serde::{Deserialize, Serialize};
-use sl_mpc_mate::{
-    bincode::{
-        de::Decoder,
-        enc::Encoder,
-        error::{DecodeError, EncodeError},
-        Decode, Encode,
-    },
-    message::*,
-    traits::PersistentObject,
-    CryptoRng, RngCore,
-};
+use sl_mpc_mate::{message::*, CryptoRng, RngCore};
 
-use crate::{
-    serialization::serde_projective_point, utils::TranscriptProtocol,
-};
+use crate::utils::TranscriptProtocol;
 
 /// Non-interactive Proof of knowledge of discrete logarithm with Fiat-Shamir transform.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, bincode::Encode, bincode::Decode,
+)]
 pub struct DLogProof {
     /// Public point `t`.
-    #[serde(with = "serde_projective_point")]
-    pub t: ProjectivePoint,
+    pub t: Opaque<ProjectivePoint, GR>,
+
     /// Challenge response
-    pub s: Scalar,
+    pub s: Opaque<Scalar, PF>,
 }
 
 impl DLogProof {
@@ -46,7 +33,10 @@ impl DLogProof {
 
         let s = r + c * x;
 
-        Self { t, s }
+        Self {
+            t: t.into(),
+            s: s.into(),
+        }
     }
 
     /// Verify knowledge of discrete logarithm.
@@ -57,7 +47,7 @@ impl DLogProof {
         transcript: &mut Transcript,
     ) -> bool {
         let c = Self::fiat_shamir(y, &self.t, base_point, transcript);
-        let lhs = base_point * self.s;
+        let lhs = base_point * &self.s.0;
         let rhs = self.t + y * &c;
 
         lhs.ct_eq(&rhs).into()
@@ -77,32 +67,29 @@ impl DLogProof {
     }
 }
 
-impl PersistentObject for DLogProof {}
+// impl PersistentObject for DLogProof {}
 
-impl Encode for DLogProof {
-    fn encode<E: Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), EncodeError> {
-        FixedArray(self.t.to_bytes()).encode(encoder)?;
-        FixedArray(self.s.to_bytes()).encode(encoder)?;
-        Ok(())
-    }
-}
+// impl Encode for DLogProof {
+//     fn encode<E: Encoder>(
+//         &self,
+//         encoder: &mut E,
+//     ) -> Result<(), EncodeError> {
+//         Opaque(self.t.to_bytes()).encode(encoder)?;
+//         Opaque(self.s.to_repr()).encode(encoder)?;
+//         Ok(())
+//     }
+// }
 
-impl Decode for DLogProof {
-    fn decode<D: Decoder>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
-        let t =
-            ProjectivePoint::from_bytes(&FixedArray::decode(decoder)?)
-                .unwrap();
-        let s =
-            Scalar::from_repr(FixedArray::decode(decoder)?).unwrap();
+// impl Decode for DLogProof {
+//     fn decode<D: Decoder>(
+//         decoder: &mut D,
+//     ) -> Result<Self, DecodeError> {
+//         let t = decode_group_element(decoder, "t")?;
+//         let s = decode_primefield_element(decoder, "s")?;
 
-        Ok(DLogProof { t, s })
-    }
-}
+//         Ok(DLogProof { t, s })
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

@@ -133,7 +133,7 @@ impl SoftSpokenOTRec<RecR0> {
             for (j, r_x_j) in r_x.iter_mut().enumerate() {
                 let mut shake = Shake256::default();
 
-                shake.update(&self.session_id.0);
+                shake.update(&self.session_id);
                 shake.update(SOFT_SPOKEN_LABEL);
                 shake.update(
                     &self.seed_ot_results.one_time_pad_enc_keys[i][j],
@@ -508,7 +508,7 @@ impl SoftSpokenOTSender {
                 .for_each(|(i, b)| zeta[j][i] ^= b);
 
             let mut shake = Shake256::default();
-            shake.update(&self.session_id.0);
+            shake.update(&self.session_id);
             shake.update(SOFT_SPOKEN_LABEL);
             shake.update(&(j as u16).to_be_bytes());
             shake.update(&zeta[j]);
@@ -533,6 +533,7 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
 ) -> (SenderOTSeed, ReceiverOTSeed) {
     let mut one_time_pad_enc_keys = Vec::new();
     let mut one_time_pad_dec_keys = Vec::new();
+
     for _ in 0..(KAPPA_DIV_SOFT_SPOKEN_K) {
         let ot_sender_messages = (0..SOFT_SPOKEN_Q)
             .map(|_| random_bytes(rng))
