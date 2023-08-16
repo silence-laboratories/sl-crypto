@@ -78,7 +78,7 @@ impl From<[u8; 32]> for InstanceId {
 pub struct MessageTag(pub(crate) u64);
 
 impl MessageTag {
-    pub fn tag(tag: u64) -> Self {
+    pub const fn tag(tag: u64) -> Self {
         Self(tag)
     }
 
@@ -560,6 +560,16 @@ impl<const N: usize> Decode for Opaque<[u8; N]> {
         decoder.reader().read(&mut array)?;
 
         Ok(Opaque(array, PhantomData))
+    }
+}
+
+impl<'de, const N: usize> BorrowDecode<'de>
+    for Opaque<[u8; N]>
+{
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        Self::decode(decoder)
     }
 }
 
