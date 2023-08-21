@@ -20,7 +20,7 @@ pub struct VSOTMsg1 {
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
 pub struct VSOTMsg2 {
     /// Encoded choice bits
-    pub encoded_choice_bits: [Opaque<ProjectivePoint, GR>; BATCH_SIZE],
+    pub encoded_choice_bits: Vec<Opaque<ProjectivePoint, GR>>,
 }
 
 /// VSOT Message 3

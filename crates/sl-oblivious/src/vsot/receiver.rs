@@ -94,7 +94,7 @@ impl VSOTReceiver<InitRec> {
         let session_id = SessionId::new(hasher.finalize().into());
 
         let mut encoded_choice_bits =
-            [Opaque::from(ProjectivePoint::IDENTITY); BATCH_SIZE];
+            vec![Opaque::from(ProjectivePoint::IDENTITY); BATCH_SIZE];
 
         let mut rho_w_vec = [[0u8; 32]; BATCH_SIZE];
 
