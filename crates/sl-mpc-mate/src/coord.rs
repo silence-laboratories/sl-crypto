@@ -1,13 +1,13 @@
 use std::cmp::Ordering;
 use std::collections::{hash_map::Entry, BinaryHeap, HashMap};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use tokio::sync::mpsc;
+use tokio::{sync::oneshot, time::timeout};
 
 use crate::message::*;
-use crate::state::*;
 
+#[derive(Debug)]
 struct Expire(Instant, MsgId, Kind);
 
 impl PartialEq for Expire {
@@ -30,62 +30,76 @@ impl Ord for Expire {
     }
 }
 
+#[derive(Debug)]
 enum MsgEntry {
-    Waiters((Instant, Vec<mpsc::Sender<Vec<u8>>>)),
+    Waiters((Instant, Vec<oneshot::Sender<Vec<u8>>>)),
     Ready(Vec<u8>),
 }
 
 #[derive(Clone)]
-pub struct Sender {
-    tx: mpsc::Sender<Vec<u8>>,
+pub struct MessageRelay {
     inner: Arc<Mutex<CoordInner>>,
 }
+unsafe impl Send for MessageRelay {}
 
-impl Sender {
-    pub fn send(&mut self, msg: Vec<u8>) {
+impl MessageRelay {
+    /// Send or publish a message. Other parties could receive
+    /// the message by MsgId.
+    pub fn send(&self, msg: Vec<u8>) {
         if let Some(hdr) = MsgHdr::from(&msg) {
-            self.inner
-                .lock()
-                .unwrap()
-                .handle_message(hdr, msg, &self.tx);
+            println!("send {:?} {}", hdr.id, msg.len());
+            self.inner.lock().unwrap().send(hdr, msg, None);
         }
     }
-}
 
-pub struct Receiver {
-    rx: mpsc::Receiver<Vec<u8>>,
-}
+    /// Ask the message relay for a message with given ID and
+    /// wait for it up to given timeout.
+    pub async fn recv(self, id: MsgId, ttl: u32) -> Option<Vec<u8>> {
+        let msg = AskMsg::allocate(&id, ttl);
+        let hdr = MsgHdr::from(&msg).unwrap();
 
-impl Receiver {
-    pub async fn recv(&mut self) -> Option<Vec<u8>> {
-        self.rx.recv().await
+        println!("want {:?}", id);
+
+        let (tx, rx) = oneshot::channel();
+
+        self.inner.lock().unwrap().send(hdr, msg, Some(tx));
+
+        timeout(Duration::new(ttl as u64, 0), async { rx.await.ok() })
+            .await
+            .ok()?
     }
 }
 
-pub struct Coord {
+#[derive(Debug)]
+pub struct SimpleMessageRelay {
     inner: Arc<Mutex<CoordInner>>,
 }
 
-impl Coord {
+impl SimpleMessageRelay {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(CoordInner::new())),
         }
     }
 
-    pub fn connect(&self) -> (Sender, Receiver) {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>(16);
-
-        let send = Sender {
-            tx,
+    pub fn connect(&self) -> MessageRelay {
+        MessageRelay {
             inner: self.inner.clone(),
-        };
-        let recv = Receiver { rx };
+        }
+    }
 
-        (send, recv)
+    pub fn messages(&self) -> Vec<MsgId> {
+        self.inner
+            .lock()
+            .unwrap()
+            .messages
+            .keys()
+            .cloned()
+            .collect()
     }
 }
 
+#[derive(Debug)]
 struct CoordInner {
     expire: BinaryHeap<Expire>,
     messages: HashMap<MsgId, MsgEntry>,
@@ -99,18 +113,13 @@ impl CoordInner {
         }
     }
 
-    fn cleanup_later(
-        &mut self,
-        id: MsgId,
-        expire: Instant,
-        kind: Kind,
-    ) {
+    fn cleanup_later(&mut self, id: MsgId, expire: Instant, kind: Kind) {
         self.expire.push(Expire(expire, id, kind));
     }
 
     fn cleanup(&mut self, now: Instant) {
         while let Some(ent) = self.expire.peek() {
-            if ent.0 < now {
+            if ent.0 > now {
                 break;
             }
 
@@ -119,13 +128,13 @@ impl CoordInner {
             if let Entry::Occupied(ocp) = self.messages.entry(id) {
                 match ocp.get() {
                     MsgEntry::Ready(_) => {
-                        if matches!(kind, Kind::Pub) {
+                        if kind == Kind::Pub {
                             ocp.remove();
                         }
                     }
 
                     MsgEntry::Waiters((expire, _)) => {
-                        if matches!(kind, Kind::Ask) && *expire <= now {
+                        if kind == Kind::Ask && *expire <= now {
                             ocp.remove();
                         }
                     }
@@ -134,13 +143,15 @@ impl CoordInner {
         }
     }
 
-    pub fn handle_message(
+    fn send(
         &mut self,
         hdr: MsgHdr,
         msg: Vec<u8>,
-        tx: &mpsc::Sender<Vec<u8>>,
+        mut tx: Option<oneshot::Sender<Vec<u8>>>,
     ) {
         let MsgHdr { id, ttl, kind } = hdr;
+
+        debug_assert!(kind == Kind::Pub || tx.is_some());
 
         let now = Instant::now();
         let expire = now + ttl;
@@ -155,31 +166,22 @@ impl CoordInner {
                         if matches!(kind, Kind::Ask) {
                             // got an ASK for a Ready message
                             // send the message immediately
-                            let tx = tx.clone();
-                            let msg = msg.clone();
-                            tokio::spawn(async move {
-                                // ignore send error
-                                let _ = tx.send(msg).await;
-                            });
-                        } else {
-                            // ignore the duplicate message
+                            let _ = tx.take().unwrap().send(msg.clone());
                         }
                     }
 
                     MsgEntry::Waiters((prev, b)) => {
-                        if matches!(kind, Kind::Ask) {
+                        if kind == Kind::Ask {
                             // join other waiters
                             if *prev < expire {
                                 *prev = expire;
                             }
-                            b.push(tx.clone());
+                            b.push(tx.take().unwrap());
                         } else {
                             // wake up all waiters
-                            for s in b.drain(..) {
+                            for tx in b.drain(..) {
                                 let msg = msg.clone();
-                                tokio::spawn(async move {
-                                    let _ = s.send(msg).await;
-                                });
+                                let _ = tx.send(msg.clone());
                             }
                             // and replace with a Read message
                             ocp.insert(MsgEntry::Ready(msg));
@@ -196,7 +198,7 @@ impl CoordInner {
                     // This is the first ASK for the message
                     vac.insert(MsgEntry::Waiters((
                         expire,
-                        vec![tx.clone()],
+                        vec![tx.take().unwrap()],
                     )));
                 } else {
                     vac.insert(MsgEntry::Ready(msg));
@@ -208,40 +210,29 @@ impl CoordInner {
     }
 }
 
-impl OutputQueue for Sender {
-    fn wait(&mut self, msg_id: &MsgId, ttl: u32) {
-        self.send(AskMsg::allocate(msg_id, ttl));
-    }
-
-    fn publish(&mut self, msg: Vec<u8>) {
-        self.send(msg);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn make_msg(id: &MsgId, sk: &SigningKey) -> Vec<u8> {
-        let mut msg = Builder::<Signed>::allocate(&id, 254, 8);
+    #[test]
+    fn expire() {
+        let now = Instant::now();
 
-        let mut writer = msg.writer();
-
-        let config = bincode::config::standard();
-
-        bincode::encode_into_writer(&[1u8; 8], &mut writer, config)
-            .unwrap();
-
-        msg.sign(&sk).unwrap()
+        let e1 = Expire(now, MsgId::ZERO_ID, Kind::Pub);
+        let e2 = Expire(now, MsgId::ZERO_ID, Kind::Pub);
+        let e3 =
+            Expire(now + Duration::new(10, 0), MsgId::ZERO_ID, Kind::Pub);
+        assert!(e1 >= e2);
+        assert!(e1 > e3);
     }
 
     #[tokio::test]
     async fn coord() {
         let sk = SigningKey::from_bytes(&rand::random());
 
-        let coord = Coord::new();
+        let coord = SimpleMessageRelay::new();
 
-        let (mut tx1, mut rx1) = coord.connect();
+        let c1 = coord.connect();
 
         let msg_id = MsgId::new(
             &InstanceId::from([0; 32]),
@@ -250,25 +241,21 @@ mod tests {
             MessageTag::tag(0),
         );
 
-        tx1.wait(&msg_id, 100);
+        c1.send(
+            Builder::<Signed>::encode(&msg_id, 10, &sk, &(0u32, 255u64))
+                .unwrap(),
+        );
 
-        let (mut tx2, _rx2) = coord.connect();
+        let c2 = coord.connect();
 
-        tx2.send(make_msg(&msg_id, &sk));
+        let mut msg = c2.recv(msg_id, 100).await.unwrap();
 
-        let mut mbody = rx1.recv().await.unwrap();
+        let payload: (u32, u64) = Message::verify_and_decode(
+            Message::from_buffer(&mut msg).unwrap(),
+            &sk.verifying_key(),
+        )
+        .unwrap();
 
-        let msg = Message::from_buffer(&mut mbody).unwrap();
-
-        let mut reader = msg.verify(&sk.verifying_key()).unwrap();
-
-        let config = bincode::config::standard();
-
-        let payload: [u8; 8] =
-            bincode::decode_from_reader(&mut reader, config).unwrap();
-
-        //        let payload: [u8; 8] = msg.decode().unwrap();
-
-        assert_eq!(payload, [1; 8]);
+        assert_eq!(payload, (0u32, 255u64));
     }
 }

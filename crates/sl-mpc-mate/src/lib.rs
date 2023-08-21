@@ -43,8 +43,7 @@ pub mod nacl {
         signing_key: &SignPrivKey,
         message: &[u8],
     ) -> Result<Signature, dryoc::Error> {
-        let mut signed_message: Signature =
-            [0u8; CRYPTO_SIGN_ED25519_BYTES];
+        let mut signed_message: Signature = [0u8; CRYPTO_SIGN_ED25519_BYTES];
         crypto_sign::crypto_sign_detached(
             &mut signed_message,
             message,
@@ -145,10 +144,7 @@ pub type HashBytes = ByteArray<32>;
 // }
 
 /// XOR two byte arrays.
-pub fn xor_byte_arrays<const T: usize>(
-    a: &[u8; T],
-    b: &[u8; T],
-) -> [u8; T] {
+pub fn xor_byte_arrays<const T: usize>(a: &[u8; T], b: &[u8; T]) -> [u8; T] {
     std::array::from_fn(|i| a[i] ^ b[i])
 }
 
@@ -223,28 +219,28 @@ pub fn recv_broadcast<M: PersistentObject>(
 /// Prepare batch of messages
 pub fn encode_batch<T: AsRef<[u8]>>(msgs: &[T]) -> Option<Vec<u8>> {
     let msgs: Vec<&[u8]> = msgs.iter().map(AsRef::as_ref).collect();
-    bincode::serde::encode_to_vec(&msgs, bincode::config::legacy()).ok()
+    bincode::serde::encode_to_vec(msgs, bincode::config::legacy()).ok()
 }
 
-#[macro_export]
-/// Macro to implement the HasFromParty and HasSignature traits for a message types.
-macro_rules! impl_basemessage {
-    ($($type:ty),*) => {
-        $(
-            impl $crate::traits::HasFromParty for $type {
-                fn get_pid(&self) -> usize {
-                    self.from_party
-                }
-            }
-
-            impl $crate::nacl::HasSignature for $type {
-                fn get_signature(&self) -> &Signature {
-                    &self.signature
-                }
-            }
-        )*
-    }
-}
+// #[macro_export]
+// /// Macro to implement the HasFromParty and HasSignature traits for a message types.
+// macro_rules! impl_basemessage {
+//     ($($type:ty),*) => {
+//         $(
+//             impl $crate::traits::HasFromParty for $type {
+//                 fn get_pid(&self) -> usize {
+//                     self.from_party
+//                 }
+//             }
+//
+//             impl $crate::nacl::HasSignature for $type {
+//                 fn get_signature(&self) -> &Signature {
+//                     &self.signature
+//                 }
+//             }
+//         )*
+//     }
+// }
 
 /// Coordinator module
 pub mod cooridinator {

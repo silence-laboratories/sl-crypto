@@ -6,31 +6,19 @@ pub trait PersistentObject:
 {
     ///  Serialize
     fn to_bytes(&self) -> Option<Vec<u8>> {
-        bincode::serde::encode_to_vec(self, bincode::config::legacy())
-            .ok()
+        bincode::serde::encode_to_vec(self, bincode::config::legacy()).ok()
     }
 
     /// Deserialize
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        bincode::serde::decode_from_slice(
-            bytes,
-            bincode::config::legacy(),
-        )
-        .map(|(val, _)| val)
-        .ok()
+        bincode::serde::decode_from_slice(bytes, bincode::config::legacy())
+            .map(|(val, _)| val)
+            .ok()
     }
 
     /// Deserialize batch of messages
     fn decode_batch(_bytes: &[u8]) -> Option<Vec<Self>> {
         todo!()
-        // let msgs: Vec<&[u8]> = bincode::serde::decode_from_slice(
-        //     bytes,
-        //     bincode::config::legacy(),
-        // )
-        // .map(|(val, _)| val)
-        // .ok()?;
-
-        // msgs.into_iter().map(Self::from_bytes).collect()
     }
 }
 

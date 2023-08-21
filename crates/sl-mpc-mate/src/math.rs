@@ -44,9 +44,7 @@ impl<C: CurveArithmetic> Polynomial<C> {
             self.coeffs
                 .iter()
                 .map(|coeff| {
-                    Opaque::from(
-                        C::ProjectivePoint::generator() * coeff,
-                    )
+                    Opaque::from(C::ProjectivePoint::generator() * coeff)
                 })
                 .collect(),
         )
@@ -78,7 +76,7 @@ impl<C: CurveArithmetic> Polynomial<C> {
 }
 
 /// A polynomial with coefficients of type `ProjectivePoint`.
-#[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, bincode::Encode, bincode::Decode)]
 #[bincode(bounds = "C::ProjectivePoint: GroupEncoding")]
 pub struct GroupPolynomial<C: CurveArithmetic>
 where
@@ -131,6 +129,17 @@ where
             })
             .collect()
     }
+
+    pub fn points(
+        &self,
+    ) -> impl Iterator<Item = &'_ <C as CurveArithmetic>::ProjectivePoint>
+    {
+        self.coeffs.iter().map(|p| &p.0)
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&C::ProjectivePoint> {
+        self.coeffs.get(idx).map(|p| &p.0)
+    }
 }
 
 impl<C: CurveArithmetic> Deref for Polynomial<C> {
@@ -141,9 +150,13 @@ impl<C: CurveArithmetic> Deref for Polynomial<C> {
     }
 }
 
-// impl<C: CurveArithmetic> Deref for GroupPolynomial<C>
+// impl<C> Deref for GroupPolynomial<C>
+// where
+//     C: CurveArithmetic,
+//     C::ProjectivePoint: GroupEncoding,
 // {
 //     type Target = [C::ProjectivePoint];
+
 //     fn deref(&self) -> &Self::Target {
 //         &self.coeffs
 //     }

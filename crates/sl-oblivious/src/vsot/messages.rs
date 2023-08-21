@@ -17,28 +17,28 @@ pub struct VSOTMsg1 {
 }
 
 /// VSOT Message 2
-#[derive(bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
 pub struct VSOTMsg2 {
     /// Encoded choice bits
     pub encoded_choice_bits: [Opaque<ProjectivePoint, GR>; BATCH_SIZE],
 }
 
 /// VSOT Message 3
-#[derive(bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
 pub struct VSOTMsg3 {
     ///  Challenges
     pub challenges: [[u8; 32]; BATCH_SIZE],
 }
 
 /// VSOT Message 4
-#[derive(bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
 pub struct VSOTMsg4 {
     ///  Challenge responses from the receiver
     pub challenge_responses: [[u8; 32]; BATCH_SIZE],
 }
 
 /// VSOT Message 5
-#[derive(bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
 pub struct VSOTMsg5 {
     ///  Challenge responses from the receiver
     pub challenge_openings: [ChallengeOpening; BATCH_SIZE],

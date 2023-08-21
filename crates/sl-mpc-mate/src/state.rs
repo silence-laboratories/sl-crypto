@@ -1,7 +1,13 @@
+use std::fmt;
+
 use crate::message::{Message, MsgId};
 
 pub trait OutputQueue {
+    /// Inform the message relay subsystem that we are waiting
+    /// for a message with given ID for at most TTL seconds.
     fn wait(&mut self, msg_id: &MsgId, ttl: u32);
+
+    /// Publish message. Send it a message relay.
     fn publish(&mut self, msg: Vec<u8>);
 }
 
@@ -9,6 +15,7 @@ pub trait Env: OutputQueue {}
 
 impl<T: OutputQueue> Env for T {}
 
+#[derive(Debug)]
 pub struct WaitQueue<T> {
     queue: Vec<(MsgId, T)>,
 }
@@ -20,13 +27,13 @@ impl<T> WaitQueue<T> {
         }
     }
 
-    pub fn wait(&mut self, id: &MsgId, context: T) {
-        self.queue.push((*id, context));
+    /// Associate ID with the DATUM
+    pub fn wait(&mut self, id: &MsgId, datum: T) {
+        self.queue.push((*id, datum));
     }
 
-    pub fn find(&mut self, id: &MsgId) -> Option<T> {
-        let idx =
-            self.queue.iter().position(|(msg_id, _)| msg_id == id)?;
+    pub fn remove(&mut self, id: &MsgId) -> Option<T> {
+        let idx = self.queue.iter().position(|(msg_id, _)| msg_id == id)?;
 
         let (_, data) = self.queue.swap_remove(idx);
 
@@ -47,19 +54,19 @@ pub enum Output<S: State> {
     Next(S::Next),
 }
 
-pub type Result<S> =
+pub type StateResult<S> =
     core::result::Result<Output<S>, <S as State>::Error>;
 
 /// Represents a MPC round. This is a back block of MPC protocols.
 pub trait State: Sized {
     type Next;
-    type Error;
+    type Error: fmt::Debug;
 
     fn process(
         self,
         env: &mut dyn Env,
         msg: &mut Message,
-    ) -> Result<Self>;
+    ) -> Result<Output<Self>, Self::Error>;
 }
 
 /// Represents sequence of one or more states of MPC protocol.
@@ -71,10 +78,10 @@ pub trait Step: Sized {
     type Result;
 
     /// A possible error
-    type Error;
+    type Error: fmt::Debug;
 
     /// Create a Step from a given State.
-    fn from(state: Self::State) -> Self;
+    fn create(state: Self::State) -> Self;
 
     /// Execute a Step.
     fn step(
@@ -85,6 +92,7 @@ pub trait Step: Sized {
 }
 
 /// Result of execution of one step of a MPC protocol
+#[derive(Debug)]
 pub enum Status<T, E> {
     /// Pending for more messages
     Pending,
@@ -109,7 +117,7 @@ impl<T: State> Step for Final<T> {
     type Result = T::Next;
     type Error = T::Error;
 
-    fn from(state: T) -> Self {
+    fn create(state: T) -> Self {
         Self { state: Some(state) }
     }
 
@@ -148,7 +156,7 @@ where
     type Result = Steps::Result;
     type Error = Steps::Error;
 
-    fn from(state: T) -> Self {
+    fn create(state: T) -> Self {
         Self::P(Some(state))
     }
 
@@ -166,7 +174,7 @@ where
                 match state.process(env, msg) {
                     Err(err) => Status::Error(err),
                     Ok(Output::Next(next)) => {
-                        *self = Next::N(Steps::from(next));
+                        *self = Next::N(Steps::create(next));
                         Status::Pending
                     }
                     Ok(Output::Loop(new_state)) => {
@@ -192,6 +200,7 @@ mod tests {
         fn publish(&mut self, _msg: Vec<u8>) {}
     }
 
+    #[derive(Debug)]
     pub struct Err1;
 
     pub struct S1;
@@ -206,7 +215,7 @@ mod tests {
             self,
             _env: &mut dyn Env,
             _msg: &mut Message,
-        ) -> Result<Self> {
+        ) -> StateResult<Self> {
             Ok(Output::Loop(self))
         }
     }
@@ -219,7 +228,7 @@ mod tests {
             self,
             _env: &mut dyn Env,
             _msg: &mut Message,
-        ) -> Result<Self> {
+        ) -> StateResult<Self> {
             Ok(Output::Loop(self))
         }
     }
@@ -232,7 +241,7 @@ mod tests {
             self,
             _env: &mut dyn Env,
             _msg: &mut Message,
-        ) -> Result<Self> {
+        ) -> StateResult<Self> {
             Ok(Output::Loop(self))
         }
     }

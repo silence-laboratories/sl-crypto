@@ -22,12 +22,12 @@ impl DLogProof {
     // TODO: Do we need merlin?
     pub fn prove<R: CryptoRng + RngCore>(
         x: &Scalar,
-        base_point: ProjectivePoint,
+        base_point: &ProjectivePoint,
         transcript: &mut Transcript,
         rng: &mut R,
     ) -> Self {
         let r = Scalar::random(rng);
-        let t = base_point * r;
+        let t = base_point * &r;
         let y = base_point * x;
         let c = Self::fiat_shamir(&y, &t, base_point, transcript);
 
@@ -43,7 +43,7 @@ impl DLogProof {
     pub fn verify(
         &self,
         y: &ProjectivePoint,
-        base_point: ProjectivePoint,
+        base_point: &ProjectivePoint,
         transcript: &mut Transcript,
     ) -> bool {
         let c = Self::fiat_shamir(y, &self.t, base_point, transcript);
@@ -57,39 +57,15 @@ impl DLogProof {
     pub fn fiat_shamir(
         y: &ProjectivePoint,
         t: &ProjectivePoint,
-        base_point: ProjectivePoint,
+        base_point: &ProjectivePoint,
         transcript: &mut Transcript,
     ) -> Scalar {
         transcript.append_point(b"y", y);
         transcript.append_point(b"t", t);
-        transcript.append_point(b"base-point", &base_point);
+        transcript.append_point(b"base-point", base_point);
         transcript.challenge_scalar(b"DLogProof-challenge")
     }
 }
-
-// impl PersistentObject for DLogProof {}
-
-// impl Encode for DLogProof {
-//     fn encode<E: Encoder>(
-//         &self,
-//         encoder: &mut E,
-//     ) -> Result<(), EncodeError> {
-//         Opaque(self.t.to_bytes()).encode(encoder)?;
-//         Opaque(self.s.to_repr()).encode(encoder)?;
-//         Ok(())
-//     }
-// }
-
-// impl Decode for DLogProof {
-//     fn decode<D: Decoder>(
-//         decoder: &mut D,
-//     ) -> Result<Self, DecodeError> {
-//         let t = decode_group_element(decoder, "t")?;
-//         let s = decode_primefield_element(decoder, "s")?;
-
-//         Ok(DLogProof { t, s })
-//     }
-// }
 
 #[cfg(test)]
 mod tests {
@@ -113,11 +89,11 @@ mod tests {
         let y = base_point * x;
 
         let proof =
-            DLogProof::prove(&x, base_point, &mut transcript, &mut rng);
+            DLogProof::prove(&x, &base_point, &mut transcript, &mut rng);
 
         let mut verify_transcript = Transcript::new(b"test-dlog-proof");
 
-        assert!(proof.verify(&y, base_point, &mut verify_transcript));
+        assert!(proof.verify(&y, &base_point, &mut verify_transcript));
     }
 
     #[test]
@@ -132,14 +108,14 @@ mod tests {
 
         let proof = DLogProof::prove(
             &wrong_scalar,
-            base_point,
+            &base_point,
             &mut transcript,
             &mut rng,
         );
 
         let mut verify_transcript = Transcript::new(b"test-dlog-proof");
 
-        assert!(!proof.verify(&y, base_point, &mut verify_transcript));
+        assert!(!proof.verify(&y, &base_point, &mut verify_transcript));
     }
 
     #[test]
@@ -155,13 +131,13 @@ mod tests {
         let y = base_point * x;
 
         let proof =
-            DLogProof::prove(&x, base_point, &mut transcript, &mut rng);
+            DLogProof::prove(&x, &base_point, &mut transcript, &mut rng);
 
         let mut verify_transcript =
             Transcript::new(b"test-dlog-proof-wrong");
 
         assert!(
-            !proof.verify(&y, base_point, &mut verify_transcript),
+            !proof.verify(&y, &base_point, &mut verify_transcript),
             "Proof should fail with wrong transcript"
         );
     }

@@ -43,7 +43,7 @@ impl VSOTSender<SendR1> {
 
         let dlog_proof = DLogProof::prove(
             &secret_key,
-            ProjectivePoint::GENERATOR,
+            &ProjectivePoint::GENERATOR,
             &mut transcript,
             rng,
         );
@@ -88,25 +88,23 @@ impl VSOTSender<SendR1> {
 
         msg2.encoded_choice_bits.iter().enumerate().for_each(
             |(idx, encoded_choice)| {
-                let rho_0_prehash = encoded_choice.0 * &self.secret_key;
-                let rho_1_prehash = (encoded_choice.0 - &self.public_key)
-                    * &self.secret_key;
+                let rho_0_prehash = encoded_choice.0 * self.secret_key;
+                let rho_1_prehash =
+                    (encoded_choice.0 - self.public_key) * self.secret_key;
                 let mut hasher = blake3::Hasher::new();
 
                 hasher.update(b"SL-Seed-VSOT");
                 hasher.update(session_id.as_ref());
                 hasher.update((idx as u64).to_be_bytes().as_ref());
-                hasher.update(
-                    rho_0_prehash.to_encoded_point(true).as_bytes(),
-                );
+                hasher
+                    .update(rho_0_prehash.to_encoded_point(true).as_bytes());
                 let rho_0: [u8; 32] = hasher.finalize().into();
 
                 hasher.reset().update(b"SL-Seed-VSOT");
                 hasher.update(session_id.as_ref());
                 hasher.update((idx as u64).to_be_bytes().as_ref());
-                hasher.update(
-                    rho_1_prehash.to_encoded_point(true).as_bytes(),
-                );
+                hasher
+                    .update(rho_1_prehash.to_encoded_point(true).as_bytes());
 
                 let rho_1: [u8; 32] = hasher.finalize().into();
 
@@ -128,13 +126,10 @@ impl VSOTSender<SendR1> {
                     .finalize()
                     .into();
 
-                challenges[idx] = xor_byte_arrays(
-                    &rho_0_double_hash,
-                    &rho_1_double_hash,
-                );
+                challenges[idx] =
+                    xor_byte_arrays(&rho_0_double_hash, &rho_1_double_hash);
 
-                pad_enc_keys[idx] =
-                    OneTimePadEncryptionKeys { rho_0, rho_1 };
+                pad_enc_keys[idx] = OneTimePadEncryptionKeys { rho_0, rho_1 };
             },
         );
 
@@ -175,8 +170,7 @@ impl VSOTSender<SendR2> {
                 .then_some(())
                 .ok_or(VSOTError::InvalidChallegeResponse)?;
 
-            let rho_1_hash =
-                blake3::hash(pad_end_key.rho_1.as_ref()).into();
+            let rho_1_hash = blake3::hash(pad_end_key.rho_1.as_ref()).into();
 
             challenge_openings[idx] = ChallengeOpening {
                 rho_0_hash,
@@ -192,8 +186,7 @@ impl VSOTSender<SendR2> {
 }
 
 /// Challenge opening for a single choice.
-#[derive(Default, Copy, Clone)]
-#[derive(bincode::Encode, bincode::Decode)]
+#[derive(Default, Debug, Copy, Clone, bincode::Encode, bincode::Decode)]
 pub struct ChallengeOpening {
     /// H(rho_0)
     pub rho_0_hash: [u8; 32],
@@ -202,16 +195,14 @@ pub struct ChallengeOpening {
 }
 
 /// The one time pad encryption keys for a single choice.
-#[derive(Default, Clone, Copy)]
-#[derive(bincode::Encode, bincode::Decode)]
+#[derive(Default, Clone, Copy, bincode::Encode, bincode::Decode)]
 pub struct OneTimePadEncryptionKeys {
     pub rho_0: [u8; 32],
     pub rho_1: [u8; 32],
 }
 
 /// The output of the VSOT receiver.
-#[derive(Clone, Copy)]
-#[derive(bincode::Encode, bincode::Decode)]
+#[derive(Clone, Copy, bincode::Encode, bincode::Decode)]
 pub struct SenderOutput {
     pub one_time_pad_enc_keys: [OneTimePadEncryptionKeys; BATCH_SIZE],
 }

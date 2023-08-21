@@ -3,8 +3,9 @@
 //!
 //! To create a new message use [Builder].
 use std::borrow::Borrow;
+use std::fmt;
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut, Mul, Add};
+use std::ops::{Add, Deref, DerefMut, Mul};
 use std::time::Duration;
 
 use aead::{
@@ -63,8 +64,11 @@ pub enum InvalidMessage {
     /// Message signature verification failed
     InvalidSignature,
 
-    ///  Message decryption failed
+    /// Message decryption failed
     InvalidTag,
+
+    ///
+    DecodeError,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -75,6 +79,8 @@ impl From<[u8; 32]> for InstanceId {
         Self(bytes)
     }
 }
+
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct MessageTag(pub(crate) u64);
 
 impl MessageTag {
@@ -95,12 +101,27 @@ impl MessageTag {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, Hash, PartialOrd, Eq)]
+#[derive(PartialEq, Clone, Copy, Hash, PartialOrd, Eq)]
 pub struct MsgId([u8; MESSAGE_ID_SIZE]);
 
 impl Borrow<[u8]> for MsgId {
     fn borrow(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl fmt::Debug for MsgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MsgId({self:X})")
+    }
+}
+
+impl fmt::UpperHex for MsgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for b in &self.0 {
+            write!(f, "{:02X}", b)?;
+        }
+        Ok(())
     }
 }
 
@@ -117,9 +138,7 @@ impl MsgId {
             Sha256::new()
                 .chain_update(tag.to_le_bytes())
                 .chain_update(sender_pk)
-                .chain_update(
-                    receiver_pk.unwrap_or(&[0; PUBLIC_KEY_LENGTH]),
-                )
+                .chain_update(receiver_pk.unwrap_or(&[0; PUBLIC_KEY_LENGTH]))
                 .chain_update(instance.0)
                 .finalize()
                 .into(),
@@ -141,6 +160,7 @@ impl From<[u8; MESSAGE_ID_SIZE]> for MsgId {
     }
 }
 
+#[derive(Debug, Eq, Copy, Clone, PartialEq)]
 pub enum Kind {
     Ask,
     Pub,
@@ -152,21 +172,33 @@ pub struct MsgHdr {
     pub kind: Kind,
 }
 
+impl fmt::Debug for MsgHdr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "MsgHdr(id: {:X}, ttl: {}, kind: {:?})",
+            self.id,
+            self.ttl.as_secs(),
+            self.kind
+        )
+    }
+}
+
 impl MsgHdr {
     pub fn from(msg: &[u8]) -> Option<Self> {
         if msg.len() >= MESSAGE_HEADER_SIZE {
             let (hdr, body) = msg.split_at(MESSAGE_HEADER_SIZE);
 
             let body_len = body.len();
-            // FIXME: implicit assumption that Signature::BYTES > TAG_SIZE + NONCE_SIZE
+            // FIXME: implicit assumption that Signature::BYTES
+            //    > TAG_SIZE + NONCE_SIZE
             if body_len > 0 && body_len <= TAG_SIZE + NONCE_SIZE {
                 return None;
             }
 
             let ttl = Duration::new(
-                u32::from_le_bytes(
-                    hdr[MESSAGE_ID_SIZE..].try_into().unwrap(),
-                ) as u64,
+                u32::from_le_bytes(hdr[MESSAGE_ID_SIZE..].try_into().unwrap())
+                    as u64,
                 0,
             );
 
@@ -206,10 +238,7 @@ pub struct Builder<K> {
 pub trait UnderConstruction {
     fn writer(&mut self) -> SliceWriter;
 
-    fn encode<T: Encode>(
-        &mut self,
-        value: &T,
-    ) -> Result<(), EncodeError> {
+    fn encode<T: Encode>(&mut self, value: &T) -> Result<(), EncodeError> {
         let mut writer = self.writer();
         let config = bincode::config::standard();
 
@@ -266,6 +295,17 @@ impl Builder<Signed> {
 
         Ok(buffer)
     }
+
+    pub fn encode<E: Encode>(
+        msg_id: &MsgId,
+        ttl: u32,
+        signing_key: &SigningKey,
+        msg: &E,
+    ) -> Result<Vec<u8>, InvalidMessage> {
+        let mut buf = Self::allocate(msg_id, ttl, msg);
+        buf.encode(msg).map_err(|_| InvalidMessage::DecodeError)?;
+        buf.sign(signing_key)
+    }
 }
 
 impl UnderConstruction for Builder<Signed> {
@@ -289,6 +329,10 @@ impl Builder<Encrypted> {
         )
     }
 
+    /// Encrypt message.
+    ///
+    /// FIXME HANDLE nonce!!!
+    ///
     pub fn encrypt(
         self,
         start: usize,
@@ -325,6 +369,19 @@ impl Builder<Encrypted> {
 
         Ok(buffer)
     }
+
+    /// Create encrypted message
+    pub fn encode<E: Encode>(
+        msg_id: &MsgId,
+        ttl: u32,
+        secret: &ReusableSecret,
+        public_key: &PublicKey,
+        msg: &E,
+    ) -> Result<Vec<u8>, InvalidMessage> {
+        let mut buf = Self::allocate(msg_id, ttl, msg);
+        buf.encode(msg).map_err(|_| InvalidMessage::DecodeError)?;
+        buf.encrypt(MESSAGE_HEADER_SIZE, secret, public_key)
+    }
 }
 
 impl UnderConstruction for Builder<Encrypted> {
@@ -342,8 +399,7 @@ impl<K> Builder<K> {
         payload: usize,
         trailer: usize,
     ) -> Self {
-        let mut buffer =
-            vec![0u8; MESSAGE_HEADER_SIZE + payload + trailer];
+        let mut buffer = vec![0u8; MESSAGE_HEADER_SIZE + payload + trailer];
 
         buffer[..MESSAGE_ID_SIZE].copy_from_slice(&id.0);
         buffer[MESSAGE_ID_SIZE..MESSAGE_ID_SIZE + 4]
@@ -365,9 +421,7 @@ impl<'a> Message<'a> {
     pub const HDR_SIZE: usize = MESSAGE_HEADER_SIZE;
     pub const SIGN_SIZE: usize = Signature::BYTE_SIZE;
 
-    pub fn from_buffer(
-        buffer: &'a mut [u8],
-    ) -> Result<Self, InvalidMessage> {
+    pub fn from_buffer(buffer: &'a mut [u8]) -> Result<Self, InvalidMessage> {
         if buffer.len() < MESSAGE_HEADER_SIZE {
             return Err(InvalidMessage::BufferTooShort);
         }
@@ -396,6 +450,25 @@ impl<'a> Message<'a> {
             .map_err(|_| InvalidMessage::InvalidSignature)?;
 
         Ok(SliceReader::new(&self.buffer[Self::HDR_SIZE..]))
+    }
+
+    pub fn verify_and_decode<D: Decode>(
+        self,
+        verify_key: &VerifyingKey,
+    ) -> Result<D, InvalidMessage> {
+        let reader = self.verify(verify_key)?;
+
+        MessageReader::decode(reader).map_err(|_| InvalidMessage::DecodeError)
+    }
+
+    pub fn verify_and_borrow_decode<'de, D: BorrowDecode<'de>>(
+        &'de self,
+        verify_key: &VerifyingKey,
+    ) -> Result<D, InvalidMessage> {
+        let reader = self.verify(verify_key)?;
+
+        MessageReader::borrow_decode(reader)
+            .map_err(|_| InvalidMessage::DecodeError)
     }
 
     pub fn decrypt(
@@ -432,6 +505,29 @@ impl<'a> Message<'a> {
         Ok(SliceReader::new(ciphertext))
     }
 
+    pub fn decrypt_and_decode<D: Decode>(
+        &mut self,
+        start: usize,
+        secret: &ReusableSecret,
+        public_key: &PublicKey,
+    ) -> Result<D, InvalidMessage> {
+        let reader = self.decrypt(start, secret, public_key)?;
+
+        MessageReader::decode(reader).map_err(|_| InvalidMessage::DecodeError)
+    }
+
+    pub fn decrypt_and_borrow_decode<'de, D: BorrowDecode<'de>>(
+        &'de mut self,
+        start: usize,
+        secret: &ReusableSecret,
+        public_key: &PublicKey,
+    ) -> Result<D, InvalidMessage> {
+        let reader = self.decrypt(start, secret, public_key)?;
+
+        MessageReader::borrow_decode(reader)
+            .map_err(|_| InvalidMessage::DecodeError)
+    }
+
     pub fn payload_size<D: Encode>(value: &D) -> usize {
         let mut encoder = bincode::enc::EncoderImpl::new(
             bincode::enc::write::SizeWriter::default(),
@@ -454,10 +550,8 @@ impl MessageReader {
         R: BorrowReader<'de>,
         D: bincode::de::BorrowDecode<'de>,
     {
-        let mut decoder = bincode::de::DecoderImpl::new(
-            src,
-            bincode::config::standard(),
-        );
+        let mut decoder =
+            bincode::de::DecoderImpl::new(src, bincode::config::standard());
         D::borrow_decode(&mut decoder)
     }
 
@@ -466,10 +560,8 @@ impl MessageReader {
         R: Reader,
         D: bincode::de::Decode,
     {
-        let mut decoder = bincode::de::DecoderImpl::new(
-            src,
-            bincode::config::standard(),
-        );
+        let mut decoder =
+            bincode::de::DecoderImpl::new(src, bincode::config::standard());
         D::decode(&mut decoder)
     }
 }
@@ -520,18 +612,13 @@ impl<T, K> DerefMut for Opaque<T, K> {
 }
 
 impl<U: ArrayLength<u8>> Encode for Opaque<GenericArray<u8, U>> {
-    fn encode<E: Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), EncodeError> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         encoder.writer().write(&self.0)
     }
 }
 
 impl<U: ArrayLength<u8>> Decode for Opaque<GenericArray<u8, U>> {
-    fn decode<D: Decoder>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let mut array = GenericArray::default();
 
         decoder.claim_bytes_read(U::USIZE)?;
@@ -542,18 +629,13 @@ impl<U: ArrayLength<u8>> Decode for Opaque<GenericArray<u8, U>> {
 }
 
 impl<const N: usize> Encode for Opaque<[u8; N]> {
-    fn encode<E: Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), EncodeError> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         encoder.writer().write(&self.0)
     }
 }
 
 impl<const N: usize> Decode for Opaque<[u8; N]> {
-    fn decode<D: Decoder>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let mut array = [0; N];
 
         decoder.claim_bytes_read(N)?;
@@ -563,9 +645,7 @@ impl<const N: usize> Decode for Opaque<[u8; N]> {
     }
 }
 
-impl<'de, const N: usize> BorrowDecode<'de>
-    for Opaque<[u8; N]>
-{
+impl<'de, const N: usize> BorrowDecode<'de> for Opaque<[u8; N]> {
     fn borrow_decode<D: BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> Result<Self, DecodeError> {
@@ -574,10 +654,7 @@ impl<'de, const N: usize> BorrowDecode<'de>
 }
 
 impl<const N: usize> Encode for Opaque<&[u8; N]> {
-    fn encode<E: Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), EncodeError> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         encoder.writer().write(self.0)
     }
 }
@@ -596,27 +673,19 @@ impl<'de, const N: usize> BorrowDecode<'de> for Opaque<&'de [u8; N]> {
 }
 
 impl<const N: usize> Encode for Opaque<ByteArray<N>> {
-    fn encode<E: Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), EncodeError> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         encoder.writer().write(&self.0)
     }
 }
 
 impl<const N: usize> Encode for Opaque<&ByteArray<N>> {
-    fn encode<E: Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), EncodeError> {
-        encoder.writer().write(&self.0)
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        encoder.writer().write(self.0)
     }
 }
 
 impl<const N: usize> Decode for Opaque<ByteArray<N>> {
-    fn decode<D: Decoder>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let mut array = [0; N];
 
         decoder.claim_bytes_read(N)?;
@@ -626,9 +695,15 @@ impl<const N: usize> Decode for Opaque<ByteArray<N>> {
     }
 }
 
-impl<'de, const N: usize> BorrowDecode<'de>
-    for Opaque<&'de ByteArray<N>>
-{
+impl<'de, const N: usize> BorrowDecode<'de> for Opaque<ByteArray<N>> {
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        Self::decode(decoder)
+    }
+}
+
+impl<'de, const N: usize> BorrowDecode<'de> for Opaque<&'de ByteArray<N>> {
     fn borrow_decode<D: BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> Result<Self, DecodeError> {
@@ -642,11 +717,8 @@ impl<'de, const N: usize> BorrowDecode<'de>
 }
 
 impl<U: ArrayLength<u8>> Encode for Opaque<&GenericArray<u8, U>> {
-    fn encode<E: Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), EncodeError> {
-        encoder.writer().write(&self.0)
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        encoder.writer().write(self.0)
     }
 }
 
@@ -669,27 +741,19 @@ pub struct GR;
 pub struct PF;
 
 impl<T: GroupEncoding> Encode for Opaque<T, GR> {
-    fn encode<E: Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), EncodeError> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         encoder.writer().write(self.0.to_bytes().as_ref())
     }
 }
 
 impl<T: PrimeField> Encode for Opaque<T, PF> {
-    fn encode<E: Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), EncodeError> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         encoder.writer().write(self.0.to_repr().as_ref())
     }
 }
 
 impl<T: GroupEncoding> Decode for Opaque<T, GR> {
-    fn decode<D: Decoder>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let mut array = T::Repr::default();
 
         decoder.reader().read(array.as_mut())?;
@@ -705,9 +769,7 @@ impl<T: GroupEncoding> Decode for Opaque<T, GR> {
 }
 
 impl<T: PrimeField> Decode for Opaque<T, PF> {
-    fn decode<D: Decoder>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let mut array = T::Repr::default();
 
         decoder.reader().read(array.as_mut())?;
@@ -782,5 +844,18 @@ mod tests {
         msg.verify(&sk.verifying_key()).unwrap();
 
         println!("signed msg {:?}", bytes);
+    }
+
+    #[test]
+    fn encrypt_message() {
+        let mut rng = rand::thread_rng();
+
+        let _sk1 = SigningKey::from_bytes(&rand::random());
+        let _en1 = ReusableSecret::random_from_rng(&mut rng);
+
+        let _sk1 = SigningKey::from_bytes(&rand::random());
+        let _en2 = ReusableSecret::random_from_rng(&mut rng);
+
+        // TODO finish the test!
     }
 }

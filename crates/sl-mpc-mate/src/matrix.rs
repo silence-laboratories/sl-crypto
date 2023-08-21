@@ -28,8 +28,7 @@ pub fn transpose<C: CurveArithmetic>(
     v: Vec<Vec<C::Scalar>>,
 ) -> Vec<Vec<C::Scalar>> {
     let len = v[0].len();
-    let mut iters: Vec<_> =
-        v.into_iter().map(|n| n.into_iter()).collect();
+    let mut iters: Vec<_> = v.into_iter().map(|n| n.into_iter()).collect();
     (0..len)
         .map(|_| {
             iters
@@ -81,8 +80,8 @@ where
                     if inv.is_none().into() {
                         return Err("Modular inverse does not exist while computing determinant, Given ranks setup might not be valid");
                     }
-                    matrix[j][k] = matrix[j][k]
-                        * matrix[i - 1][i - 1].invert().unwrap()
+                    matrix[j][k] =
+                        matrix[j][k] * matrix[i - 1][i - 1].invert().unwrap()
                 }
             }
         }
@@ -97,9 +96,8 @@ pub fn matrix_inverse<C: CurveArithmetic>(
     matrix: Vec<Vec<C::Scalar>>,
     rows: usize,
 ) -> Vec<Vec<C::Scalar>> {
-    let determinant =
-        mod_bareiss_determinant::<C>(matrix.clone(), rows)
-            .expect("Error while finding det");
+    let determinant = mod_bareiss_determinant::<C>(matrix.clone(), rows)
+        .expect("Error while finding det");
     let determinant_inv = determinant.invert().unwrap();
     let n = matrix.len();
 
@@ -136,9 +134,7 @@ pub fn matrix_inverse<C: CurveArithmetic>(
 
     transposed
         .into_iter()
-        .map(|row| {
-            row.into_iter().map(|x| x * determinant_inv).collect()
-        })
+        .map(|row| row.into_iter().map(|x| x * determinant_inv).collect())
         .collect::<Vec<_>>()
 }
 
@@ -167,9 +163,7 @@ mod tests {
             vec![Scalar::from(1_u64), Scalar::from(2_u64)],
             vec![Scalar::from(3_u64), Scalar::from(4_u64)],
         ];
-        let minor =
-            mod_bareiss_determinant::<Secp256k1>(matrix, 2)
-                .unwrap();
+        let minor = mod_bareiss_determinant::<Secp256k1>(matrix, 2).unwrap();
         assert_eq!(minor, Scalar::ZERO.sub(&Scalar::from(2_u64)));
     }
 

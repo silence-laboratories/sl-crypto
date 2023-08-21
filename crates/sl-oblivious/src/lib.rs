@@ -9,10 +9,6 @@ pub mod soft_spoken;
 
 pub mod soft_spoken_mod;
 
-/// Serialization for ProjectivePoint
-// TODO: Can we remove this?
-pub mod serialization;
-
 pub mod zkproofs;
 
 /// Utility functions
@@ -38,15 +34,12 @@ pub mod utils {
     }
 
     /// Compute the double blake hash of a byte array, and return both the hash and the double hash.
-    pub fn double_blake_hash_inter(
-        data: &[u8],
-    ) -> ([u8; 32], [u8; 32]) {
+    pub fn double_blake_hash_inter(data: &[u8]) -> ([u8; 32], [u8; 32]) {
         let mut hasher = blake3::Hasher::new();
         hasher.update(data);
         let hash = hasher.finalize();
 
-        let double_hash =
-            hasher.reset().update(hash.as_bytes()).finalize();
+        let double_hash = hasher.reset().update(hash.as_bytes()).finalize();
 
         (hash.into(), double_hash.into())
     }
@@ -109,8 +102,7 @@ pub mod utils {
             label: &'static [u8],
         ) -> Self {
             let mut transcript = Transcript::new(label);
-            transcript
-                .append_message(b"session_id", session_id.as_ref());
+            transcript.append_message(b"session_id", session_id.as_ref());
             transcript.append_u64(b"party_id", party_id as u64);
             transcript.append_message(b"action", action);
 

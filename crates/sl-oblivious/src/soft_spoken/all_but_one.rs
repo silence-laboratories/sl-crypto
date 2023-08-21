@@ -1,12 +1,12 @@
 use elliptic_curve::subtle::{
     Choice, ConditionallySelectable, ConstantTimeEq,
 };
-use serde::{Deserialize, Serialize};
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
     Shake256,
 };
-use sl_mpc_mate::{traits::PersistentObject, SessionId};
+
+use sl_mpc_mate::SessionId;
 
 pub const DIGEST_SIZE: usize = 32;
 
@@ -18,15 +18,17 @@ use crate::{
 
 use super::ReceiverOTSeed;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, bincode::Encode, bincode::Decode)]
 pub struct PPRFOutput {
     pub t: Vec<[[u8; DIGEST_SIZE]; 2]>,
-    #[serde(with = "serde_arrays")]
+
     pub s_tilda: [u8; DIGEST_SIZE * 2],
-    #[serde(with = "serde_arrays")]
+
     pub t_tilda: [u8; DIGEST_SIZE * 2],
 }
-impl PersistentObject for PPRFOutput {}
+
+// impl PersistentObject for PPRFOutput {}
+
 ///Implements BuildPPRF and ProvePPRF functionality of
 /// https://eprint.iacr.org/2022/192.pdf p.22, fig. 13
 pub fn build_pprf(
@@ -45,13 +47,10 @@ pub fn build_pprf(
 
         let mut s_i = vec![[0u8; DIGEST_SIZE]; two_power_k as usize];
 
-        let mut s_i_plus_1 =
-            vec![[0u8; DIGEST_SIZE]; two_power_k as usize];
+        let mut s_i_plus_1 = vec![[0u8; DIGEST_SIZE]; two_power_k as usize];
 
-        s_i[0] = sender_ot_seed.one_time_pad_enc_keys[(j * k) as usize]
-            .rho_0;
-        s_i[1] = sender_ot_seed.one_time_pad_enc_keys[(j * k) as usize]
-            .rho_1;
+        s_i[0] = sender_ot_seed.one_time_pad_enc_keys[(j * k) as usize].rho_0;
+        s_i[1] = sender_ot_seed.one_time_pad_enc_keys[(j * k) as usize].rho_1;
 
         // for k=1 case
         s_i_plus_1[0] = s_i[0];
@@ -68,14 +67,13 @@ pub fn build_pprf(
                 let mut reader = shake.finalize_xof();
                 let mut hash = [0u8; DIGEST_SIZE * 2];
                 reader.read(&mut hash);
-                s_i_plus_1[2 * y] =
-                    hash[..DIGEST_SIZE].try_into().unwrap();
+                s_i_plus_1[2 * y] = hash[..DIGEST_SIZE].try_into().unwrap();
                 s_i_plus_1[2 * y + 1] =
                     hash[DIGEST_SIZE..].try_into().unwrap();
             }
 
-            let big_f_i = &sender_ot_seed.one_time_pad_enc_keys
-                [(j * k) as usize + i];
+            let big_f_i =
+                &sender_ot_seed.one_time_pad_enc_keys[(j * k) as usize + i];
             let big_f_i_0 = big_f_i.rho_0;
             let big_f_i_1 = big_f_i.rho_1;
             t_x_i[i - 1][0] = big_f_i_0;
@@ -154,15 +152,13 @@ pub fn eval_pprf(
         let big_f_i_star =
             receiver_ot_seed.one_time_pad_decryption_keys[j * k];
 
-        let selected =
-            u8::conditional_select(&1, &0, Choice::from(x_star_0));
+        let selected = u8::conditional_select(&1, &0, Choice::from(x_star_0));
         s_star_i[selected as usize] = big_f_i_star;
 
         let mut y_star = x_star_0;
 
         for i in 1..k {
-            let mut s_star_i_plus_1 =
-                vec![[0u8; DIGEST_SIZE]; two_power_k];
+            let mut s_star_i_plus_1 = vec![[0u8; DIGEST_SIZE]; two_power_k];
             for y in 0..2usize.pow(i as u32) {
                 // TODO: Constant time?
                 if y == (y_star as usize) {
@@ -187,12 +183,11 @@ pub fn eval_pprf(
                 .into();
 
             let x_star_i = (x_star_i + 1) & 0x01;
-            let big_f_i_star = receiver_ot_seed
-                .one_time_pad_decryption_keys[j * k + i];
+            let big_f_i_star =
+                receiver_ot_seed.one_time_pad_decryption_keys[j * k + i];
 
-            let ct_x =
-                u8::conditional_select(&1, &0, Choice::from(x_star_i))
-                    as usize;
+            let ct_x = u8::conditional_select(&1, &0, Choice::from(x_star_i))
+                as usize;
             // TODO: fix clippy
             for b_i in 0..DIGEST_SIZE {
                 s_star_i_plus_1[2 * y_star as usize + ct_x][b_i] =
@@ -203,8 +198,8 @@ pub fn eval_pprf(
                         continue;
                     }
 
-                    s_star_i_plus_1[2 * (y_star as usize) + ct_x]
-                        [b_i] ^= s_star_i_plus_1[2 * y + ct_x][b_i];
+                    s_star_i_plus_1[2 * (y_star as usize) + ct_x][b_i] ^=
+                        s_star_i_plus_1[2 * y + ct_x][b_i];
                 }
             }
 
@@ -213,8 +208,7 @@ pub fn eval_pprf(
         }
 
         // Verify
-        let mut s_tilda_star =
-            vec![[0u8; DIGEST_SIZE * 2]; two_power_k];
+        let mut s_tilda_star = vec![[0u8; DIGEST_SIZE * 2]; two_power_k];
         let s_tilda_expected = output[j].s_tilda;
         let mut s_tilda_hasher = Shake256::default();
         s_tilda_hasher.update(session_id.as_ref());
@@ -248,8 +242,7 @@ pub fn eval_pprf(
         let mut s_tilda_digest = [0u8; DIGEST_SIZE * 2];
         s_tilda_hasher.finalize_xof().read(&mut s_tilda_digest);
 
-        let valid: bool =
-            s_tilda_digest.ct_eq(&s_tilda_expected).into();
+        let valid: bool = s_tilda_digest.ct_eq(&s_tilda_expected).into();
 
         if !valid {
             return Err("Invalid proof");
@@ -266,8 +259,8 @@ pub fn eval_pprf(
 
 #[cfg(test)]
 mod test {
-    use std::array;
     use super::*;
+    use std::array;
 
     use rand::{thread_rng, Rng};
 
@@ -317,8 +310,7 @@ mod test {
         let batch_size: u32 = 8;
         let mut rng = rand::thread_rng();
 
-        let (sender_ot_seed, receiver_ot_seed) =
-            generate_seed_ot_for_test();
+        let (sender_ot_seed, receiver_ot_seed) = generate_seed_ot_for_test();
 
         let session_id = SessionId::random(&mut rng);
 

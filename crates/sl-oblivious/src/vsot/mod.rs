@@ -52,6 +52,7 @@ mod test {
         let (sender, msg1) = VSOTSender::new(session_id, &mut rng);
 
         let rec = VSOTReceiver::new(session_id, &mut rng);
+
         let (rec, msg2) = rec.process(msg1).unwrap();
 
         let (sender, msg3) = sender.process(msg2).unwrap();
@@ -63,15 +64,11 @@ mod test {
         let rec_output = rec.process(msg5).unwrap();
 
         for i in 0..BATCH_SIZE {
-            let sender_pad =
-                &sender_output.one_time_pad_enc_keys[i as usize];
+            let sender_pad = &sender_output.one_time_pad_enc_keys[i];
 
-            let rec_pad =
-                &rec_output.one_time_pad_decryption_keys[i as usize];
+            let rec_pad = &rec_output.one_time_pad_decryption_keys[i];
 
-            let bit = rec_output
-                .packed_random_choice_bits
-                .extract_bit(i as usize);
+            let bit = rec_output.packed_random_choice_bits.extract_bit(i);
             if bit {
                 assert_eq!(&sender_pad.rho_1, rec_pad);
             } else {

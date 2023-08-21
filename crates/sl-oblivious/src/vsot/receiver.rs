@@ -9,8 +9,7 @@ use merlin::Transcript;
 use rand::Rng;
 // use rayon::prelude::*;
 use sl_mpc_mate::{
-    xor_byte_arrays, CryptoRng, HashBytes, RngCore, SessionId,
-    message::*,
+    message::*, xor_byte_arrays, CryptoRng, HashBytes, RngCore, SessionId,
 };
 
 use crate::{
@@ -73,13 +72,12 @@ impl VSOTReceiver<InitRec> {
     ) -> Result<(VSOTReceiver<RecR1>, VSOTMsg2), VSOTError> {
         let mut transcript = Transcript::new(b"SL-VSOT");
 
-        transcript
-            .append_message(b"session_id", self.session_id.as_ref());
+        transcript.append_message(b"session_id", self.session_id.as_ref());
 
         msg1.proof
             .verify(
                 &msg1.public_key,
-                ProjectivePoint::GENERATOR,
+                &ProjectivePoint::GENERATOR,
                 &mut transcript,
             )
             .then_some(())
@@ -95,7 +93,7 @@ impl VSOTReceiver<InitRec> {
 
         let session_id = SessionId::new(hasher.finalize().into());
 
-        let mut encoded_choice_bits: [Opaque<ProjectivePoint, GR>; BATCH_SIZE] =
+        let mut encoded_choice_bits =
             [Opaque::from(ProjectivePoint::IDENTITY); BATCH_SIZE];
 
         let mut rho_w_vec = [[0u8; 32]; BATCH_SIZE];
@@ -113,18 +111,16 @@ impl VSOTReceiver<InitRec> {
             hasher.update(b"SL-Seed-VSOT");
             hasher.update(session_id.as_ref());
             hasher.update((idx as u64).to_be_bytes().as_slice());
-            hasher.update(
-                rho_w_prehash.to_encoded_point(true).as_bytes(),
-            );
+            hasher.update(rho_w_prehash.to_encoded_point(true).as_bytes());
 
             rho_w_vec[idx] = hasher.finalize().into();
 
-            encoded_choice_bits[idx] =
-                ProjectivePoint::conditional_select(
-                    &option_0,
-                    &option_1,
-                    Choice::from(random_choice_bit as u8),
-                ).into();
+            encoded_choice_bits[idx] = ProjectivePoint::conditional_select(
+                &option_0,
+                &option_1,
+                Choice::from(random_choice_bit as u8),
+            )
+            .into();
         });
 
         let msg2 = VSOTMsg2 {
@@ -156,8 +152,7 @@ impl VSOTReceiver<RecR1> {
             .enumerate()
             .for_each(|(idx, (rho_w, challenge))| {
                 // Reusing rho_w hashes to reduce the number of hashes
-                let (rho_w_hashe, option_0) =
-                    double_blake_hash_inter(rho_w);
+                let (rho_w_hashe, option_0) = double_blake_hash_inter(rho_w);
 
                 rho_w_hashes[idx] = rho_w_hashe;
 
