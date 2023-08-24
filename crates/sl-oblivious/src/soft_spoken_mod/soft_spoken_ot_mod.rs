@@ -12,7 +12,15 @@ use sha3::{
     Shake256,
 };
 
-use sl_mpc_mate::{random_bytes, SessionId};
+use sl_mpc_mate::{
+    bincode::{
+        de::{read::Reader, Decoder, BorrowDecode, BorrowDecoder},
+        enc::{write::Writer, Encoder},
+        error::{DecodeError, EncodeError},
+        Decode, Encode,
+    },
+    random_bytes, SessionId, message::*,
+};
 
 use crate::{
     soft_spoken::{ReceiverOTSeed, SenderOTSeed, DIGEST_SIZE},
@@ -48,9 +56,82 @@ pub struct Round1Output {
     pub v_prime: [[u8; SOFT_SPOKEN_S_BYTES]; KAPPA], // U128
 }
 
+//
+impl Encode for Round1Output {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        for u in &self.u {
+            encoder.writer().write(u)?;
+        }
+
+        encoder.writer().write(&self.w_prime)?;
+
+        for v in &self.v_prime {
+            encoder.writer().write(v)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Decode for Round1Output {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let mut r = Round1Output {
+            u: [[0; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
+            w_prime: [0; SOFT_SPOKEN_S_BYTES],
+            v_prime: [[0; SOFT_SPOKEN_S_BYTES]; KAPPA],
+        };
+
+        for u in &mut r.u {
+            decoder.reader().read(u)?;
+        }
+
+        decoder.reader().read(&mut r.w_prime)?;
+
+        for v in &mut r.v_prime {
+            decoder.reader().read(v)?;
+        }
+
+        Ok(r)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Round2Output {
     pub tau: [[Scalar; OT_WIDTH]; ETA],
+}
+
+impl Encode for Round2Output {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        for t in &self.tau {
+            for s in t {
+                Opaque::<&Scalar, PFR>::from(s).encode(encoder)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Decode for Round2Output {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let mut tau = [[Scalar::ZERO; OT_WIDTH]; ETA];
+
+        for t in &mut tau {
+            for s in &mut t[..] {
+                *s = *Opaque::<Scalar, PF>::decode(decoder)?;
+            }
+        }
+
+        Ok(Round2Output{ tau })
+    }
+}
+
+impl<'de> BorrowDecode<'de> for Round2Output {
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        Self::decode(decoder)
+    }
 }
 
 // TODO: Expose SOFT_SPOKEN_K const as two options (2 and 4) for the user.
@@ -333,8 +414,10 @@ impl SoftSpokenOTSender {
     pub fn process(
         self,
         message: (&Round1Output, &[[Scalar; OT_WIDTH]; ETA]),
-    ) -> Result<(Box<[[Scalar; OT_WIDTH]; ETA]>, Box<Round2Output>), &'static str>
-    {
+    ) -> Result<
+        (Box<[[Scalar; OT_WIDTH]; ETA]>, Box<Round2Output>),
+        &'static str,
+    > {
         let mut r_x = [[[0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
             KAPPA_DIV_SOFT_SPOKEN_K]; SOFT_SPOKEN_Q];
 

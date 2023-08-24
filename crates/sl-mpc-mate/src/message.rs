@@ -69,6 +69,9 @@ pub enum InvalidMessage {
 
     ///
     DecodeError,
+
+    /// Missing expected message
+    RecvError,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -184,6 +187,7 @@ impl fmt::Debug for MsgHdr {
     }
 }
 
+// FIXME convert to TryFrom<&[u8]> ?
 impl MsgHdr {
     pub fn from(msg: &[u8]) -> Option<Self> {
         if msg.len() >= MESSAGE_HEADER_SIZE {
@@ -740,6 +744,9 @@ pub struct GR;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PF;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PFR;
+
 impl<T: GroupEncoding> Encode for Opaque<T, GR> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         encoder.writer().write(self.0.to_bytes().as_ref())
@@ -747,6 +754,12 @@ impl<T: GroupEncoding> Encode for Opaque<T, GR> {
 }
 
 impl<T: PrimeField> Encode for Opaque<T, PF> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        encoder.writer().write(self.0.to_repr().as_ref())
+    }
+}
+
+impl<T: PrimeField> Encode for Opaque<&T, PFR> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         encoder.writer().write(self.0.to_repr().as_ref())
     }
