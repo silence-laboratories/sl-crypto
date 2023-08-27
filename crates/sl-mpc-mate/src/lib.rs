@@ -8,15 +8,9 @@ pub mod matrix;
 
 pub mod coord;
 pub mod message;
-pub mod state;
 
 /// Reexport bincode
 pub use bincode;
-
-pub use elliptic_curve::bigint::{
-    ArrayDecoding, ArrayEncoding, Encoding, U256,
-};
-pub use rand_core::{CryptoRng, RngCore};
 
 /// Session ID
 pub type SessionId = ByteArray<32>;

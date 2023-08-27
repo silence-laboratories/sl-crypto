@@ -47,18 +47,15 @@ impl MessageRelay {
     /// the message by MsgId.
     pub fn send(&self, msg: Vec<u8>) {
         if let Some(hdr) = MsgHdr::from(&msg) {
-            println!("send {:?} {}", hdr.id, msg.len());
             self.inner.lock().unwrap().send(hdr, msg, None);
         }
     }
 
     /// Ask the message relay for a message with given ID and
     /// wait for it up to given timeout.
-    pub async fn recv(self, id: MsgId, ttl: u32) -> Option<Vec<u8>> {
-        let msg = AskMsg::allocate(&id, ttl);
+    pub async fn recv(&self, id: &MsgId, ttl: u32) -> Option<Vec<u8>> {
+        let msg = AskMsg::allocate(id, ttl);
         let hdr = MsgHdr::from(&msg).unwrap();
-
-        println!("want {:?}", id);
 
         let (tx, rx) = oneshot::channel();
 
@@ -248,7 +245,7 @@ mod tests {
 
         let c2 = coord.connect();
 
-        let mut msg = c2.recv(msg_id, 100).await.unwrap();
+        let mut msg = c2.recv(&msg_id, 100).await.unwrap();
 
         let payload: (u32, u64) = Message::verify_and_decode(
             Message::from_buffer(&mut msg).unwrap(),

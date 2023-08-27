@@ -1,7 +1,9 @@
 use elliptic_curve::{subtle::ConstantTimeEq, Field};
 use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
-use sl_mpc_mate::{message::*, CryptoRng, RngCore};
+use rand::prelude::*;
+
+use sl_mpc_mate::message::*;
 
 use crate::utils::TranscriptProtocol;
 

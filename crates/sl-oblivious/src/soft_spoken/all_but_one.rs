@@ -27,9 +27,7 @@ pub struct PPRFOutput {
     pub t_tilda: [u8; DIGEST_SIZE * 2],
 }
 
-// impl PersistentObject for PPRFOutput {}
-
-///Implements BuildPPRF and ProvePPRF functionality of
+/// Implements BuildPPRF and ProvePPRF functionality of
 /// https://eprint.iacr.org/2022/192.pdf p.22, fig. 13
 pub fn build_pprf(
     session_id: &SessionId,

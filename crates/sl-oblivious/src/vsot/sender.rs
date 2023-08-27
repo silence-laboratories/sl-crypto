@@ -2,7 +2,8 @@ use elliptic_curve::{sec1::ToEncodedPoint, subtle::ConstantTimeEq};
 use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
 // use rayon::prelude::*;
-use sl_mpc_mate::{xor_byte_arrays, CryptoRng, RngCore, SessionId};
+use sl_mpc_mate::{xor_byte_arrays, SessionId};
+use rand::prelude::*;
 
 use crate::{
     vsot::{

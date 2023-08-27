@@ -6,10 +6,10 @@ use elliptic_curve::{
 };
 use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
-use rand::Rng;
+use rand::prelude::*;
 // use rayon::prelude::*;
 use sl_mpc_mate::{
-    message::*, xor_byte_arrays, CryptoRng, HashBytes, RngCore, SessionId,
+    message::*, xor_byte_arrays, HashBytes, SessionId,
 };
 
 use crate::{

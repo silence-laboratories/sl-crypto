@@ -239,6 +239,34 @@ pub struct Builder<K> {
     kind: PhantomData<K>,
 }
 
+pub struct NonceCounter(u32);
+
+impl NonceCounter {
+    /// New counter initialize by 0.
+    pub fn new() -> Self {
+        Self(0)
+    }
+
+    /// Increment counter.
+    pub fn next_nonce(&mut self) -> Self {
+        self.0 = self.0.wrapping_add(1);
+        Self(self.0)
+    }
+
+    // Consume counter and create a nonce. This way
+    // we cant create two equal nonces.
+    //
+    // This is private method and should be called
+    // from encrypt() to avoid using generated nonce
+    // more than once.
+    fn nonce(self) -> Nonce<AEAD> {
+        let mut nonce = Nonce::<AEAD>::default();
+        nonce[..4].copy_from_slice(&self.0.to_le_bytes());
+
+        nonce
+    }
+}
+
 pub trait UnderConstruction {
     fn writer(&mut self) -> SliceWriter;
 
@@ -335,13 +363,12 @@ impl Builder<Encrypted> {
 
     /// Encrypt message.
     ///
-    /// FIXME HANDLE nonce!!!
-    ///
     pub fn encrypt(
         self,
         start: usize,
         secret: &ReusableSecret,
         public_key: &PublicKey,
+        counter: NonceCounter,
     ) -> Result<Vec<u8>, InvalidMessage> {
         let Self {
             mut buffer,
@@ -362,7 +389,7 @@ impl Builder<Encrypted> {
 
         let (data, plaintext) = msg.split_at_mut(start);
 
-        let nonce = Nonce::<AEAD>::default(); // FIXME(arm) random!!!
+        let nonce = counter.nonce();
 
         let tag = cipher
             .encrypt_in_place_detached(&nonce, data, plaintext)
@@ -381,10 +408,11 @@ impl Builder<Encrypted> {
         secret: &ReusableSecret,
         public_key: &PublicKey,
         msg: &E,
+        counter: NonceCounter,
     ) -> Result<Vec<u8>, InvalidMessage> {
         let mut buf = Self::allocate(msg_id, ttl, msg);
         buf.encode(msg).map_err(|_| InvalidMessage::DecodeError)?;
-        buf.encrypt(MESSAGE_HEADER_SIZE, secret, public_key)
+        buf.encrypt(MESSAGE_HEADER_SIZE, secret, public_key, counter)
     }
 }
 
@@ -863,12 +891,44 @@ mod tests {
     fn encrypt_message() {
         let mut rng = rand::thread_rng();
 
-        let _sk1 = SigningKey::from_bytes(&rand::random());
-        let _en1 = ReusableSecret::random_from_rng(&mut rng);
+        let inst = InstanceId::from(rand::random::<[u8; 32]>());
 
-        let _sk1 = SigningKey::from_bytes(&rand::random());
-        let _en2 = ReusableSecret::random_from_rng(&mut rng);
+        let sk1 = SigningKey::from_bytes(&rand::random());
+        let vk1 = sk1.verifying_key();
+        let en1 = ReusableSecret::random_from_rng(&mut rng);
+        let pk1 = PublicKey::from(&en1);
 
-        // TODO finish the test!
+        let sk2 = SigningKey::from_bytes(&rand::random());
+        let vk2 = sk2.verifying_key();
+
+        let en2 = ReusableSecret::random_from_rng(&mut rng);
+        let pk2 = PublicKey::from(&en2);
+
+        let msg_id = MsgId::new(
+            &inst,
+            vk1.as_bytes(),
+            Some(vk2.as_bytes()),
+            MessageTag::tag(1),
+        );
+
+        let mut nonce = NonceCounter::new();
+
+        let mut msg = Builder::<Encrypted>::encode(
+            &msg_id,
+            10,
+            &en1,
+            &pk2,
+            &(1u32, 2u64),
+            nonce.next_nonce(),
+        )
+        .unwrap();
+
+        let mut msg = Message::from_buffer(&mut msg).unwrap();
+
+        let data: (u32, u64) = msg
+            .decrypt_and_decode(MESSAGE_HEADER_SIZE, &en2, &pk1)
+            .unwrap();
+
+        assert_eq!(data, (1u32, 2u64));
     }
 }
