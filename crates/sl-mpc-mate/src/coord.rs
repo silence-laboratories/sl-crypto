@@ -1,11 +1,25 @@
 use std::cmp::Ordering;
 use std::collections::{hash_map::Entry, BinaryHeap, HashMap};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::{sync::oneshot, time::timeout};
 
 use crate::message::*;
+
+pub type BoxedFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
+pub type BoxedSend = BoxedFuture<()>;
+pub type BoxedRecv = BoxedFuture<Option<Vec<u8>>>;
+
+pub trait Relay: Send + Sync + 'static {
+    fn send(&self, msg: Vec<u8>) -> BoxedSend;
+    fn recv(&self, id: MsgId, ttl: u32) -> BoxedRecv;
+    fn clone_relay(&self) -> BoxedRelay;
+}
+
+pub type BoxedRelay = Box<dyn Relay>;
 
 #[derive(Debug)]
 struct Expire(Instant, MsgId, Kind);
@@ -45,25 +59,39 @@ unsafe impl Send for MessageRelay {}
 impl MessageRelay {
     /// Send or publish a message. Other parties could receive
     /// the message by MsgId.
-    pub fn send(&self, msg: Vec<u8>) {
-        if let Some(hdr) = MsgHdr::from(&msg) {
-            self.inner.lock().unwrap().send(hdr, msg, None);
-        }
+    pub fn send(&self, msg: Vec<u8>) -> BoxedSend {
+        let inner = self.inner.clone();
+        Box::pin(async move {
+            inner.lock().unwrap().send(msg);
+        })
     }
 
     /// Ask the message relay for a message with given ID and
     /// wait for it up to given timeout.
-    pub async fn recv(&self, id: &MsgId, ttl: u32) -> Option<Vec<u8>> {
-        let msg = AskMsg::allocate(id, ttl);
-        let hdr = MsgHdr::from(&msg).unwrap();
+    pub fn recv(&self, id: MsgId, ttl: u32) -> BoxedRecv {
+        let ttl = Duration::new(ttl as u64, 0);
 
         let (tx, rx) = oneshot::channel();
 
-        self.inner.lock().unwrap().send(hdr, msg, Some(tx));
+        self.inner.lock().unwrap().recv(id, ttl, tx);
 
-        timeout(Duration::new(ttl as u64, 0), async { rx.await.ok() })
-            .await
-            .ok()?
+        Box::pin(
+            async move { timeout(ttl, async { rx.await.ok() }).await.ok()? },
+        )
+    }
+}
+
+impl Relay for MessageRelay {
+    fn send(&self, msg: Vec<u8>) -> BoxedSend {
+        self.send(msg)
+    }
+
+    fn recv(&self, id: MsgId, ttl: u32) -> BoxedRecv {
+        self.recv(id, ttl)
+    }
+
+    fn clone_relay(&self) -> Box<dyn Relay> {
+        Box::new(self.clone())
     }
 }
 
@@ -79,10 +107,10 @@ impl SimpleMessageRelay {
         }
     }
 
-    pub fn connect(&self) -> MessageRelay {
-        MessageRelay {
+    pub fn connect(&self) -> BoxedRelay {
+        Box::new(MessageRelay {
             inner: self.inner.clone(),
-        }
+        })
     }
 
     pub fn messages(&self) -> Vec<MsgId> {
@@ -140,16 +168,48 @@ impl CoordInner {
         }
     }
 
-    fn send(
+    pub fn send(&mut self, msg: Vec<u8>) {
+        let MsgHdr { id, ttl, kind } = MsgHdr::from(&msg).unwrap();
+        let now = Instant::now();
+        let expire = now + ttl;
+
+        assert!(kind == Kind::Pub);
+
+        // we have a locked state, let's cleanup some old entries
+        self.cleanup(now);
+
+        match self.messages.entry(id) {
+            Entry::Occupied(mut ocp) => match ocp.get_mut() {
+                MsgEntry::Waiters((_, b)) => {
+                    // wake up all waiters
+                    for tx in b.drain(..) {
+                        let _ = tx.send(msg.clone());
+                    }
+                    // and replace with a Read message
+                    ocp.insert(MsgEntry::Ready(msg));
+
+                    // remember to cleanup this entry later
+                    self.cleanup_later(id, expire, kind);
+                }
+                MsgEntry::Ready(_) => {
+                    // ignore dups
+                }
+            },
+
+            Entry::Vacant(vac) => {
+                vac.insert(MsgEntry::Ready(msg));
+
+                self.cleanup_later(id, expire, kind);
+            }
+        }
+    }
+
+    fn recv(
         &mut self,
-        hdr: MsgHdr,
-        msg: Vec<u8>,
-        mut tx: Option<oneshot::Sender<Vec<u8>>>,
+        id: MsgId,
+        ttl: Duration,
+        tx: oneshot::Sender<Vec<u8>>,
     ) {
-        let MsgHdr { id, ttl, kind } = hdr;
-
-        debug_assert!(kind == Kind::Pub || tx.is_some());
-
         let now = Instant::now();
         let expire = now + ttl;
 
@@ -160,48 +220,28 @@ impl CoordInner {
             Entry::Occupied(mut ocp) => {
                 match ocp.get_mut() {
                     MsgEntry::Ready(msg) => {
-                        if matches!(kind, Kind::Ask) {
-                            // got an ASK for a Ready message
-                            // send the message immediately
-                            let _ = tx.take().unwrap().send(msg.clone());
-                        }
+                        // send the message immediately
+                        let _ = tx.send(msg.clone());
                     }
 
                     MsgEntry::Waiters((prev, b)) => {
-                        if kind == Kind::Ask {
-                            // join other waiters
-                            if *prev < expire {
-                                *prev = expire;
-                            }
-                            b.push(tx.take().unwrap());
-                        } else {
-                            // wake up all waiters
-                            for tx in b.drain(..) {
-                                let msg = msg.clone();
-                                let _ = tx.send(msg.clone());
-                            }
-                            // and replace with a Read message
-                            ocp.insert(MsgEntry::Ready(msg));
+                        // join other waiters
+                        if *prev < expire {
+                            *prev = expire;
                         }
+                        b.push(tx);
 
                         // remember to cleanup this entry later
-                        self.cleanup_later(id, expire, kind);
+                        self.cleanup_later(id, expire, Kind::Ask);
                     }
                 }
             }
 
             Entry::Vacant(vac) => {
-                if matches!(kind, Kind::Ask) {
-                    // This is the first ASK for the message
-                    vac.insert(MsgEntry::Waiters((
-                        expire,
-                        vec![tx.take().unwrap()],
-                    )));
-                } else {
-                    vac.insert(MsgEntry::Ready(msg));
-                }
+                // This is the first ASK for the message
+                vac.insert(MsgEntry::Waiters((expire, vec![tx])));
 
-                self.cleanup_later(id, expire, kind);
+                self.cleanup_later(id, expire, Kind::Ask);
             }
         }
     }
@@ -241,11 +281,12 @@ mod tests {
         c1.send(
             Builder::<Signed>::encode(&msg_id, 10, &sk, &(0u32, 255u64))
                 .unwrap(),
-        );
+        )
+        .await;
 
         let c2 = coord.connect();
 
-        let mut msg = c2.recv(&msg_id, 100).await.unwrap();
+        let mut msg = c2.recv(msg_id, 100).await.unwrap();
 
         let payload: (u32, u64) = Message::verify_and_decode(
             Message::from_buffer(&mut msg).unwrap(),

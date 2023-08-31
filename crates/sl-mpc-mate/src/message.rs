@@ -31,7 +31,10 @@ use chacha20::hchacha;
 use chacha20poly1305::ChaCha20Poly1305;
 use digest::Digest;
 use ed25519_dalek::{Signature, Signer, Verifier};
-use elliptic_curve::{group::GroupEncoding, PrimeField};
+use elliptic_curve::{
+    group::GroupEncoding, CurveArithmetic, FieldBytes, NonZeroScalar,
+    PrimeField,
+};
 use sha2::Sha256;
 
 pub use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
@@ -63,6 +66,9 @@ pub enum InvalidMessage {
 
     /// Message signature verification failed
     InvalidSignature,
+
+    /// Other party's public key is identiry point
+    EncPublicKey,
 
     /// Message decryption failed
     InvalidTag,
@@ -378,10 +384,15 @@ impl Builder<Encrypted> {
         let last = buffer.len() - (TAG_SIZE + NONCE_SIZE);
         let (msg, tail) = buffer.split_at_mut(last);
 
+        // TODO Review key generation!!!
         let shared_secret = secret.diffie_hellman(public_key);
 
+        if !shared_secret.was_contributory() {
+            return Err(InvalidMessage::EncPublicKey);
+        }
+
         let key = hchacha::<U10>(
-            &shared_secret.to_bytes().into(),
+            GenericArray::from_slice(shared_secret.as_bytes()),
             &GenericArray::default(),
         );
 
@@ -521,10 +532,11 @@ impl<'a> Message<'a> {
         let tag = Tag::<AEAD>::from_slice(&tail[..TAG_SIZE]);
         let nonce = Nonce::<AEAD>::from_slice(&tail[TAG_SIZE..]);
 
+        // TODO Review key generation!!!
         let shared_secret = secret.diffie_hellman(public_key);
 
         let key = hchacha::<U10>(
-            &shared_secret.to_bytes().into(),
+            GenericArray::from_slice(shared_secret.as_bytes()),
             &GenericArray::default(),
         );
 
@@ -775,6 +787,9 @@ pub struct PF;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PFR;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NZ;
+
 impl<T: GroupEncoding> Encode for Opaque<T, GR> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         encoder.writer().write(self.0.to_bytes().as_ref())
@@ -790,6 +805,12 @@ impl<T: PrimeField> Encode for Opaque<T, PF> {
 impl<T: PrimeField> Encode for Opaque<&T, PFR> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         encoder.writer().write(self.0.to_repr().as_ref())
+    }
+}
+
+impl<C: CurveArithmetic> Encode for Opaque<NonZeroScalar<C>, NZ> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        encoder.writer().write(self.0.as_ref().to_repr().as_ref())
     }
 }
 
@@ -825,6 +846,22 @@ impl<T: PrimeField> Decode for Opaque<T, PF> {
     }
 }
 
+impl<C: CurveArithmetic> Decode for Opaque<NonZeroScalar<C>, NZ> {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let mut array = FieldBytes::<C>::default();
+
+        decoder.reader().read(array.as_mut())?;
+
+        let value = C::Scalar::from_repr(array).and_then(NonZeroScalar::new);
+
+        if bool::from(value.is_some()) {
+            Ok(Opaque(value.unwrap(), PhantomData))
+        } else {
+            Err(DecodeError::Other("bad group element"))
+        }
+    }
+}
+
 impl<'de, T: GroupEncoding> BorrowDecode<'de> for Opaque<T, GR> {
     fn borrow_decode<D: BorrowDecoder<'de>>(
         decoder: &mut D,
@@ -834,6 +871,16 @@ impl<'de, T: GroupEncoding> BorrowDecode<'de> for Opaque<T, GR> {
 }
 
 impl<'de, T: PrimeField> BorrowDecode<'de> for Opaque<T, PF> {
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        Self::decode(decoder)
+    }
+}
+
+impl<'de, C: CurveArithmetic> BorrowDecode<'de>
+    for Opaque<NonZeroScalar<C>, NZ>
+{
     fn borrow_decode<D: BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> Result<Self, DecodeError> {
