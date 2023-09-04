@@ -42,13 +42,13 @@ pub use x25519_dalek::{PublicKey, ReusableSecret};
 
 use crate::ByteArray;
 
-type AEAD = ChaCha20Poly1305;
+type Aead = ChaCha20Poly1305;
 
 pub const MESSAGE_ID_SIZE: usize = 32;
 pub const MESSAGE_HEADER_SIZE: usize = MESSAGE_ID_SIZE + 4;
 
-pub const TAG_SIZE: usize = <AEAD as AeadCore>::TagSize::USIZE;
-pub const NONCE_SIZE: usize = <AEAD as AeadCore>::NonceSize::USIZE;
+pub const TAG_SIZE: usize = <Aead as AeadCore>::TagSize::USIZE;
+pub const NONCE_SIZE: usize = <Aead as AeadCore>::NonceSize::USIZE;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum InvalidMessage {
@@ -245,6 +245,7 @@ pub struct Builder<K> {
     kind: PhantomData<K>,
 }
 
+#[derive(Default)]
 pub struct NonceCounter(u32);
 
 impl NonceCounter {
@@ -265,8 +266,8 @@ impl NonceCounter {
     // This is private method and should be called
     // from encrypt() to avoid using generated nonce
     // more than once.
-    fn nonce(self) -> Nonce<AEAD> {
-        let mut nonce = Nonce::<AEAD>::default();
+    fn nonce(self) -> Nonce<Aead> {
+        let mut nonce = Nonce::<Aead>::default();
         nonce[..4].copy_from_slice(&self.0.to_le_bytes());
 
         nonce
@@ -336,11 +337,11 @@ impl Builder<Signed> {
 
     pub fn encode<E: Encode>(
         msg_id: &MsgId,
-        ttl: u32,
+        ttl: Duration,
         signing_key: &SigningKey,
         msg: &E,
     ) -> Result<Vec<u8>, InvalidMessage> {
-        let mut buf = Self::allocate(msg_id, ttl, msg);
+        let mut buf = Self::allocate(msg_id, ttl.as_secs() as u32, msg);
         buf.encode(msg).map_err(|_| InvalidMessage::DecodeError)?;
         buf.sign(signing_key)
     }
@@ -396,7 +397,7 @@ impl Builder<Encrypted> {
             &GenericArray::default(),
         );
 
-        let cipher = AEAD::new(&key);
+        let cipher = Aead::new(&key);
 
         let (data, plaintext) = msg.split_at_mut(start);
 
@@ -415,13 +416,13 @@ impl Builder<Encrypted> {
     /// Create encrypted message
     pub fn encode<E: Encode>(
         msg_id: &MsgId,
-        ttl: u32,
+        ttl: Duration,
         secret: &ReusableSecret,
         public_key: &PublicKey,
         msg: &E,
         counter: NonceCounter,
     ) -> Result<Vec<u8>, InvalidMessage> {
-        let mut buf = Self::allocate(msg_id, ttl, msg);
+        let mut buf = Self::allocate(msg_id, ttl.as_secs() as u32, msg);
         buf.encode(msg).map_err(|_| InvalidMessage::DecodeError)?;
         buf.encrypt(MESSAGE_HEADER_SIZE, secret, public_key, counter)
     }
@@ -529,8 +530,8 @@ impl<'a> Message<'a> {
         let (ciphertext, tail) =
             rest.split_at_mut(rest.len() - TAG_SIZE - NONCE_SIZE);
 
-        let tag = Tag::<AEAD>::from_slice(&tail[..TAG_SIZE]);
-        let nonce = Nonce::<AEAD>::from_slice(&tail[TAG_SIZE..]);
+        let tag = Tag::<Aead>::from_slice(&tail[..TAG_SIZE]);
+        let nonce = Nonce::<Aead>::from_slice(&tail[TAG_SIZE..]);
 
         // TODO Review key generation!!!
         let shared_secret = secret.diffie_hellman(public_key);
@@ -540,7 +541,7 @@ impl<'a> Message<'a> {
             &GenericArray::default(),
         );
 
-        let cipher = AEAD::new(&key);
+        let cipher = Aead::new(&key);
 
         cipher
             .decrypt_in_place_detached(nonce, data, ciphertext, tag)

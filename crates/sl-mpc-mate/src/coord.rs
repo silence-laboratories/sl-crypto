@@ -95,7 +95,7 @@ impl Relay for MessageRelay {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SimpleMessageRelay {
     inner: Arc<Mutex<CoordInner>>,
 }
@@ -124,7 +124,7 @@ impl SimpleMessageRelay {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct CoordInner {
     expire: BinaryHeap<Expire>,
     messages: HashMap<MsgId, MsgEntry>,
