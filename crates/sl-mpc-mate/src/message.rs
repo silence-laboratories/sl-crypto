@@ -90,22 +90,22 @@ impl From<[u8; 32]> for InstanceId {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct MessageTag(pub(crate) u64);
+pub struct MessageTag(u64);
 
 impl MessageTag {
     pub const fn tag(tag: u64) -> Self {
         Self(tag)
     }
 
-    pub fn tag1(tag: u32, param: u32) -> Self {
+    pub const fn tag1(tag: u32, param: u32) -> Self {
         Self(tag as u64 | param as u64 >> 32)
     }
 
-    pub fn tag2(tag: u32, param1: u16, param2: u16) -> Self {
+    pub const fn tag2(tag: u32, param1: u16, param2: u16) -> Self {
         Self(tag as u64 | param1 as u64 >> 32 | param2 as u64 >> 48)
     }
 
-    pub fn to_le_bytes(&self) -> [u8; 8] {
+    pub const fn to_bytes(&self) -> [u8; 8] {
         self.0.to_le_bytes()
     }
 }
@@ -134,9 +134,19 @@ impl fmt::UpperHex for MsgId {
     }
 }
 
+impl fmt::LowerHex for MsgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for b in &self.0 {
+            write!(f, "{:02x}", b)?;
+        }
+        Ok(())
+    }
+}
+
 impl MsgId {
     pub const ZERO_ID: MsgId = MsgId([0; MESSAGE_ID_SIZE]);
 
+    /// Create ID for a P2P message.
     pub fn new(
         instance: &InstanceId,
         sender_pk: &[u8; PUBLIC_KEY_LENGTH],
@@ -145,7 +155,7 @@ impl MsgId {
     ) -> Self {
         Self(
             Sha256::new()
-                .chain_update(tag.to_le_bytes())
+                .chain_update(tag.to_bytes())
                 .chain_update(sender_pk)
                 .chain_update(receiver_pk.unwrap_or(&[0; PUBLIC_KEY_LENGTH]))
                 .chain_update(instance.0)
@@ -154,6 +164,7 @@ impl MsgId {
         )
     }
 
+    /// Create ID for a broadcast message, without a designated receiver.
     pub fn broadcast(
         instance: &InstanceId,
         sender_pk: &[u8; PUBLIC_KEY_LENGTH],
@@ -239,12 +250,14 @@ pub struct Signed;
 #[derive(Debug)]
 pub struct Encrypted;
 
+/// Builder of a message.
 #[derive(Debug)]
 pub struct Builder<K> {
     buffer: Vec<u8>,
     kind: PhantomData<K>,
 }
 
+/// Counter to create a unuque nonce.
 #[derive(Default)]
 pub struct NonceCounter(u32);
 
@@ -261,7 +274,7 @@ impl NonceCounter {
     }
 
     // Consume counter and create a nonce. This way
-    // we cant create two equal nonces.
+    // we can't create two equal nonces from the same counter.
     //
     // This is private method and should be called
     // from encrypt() to avoid using generated nonce
@@ -297,11 +310,20 @@ impl IntoPayloadSize for usize {
 
 impl<D: Encode> IntoPayloadSize for &D {
     fn payload_size(&self) -> usize {
-        Message::payload_size(self)
+        let mut encoder = bincode::enc::EncoderImpl::new(
+            bincode::enc::write::SizeWriter::default(),
+            bincode::config::standard(),
+        );
+
+        self.encode(&mut encoder)
+            .expect("cant measure size of message");
+
+        encoder.into_writer().bytes_written
     }
 }
 
 impl Builder<Signed> {
+    /// Allocate a Signed (usually broadcast) message.
     pub fn allocate(
         id: &MsgId,
         ttl: u32,
@@ -315,7 +337,8 @@ impl Builder<Signed> {
         )
     }
 
-    /// Sign the message with passed signing_key return underlying buffer.
+    /// Sign the message with passed signing_key, consume builder
+    /// and return underlying buffer.
     pub fn sign(
         self,
         signing_key: &SigningKey,
@@ -335,6 +358,7 @@ impl Builder<Signed> {
         Ok(buffer)
     }
 
+    /// Helper method to allocate, encode and sign a message.
     pub fn encode<E: Encode>(
         msg_id: &MsgId,
         ttl: Duration,
@@ -355,6 +379,7 @@ impl UnderConstruction for Builder<Signed> {
 }
 
 impl Builder<Encrypted> {
+    /// Allocate a builder of an encrypted (usually P2P) message.
     pub fn allocate(
         id: &MsgId,
         ttl: u32,
@@ -369,7 +394,6 @@ impl Builder<Encrypted> {
     }
 
     /// Encrypt message.
-    ///
     pub fn encrypt(
         self,
         start: usize,
@@ -436,7 +460,7 @@ impl UnderConstruction for Builder<Encrypted> {
 }
 
 impl<K> Builder<K> {
-    // internal constructor
+    // internal constructor, common method for Signed and Encrypted messages.
     fn allocate_inner(
         id: &MsgId,
         ttl: u32,
@@ -496,6 +520,7 @@ impl<'a> Message<'a> {
         Ok(SliceReader::new(&self.buffer[Self::HDR_SIZE..]))
     }
 
+    /// Helper method to serify message signature and decode payload.
     pub fn verify_and_decode<D: Decode>(
         self,
         verify_key: &VerifyingKey,
@@ -505,6 +530,7 @@ impl<'a> Message<'a> {
         MessageReader::decode(reader).map_err(|_| InvalidMessage::DecodeError)
     }
 
+    /// The same as verify_and_decode() but decodes using borrow decoder.
     pub fn verify_and_borrow_decode<'de, D: BorrowDecode<'de>>(
         &'de self,
         verify_key: &VerifyingKey,
@@ -515,6 +541,7 @@ impl<'a> Message<'a> {
             .map_err(|_| InvalidMessage::DecodeError)
     }
 
+    /// Decrypt message and return payload reader.
     pub fn decrypt(
         &mut self,
         start: usize,
@@ -550,6 +577,7 @@ impl<'a> Message<'a> {
         Ok(SliceReader::new(ciphertext))
     }
 
+    /// Helper method to decrypt and decode message.
     pub fn decrypt_and_decode<D: Decode>(
         &mut self,
         start: usize,
@@ -561,6 +589,7 @@ impl<'a> Message<'a> {
         MessageReader::decode(reader).map_err(|_| InvalidMessage::DecodeError)
     }
 
+    /// The same as decrypt_and_decode() but using a borrow decoder.
     pub fn decrypt_and_borrow_decode<'de, D: BorrowDecode<'de>>(
         &'de mut self,
         start: usize,
@@ -571,19 +600,6 @@ impl<'a> Message<'a> {
 
         MessageReader::borrow_decode(reader)
             .map_err(|_| InvalidMessage::DecodeError)
-    }
-
-    pub fn payload_size<D: Encode>(value: &D) -> usize {
-        let mut encoder = bincode::enc::EncoderImpl::new(
-            bincode::enc::write::SizeWriter::default(),
-            bincode::config::standard(),
-        );
-
-        value
-            .encode(&mut encoder)
-            .expect("cant measure size of message");
-
-        encoder.into_writer().bytes_written
     }
 }
 
@@ -611,6 +627,9 @@ impl MessageReader {
     }
 }
 
+// TODO move to a separate module.
+
+/// Wrapper to provide bincode serialization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Opaque<T, K = ()>(pub T, pub PhantomData<K>);
 
@@ -963,7 +982,7 @@ mod tests {
 
         let mut msg = Builder::<Encrypted>::encode(
             &msg_id,
-            10,
+            Duration::new(10, 0),
             &en1,
             &pk2,
             &(1u32, 2u64),

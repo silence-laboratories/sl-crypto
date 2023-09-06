@@ -10,12 +10,23 @@ use tokio::{sync::oneshot, time::timeout};
 use crate::message::*;
 
 pub type BoxedFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
+
 pub type BoxedSend = BoxedFuture<()>;
 pub type BoxedRecv = BoxedFuture<Option<Vec<u8>>>;
 
+// TODO use #[async_trait] ?
+
+/// Object trait friendly definition of Message Relay interface.
 pub trait Relay: Send + Sync + 'static {
+    /// Send or Publish a message. In most implementations it means
+    /// to put into output queue and doesn't guarantee than anyone
+    /// actually receives this message.
     fn send(&self, msg: Vec<u8>) -> BoxedSend;
+
+    /// Receive a message with given ID, waiting up to TTL seconds.
     fn recv(&self, id: MsgId, ttl: u32) -> BoxedRecv;
+
+    /// A cheap way to clone the Relay object.
     fn clone_relay(&self) -> BoxedRelay;
 }
 
@@ -50,6 +61,7 @@ enum MsgEntry {
     Ready(Vec<u8>),
 }
 
+/// Implementation of in-memory message relay to run local test etc.
 #[derive(Clone)]
 pub struct MessageRelay {
     inner: Arc<Mutex<CoordInner>>,
@@ -94,6 +106,8 @@ impl Relay for MessageRelay {
         Box::new(self.clone())
     }
 }
+
+// TODO move SimpleMessageRelay to a separate module
 
 #[derive(Debug, Default)]
 pub struct SimpleMessageRelay {
@@ -193,6 +207,7 @@ impl CoordInner {
                 }
                 MsgEntry::Ready(_) => {
                     // ignore dups
+                    tracing::info!("msg send dup {:?}", id)
                 }
             },
 
@@ -279,8 +294,13 @@ mod tests {
         );
 
         c1.send(
-            Builder::<Signed>::encode(&msg_id, 10, &sk, &(0u32, 255u64))
-                .unwrap(),
+            Builder::<Signed>::encode(
+                &msg_id,
+                Duration::new(10, 0),
+                &sk,
+                &(0u32, 255u64),
+            )
+            .unwrap(),
         )
         .await;
 

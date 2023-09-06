@@ -31,7 +31,7 @@ pub fn random_bytes<const N: usize, R: CryptoRng + RngCore>(
     buf
 }
 
-// Wrapper around a byte array of 32 bytes.
+// TODO Use GenericArray<u8, N> ?
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct ByteArray<const T: usize>(pub [u8; T]);

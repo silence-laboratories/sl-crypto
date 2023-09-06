@@ -15,6 +15,21 @@ Also it is GPL/LGPL free.
 Implementation of new "messaging scheme". Implements message relay or
 async coordinator.
 
+Key modules and types:
+
+```rust
+message::MsgId
+message::Builder::<Signed>::encode(id, ttl, key, payload)
+message::builder::<Encrypted>::encode(id, ttl, key, payload)
+
+message::Message::from_buffer(&mut buffer)
+message::Message::verify_and_decode()
+message::Message::decrypt_and_decode()
+
+coord::Relay
+coord::SimpleMessageRelay
+```
+
 ## sl-oblivious
 
 Base code for DKLs23
