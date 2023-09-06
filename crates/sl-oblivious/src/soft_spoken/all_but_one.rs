@@ -1,10 +1,12 @@
-use elliptic_curve::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-use serde::{Deserialize, Serialize};
+use elliptic_curve::subtle::{
+    Choice, ConditionallySelectable, ConstantTimeEq,
+};
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
     Shake256,
 };
-use sl_mpc_mate::{traits::PersistentObject, SessionId};
+
+use sl_mpc_mate::SessionId;
 
 pub const DIGEST_SIZE: usize = 32;
 
@@ -16,16 +18,16 @@ use crate::{
 
 use super::ReceiverOTSeed;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, bincode::Encode, bincode::Decode)]
 pub struct PPRFOutput {
     pub t: Vec<[[u8; DIGEST_SIZE]; 2]>,
-    #[serde(with = "serde_arrays")]
+
     pub s_tilda: [u8; DIGEST_SIZE * 2],
-    #[serde(with = "serde_arrays")]
+
     pub t_tilda: [u8; DIGEST_SIZE * 2],
 }
-impl PersistentObject for PPRFOutput {}
-///Implements BuildPPRF and ProvePPRF functionality of
+
+/// Implements BuildPPRF and ProvePPRF functionality of
 /// https://eprint.iacr.org/2022/192.pdf p.22, fig. 13
 pub fn build_pprf(
     session_id: &SessionId,
@@ -64,10 +66,12 @@ pub fn build_pprf(
                 let mut hash = [0u8; DIGEST_SIZE * 2];
                 reader.read(&mut hash);
                 s_i_plus_1[2 * y] = hash[..DIGEST_SIZE].try_into().unwrap();
-                s_i_plus_1[2 * y + 1] = hash[DIGEST_SIZE..].try_into().unwrap();
+                s_i_plus_1[2 * y + 1] =
+                    hash[DIGEST_SIZE..].try_into().unwrap();
             }
 
-            let big_f_i = &sender_ot_seed.one_time_pad_enc_keys[(j * k) as usize + i];
+            let big_f_i =
+                &sender_ot_seed.one_time_pad_enc_keys[(j * k) as usize + i];
             let big_f_i_0 = big_f_i.rho_0;
             let big_f_i_1 = big_f_i.rho_1;
             t_x_i[i - 1][0] = big_f_i_0;
@@ -128,7 +132,7 @@ pub fn eval_pprf(
     batch: u32,
     k: u8,
     output: Vec<PPRFOutput>,
-) -> Result<ReceiverOTSeed, String> {
+) -> Result<ReceiverOTSeed, &'static str> {
     let k = k as usize;
     let loop_count = (batch / k as u32) as usize;
     let mut all_but_one_receiver_seed = ReceiverOTSeed::default();
@@ -143,7 +147,8 @@ pub fn eval_pprf(
             .extract_bit(j * k)
             .into();
         x_star_0 = (x_star_0 + 1) & 0x01;
-        let big_f_i_star = receiver_ot_seed.one_time_pad_decryption_keys[j * k];
+        let big_f_i_star =
+            receiver_ot_seed.one_time_pad_decryption_keys[j * k];
 
         let selected = u8::conditional_select(&1, &0, Choice::from(x_star_0));
         s_star_i[selected as usize] = big_f_i_star;
@@ -164,8 +169,10 @@ pub fn eval_pprf(
                 shake.update(&s_star_i[y]);
                 let mut res = [0u8; DIGEST_SIZE * 2];
                 shake.finalize_xof().read(&mut res);
-                s_star_i_plus_1[2 * y] = res[0..DIGEST_SIZE].try_into().unwrap();
-                s_star_i_plus_1[2 * y + 1] = res[DIGEST_SIZE..].try_into().unwrap();
+                s_star_i_plus_1[2 * y] =
+                    res[0..DIGEST_SIZE].try_into().unwrap();
+                s_star_i_plus_1[2 * y + 1] =
+                    res[DIGEST_SIZE..].try_into().unwrap();
             }
 
             let x_star_i: u8 = receiver_ot_seed
@@ -174,9 +181,11 @@ pub fn eval_pprf(
                 .into();
 
             let x_star_i = (x_star_i + 1) & 0x01;
-            let big_f_i_star = receiver_ot_seed.one_time_pad_decryption_keys[j * k + i];
+            let big_f_i_star =
+                receiver_ot_seed.one_time_pad_decryption_keys[j * k + i];
 
-            let ct_x = u8::conditional_select(&1, &0, Choice::from(x_star_i)) as usize;
+            let ct_x = u8::conditional_select(&1, &0, Choice::from(x_star_i))
+                as usize;
             // TODO: fix clippy
             for b_i in 0..DIGEST_SIZE {
                 s_star_i_plus_1[2 * y_star as usize + ct_x][b_i] =
@@ -234,7 +243,7 @@ pub fn eval_pprf(
         let valid: bool = s_tilda_digest.ct_eq(&s_tilda_expected).into();
 
         if !valid {
-            return Err("Invalid proof".into());
+            return Err("Invalid proof");
         }
 
         all_but_one_receiver_seed.random_choices.push(y_star);
@@ -249,40 +258,45 @@ pub fn eval_pprf(
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::array;
 
     use rand::{thread_rng, Rng};
 
-    use crate::vsot::OneTimePadEncryptionKeys;
-    use sl_mpc_mate::{random_bytes, HashBytes, SessionId};
+    use crate::vsot::{OneTimePadEncryptionKeys, BATCH_SIZE_BITS};
+    use sl_mpc_mate::{HashBytes, SessionId};
 
-    fn generate_seed_ot_for_test(n: usize) -> (SenderOutput, ReceiverOutput) {
-        let mut sender_ot_seed = SenderOutput::default();
+    fn generate_seed_ot_for_test() -> (SenderOutput, ReceiverOutput) {
         let mut rng = thread_rng();
 
-        for _ in 0..n {
-            let rho_0 = random_bytes(&mut rng);
-            let rho_1 = random_bytes(&mut rng);
-            let ot_sender_messages = OneTimePadEncryptionKeys { rho_0, rho_1 };
-            sender_ot_seed
-                .one_time_pad_enc_keys
-                .push(ot_sender_messages);
-        }
+        let sender_ot_seed = SenderOutput {
+            one_time_pad_enc_keys: array::from_fn(|_| {
+                let rho_0 = rng.gen();
+                let rho_1 = rng.gen();
 
-        let random_choices = (0..n / 8).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
+                OneTimePadEncryptionKeys { rho_0, rho_1 }
+            }),
+        };
 
-        let mut receiver_ot_seed = ReceiverOutput::new(random_choices.clone(), vec![]);
+        let random_choices: [u8; BATCH_SIZE_BITS] = rng.gen();
 
-        for i in 0..n {
+        let one_time_pad_enc_keys = array::from_fn(|i| {
             let choice = random_choices.extract_bit(i);
 
             let msg = HashBytes::conditional_select(
-                &HashBytes(sender_ot_seed.one_time_pad_enc_keys[i].rho_0),
-                &HashBytes(sender_ot_seed.one_time_pad_enc_keys[i].rho_1),
+                &HashBytes::new(
+                    sender_ot_seed.one_time_pad_enc_keys[i].rho_0,
+                ),
+                &HashBytes::new(
+                    sender_ot_seed.one_time_pad_enc_keys[i].rho_1,
+                ),
                 Choice::from(choice as u8),
             );
 
-            receiver_ot_seed.one_time_pad_decryption_keys.push(msg.0);
-        }
+            msg.0
+        });
+
+        let receiver_ot_seed =
+            ReceiverOutput::new(random_choices, one_time_pad_enc_keys);
 
         (sender_ot_seed, receiver_ot_seed)
     }
@@ -294,14 +308,20 @@ mod test {
         let batch_size: u32 = 8;
         let mut rng = rand::thread_rng();
 
-        let (sender_ot_seed, receiver_ot_seed) = generate_seed_ot_for_test(batch_size as usize);
+        let (sender_ot_seed, receiver_ot_seed) = generate_seed_ot_for_test();
 
         let session_id = SessionId::random(&mut rng);
 
         let (_all_but_one_sender_seed2, output_2) =
             build_pprf(&session_id, &sender_ot_seed, batch_size, 2);
 
-        let _all_but_one_receiver_seed2 =
-            eval_pprf(&session_id, &receiver_ot_seed, batch_size, 2, output_2).unwrap();
+        let _all_but_one_receiver_seed2 = eval_pprf(
+            &session_id,
+            &receiver_ot_seed,
+            batch_size,
+            2,
+            output_2,
+        )
+        .unwrap();
     }
 }

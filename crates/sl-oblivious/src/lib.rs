@@ -9,20 +9,18 @@ pub mod soft_spoken;
 
 pub mod soft_spoken_mod;
 
-/// Serialization for ProjectivePoint
-// TODO: Can we remove this?
-pub mod serialization;
-
 pub mod zkproofs;
 
 /// Utility functions
 pub mod utils {
     use std::ops::Index;
 
-    use elliptic_curve::{bigint::Encoding, sec1::ToEncodedPoint};
+    use elliptic_curve::{
+        bigint::Encoding, ops::Reduce, sec1::ToEncodedPoint, Scalar,
+    };
     use k256::{ProjectivePoint, Secp256k1, U256};
     use merlin::Transcript;
-    use sl_mpc_mate::{traits::ToScalar, SessionId};
+    use sl_mpc_mate::SessionId;
 
     pub use blake3::Hasher;
 
@@ -45,14 +43,29 @@ pub mod utils {
 
         (hash.into(), double_hash.into())
     }
+
     /// Custom extension trait for the merlin transcript.
     pub trait TranscriptProtocol {
         /// Append a point to the transcript.
-        fn append_point(&mut self, label: &'static [u8], point: &ProjectivePoint);
+        fn append_point(
+            &mut self,
+            label: &'static [u8],
+            point: &ProjectivePoint,
+        );
+
         /// Append a scalar to the transcript.
-        fn append_scalar(&mut self, label: &'static [u8], scalar: &k256::Scalar);
+        fn append_scalar(
+            &mut self,
+            label: &'static [u8],
+            scalar: &Scalar<Secp256k1>,
+        );
+
         /// Get challenge as scalar from the transcript.
-        fn challenge_scalar(&mut self, label: &'static [u8]) -> k256::Scalar;
+        fn challenge_scalar(
+            &mut self,
+            label: &'static [u8],
+        ) -> Scalar<Secp256k1>;
+
         /// New transcript for DLOG proof
         fn new_dlog_proof(
             session_id: &SessionId,
@@ -63,11 +76,22 @@ pub mod utils {
     }
 
     impl TranscriptProtocol for Transcript {
-        fn append_point(&mut self, label: &'static [u8], point: &ProjectivePoint) {
-            self.append_message(label, point.to_encoded_point(true).as_bytes())
+        fn append_point(
+            &mut self,
+            label: &'static [u8],
+            point: &ProjectivePoint,
+        ) {
+            self.append_message(
+                label,
+                point.to_encoded_point(true).as_bytes(),
+            )
         }
 
-        fn append_scalar(&mut self, label: &'static [u8], scalar: &k256::Scalar) {
+        fn append_scalar(
+            &mut self,
+            label: &'static [u8],
+            scalar: &Scalar<Secp256k1>,
+        ) {
             self.append_message(label, scalar.to_bytes().as_slice())
         }
 
@@ -85,10 +109,14 @@ pub mod utils {
             transcript
         }
 
-        fn challenge_scalar(&mut self, label: &'static [u8]) -> k256::Scalar {
+        fn challenge_scalar(
+            &mut self,
+            label: &'static [u8],
+        ) -> Scalar<Secp256k1> {
+            // TODO buf: FieldBytes
             let mut buf = [0u8; 32];
             self.challenge_bytes(label, &mut buf);
-            U256::from_be_bytes(buf).to_scalar::<Secp256k1>()
+            Scalar::<Secp256k1>::reduce(U256::from_be_bytes(buf))
         }
     }
 

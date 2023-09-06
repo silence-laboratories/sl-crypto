@@ -1,29 +1,21 @@
 use std::ops::Deref;
 
-// use k256::elliptic_curve::CurveArithmetic;
+use elliptic_curve::ops::Reduce;
 
 use elliptic_curve::{
-    bigint::U256, group::Curve, rand_core::CryptoRngCore, CurveArithmetic, Field, Group,
-    NonZeroScalar, ProjectivePoint, Scalar,
+    bigint::U256, group::GroupEncoding, rand_core::CryptoRngCore,
+    CurveArithmetic, Field, Group, NonZeroScalar,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{matrix::matrix_inverse, traits::ToScalar};
+use crate::{matrix::matrix_inverse, message::*};
 
 /// A polynomial with coefficients of type `Scalar`.
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Polynomial<C: CurveArithmetic>
-where
-    C::Scalar: Serialize + DeserializeOwned,
-{
+pub struct Polynomial<C: CurveArithmetic> {
     /// The coefficients of the polynomial.
     pub coeffs: Vec<C::Scalar>,
 }
 
-impl<C: CurveArithmetic> Polynomial<C>
-where
-    C::Scalar: Serialize + DeserializeOwned,
-{
+impl<C: CurveArithmetic> Polynomial<C> {
     /// Create a new polynomial with the given coefficients.
     pub fn new(coeffs: Vec<C::Scalar>) -> Self {
         Self { coeffs }
@@ -31,31 +23,33 @@ where
 
     /// Create a new polynomial with random coefficients.
     pub fn random(rng: &mut impl CryptoRngCore, degree: usize) -> Self {
-        let mut coeffs = Vec::with_capacity(degree + 1);
-        for _ in 0..=degree {
-            // TODO: Is this random constant time?
-            coeffs.push(C::Scalar::random(&mut *rng));
+        Self {
+            coeffs: (0..=degree)
+                .map(|_| C::Scalar::random(&mut *rng))
+                .collect(),
         }
-        Self { coeffs }
     }
 
     /// Evaluate the polynomial at 0 (the constant term).
-    pub fn get_constant(&self) -> C::Scalar {
-        self.coeffs[0]
+    pub fn get_constant(&self) -> &C::Scalar {
+        &self.coeffs[0]
     }
 
     /// Commit to this polynomial by multiplying each coefficient by the generator.
     pub fn commit(&self) -> GroupPolynomial<C>
     where
-        C::AffinePoint: Serialize + DeserializeOwned,
-        C::ProjectivePoint: From<C::AffinePoint>,
+        C::ProjectivePoint: GroupEncoding,
     {
-        let mut points = Vec::with_capacity(self.coeffs.len());
-        for coeff in &self.coeffs {
-            points.push(C::ProjectivePoint::generator() * coeff);
-        }
-        GroupPolynomial::new(points)
+        GroupPolynomial::new(
+            self.coeffs
+                .iter()
+                .map(|coeff| {
+                    Opaque::from(C::ProjectivePoint::generator() * coeff)
+                })
+                .collect(),
+        )
     }
+
     /// Computes the n_i derivative of a polynomial with coefficients u_i_k at the point x
     ///
     /// `n`: order of the derivative
@@ -68,10 +62,13 @@ where
     {
         (n..self.coeffs.len())
             .map(|i| {
+                // TODO build static table of factorials ??
+                //      U256::wrapping_mul if const fn
                 let num: U256 = factorial_range(i - n, i);
-                let scalar_num: C::Scalar = num.to_scalar::<C>();
-                let coeff = self.coeffs[i];
+                let scalar_num = C::Scalar::reduce(num);
+                let coeff = &self.coeffs[i];
                 let result = x.pow_vartime([(i - n) as u64]);
+
                 scalar_num * coeff * result
             })
             .fold(C::Scalar::ZERO, |acc, x| acc + x)
@@ -79,58 +76,27 @@ where
 }
 
 /// A polynomial with coefficients of type `ProjectivePoint`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, bincode::Encode, bincode::Decode)]
+#[bincode(bounds = "C::ProjectivePoint: GroupEncoding")]
 pub struct GroupPolynomial<C: CurveArithmetic>
 where
-    C::AffinePoint: Serialize + DeserializeOwned + Clone,
-    C::ProjectivePoint: From<C::AffinePoint>,
+    C::ProjectivePoint: GroupEncoding,
 {
-    pub coeffs: Vec<C::ProjectivePoint>,
-}
-
-impl<C: CurveArithmetic> Serialize for GroupPolynomial<C>
-where
-    C::AffinePoint: Serialize + DeserializeOwned,
-    C::ProjectivePoint: From<C::AffinePoint>,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-        C::AffinePoint: Serialize + Clone,
-    {
-        let affine: Vec<C::AffinePoint> = self.iter().map(|p| p.to_affine()).collect();
-        affine.serialize(serializer)
-    }
-}
-
-impl<'de, C: CurveArithmetic> Deserialize<'de> for GroupPolynomial<C>
-where
-    C::AffinePoint: Serialize + DeserializeOwned,
-    C::ProjectivePoint: From<C::AffinePoint>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<GroupPolynomial<C>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let affine: Vec<C::AffinePoint> = Vec::deserialize(deserializer)?;
-        let coeffs: Vec<C::ProjectivePoint> = affine.iter().map(|p| (*p).into()).collect();
-        Ok(GroupPolynomial::new(coeffs))
-    }
+    pub coeffs: Vec<Opaque<C::ProjectivePoint, GR>>,
 }
 
 impl<C: CurveArithmetic> GroupPolynomial<C>
 where
-    C::AffinePoint: Serialize + DeserializeOwned,
-    C::ProjectivePoint: From<C::AffinePoint>,
+    C::ProjectivePoint: GroupEncoding,
 {
     /// Create a new polynomial with the given coefficients.
-    pub fn new(coeffs: Vec<C::ProjectivePoint>) -> Self {
+    pub fn new(coeffs: Vec<Opaque<C::ProjectivePoint, GR>>) -> Self {
         Self { coeffs }
     }
 
     /// Evaluate the polynomial at 0 (the constant term).
-    pub fn get_constant(&self) -> C::ProjectivePoint {
-        self.coeffs[0]
+    pub fn get_constant(&self) -> &C::ProjectivePoint {
+        &self.coeffs[0]
     }
 
     /// Add another polynomial's coefficients element wise to this one inplace.
@@ -141,9 +107,10 @@ where
             .iter_mut()
             .zip(&other.coeffs)
             .for_each(|(a, b)| {
-                *a += b;
+                a.0 += b.0; // TODO implement AddAssign for Opaque
             });
     }
+
     /// Get the coeffs of the polynomial derivative
     pub fn derivative_coeffs(&self, n: usize) -> Vec<C::ProjectivePoint>
     where
@@ -155,17 +122,27 @@ where
             .iter()
             .enumerate()
             .map(|(position, u_i)| {
-                let num: C::Scalar = factorial_range(position, position + n).to_scalar::<C>();
-                *u_i * num
+                *u_i * C::Scalar::reduce(factorial_range(
+                    position,
+                    position + n,
+                ))
             })
             .collect()
     }
+
+    pub fn points(
+        &self,
+    ) -> impl Iterator<Item = &'_ <C as CurveArithmetic>::ProjectivePoint>
+    {
+        self.coeffs.iter().map(|p| &p.0)
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&C::ProjectivePoint> {
+        self.coeffs.get(idx).map(|p| &p.0)
+    }
 }
 
-impl<C: CurveArithmetic> Deref for Polynomial<C>
-where
-    C::Scalar: Serialize + DeserializeOwned,
-{
+impl<C: CurveArithmetic> Deref for Polynomial<C> {
     type Target = [C::Scalar];
 
     fn deref(&self) -> &Self::Target {
@@ -173,17 +150,17 @@ where
     }
 }
 
-impl<C: CurveArithmetic> Deref for GroupPolynomial<C>
-where
-    C::AffinePoint: Serialize + DeserializeOwned,
-    C::ProjectivePoint: From<C::AffinePoint>,
-{
-    type Target = [C::ProjectivePoint];
+// impl<C> Deref for GroupPolynomial<C>
+// where
+//     C: CurveArithmetic,
+//     C::ProjectivePoint: GroupEncoding,
+// {
+//     type Target = [C::ProjectivePoint];
 
-    fn deref(&self) -> &Self::Target {
-        &self.coeffs
-    }
-}
+//     fn deref(&self) -> &Self::Target {
+//         &self.coeffs
+//     }
+// }
 
 /// Computes the factorial of a number, n <= 57 (the largest factorial that fits in 256 bits)
 /// This is okay for our purposes because we expect threshold values to be less than 57
@@ -200,28 +177,28 @@ pub fn factorial(n: usize) -> U256 {
 
 /// Computes the factorial of a range of numbers (start, end], where end <= 57
 pub fn factorial_range(start: usize, end: usize) -> U256 {
-    //TODO: Confirm max possible sizes for start and end
+    // TODO: Confirm max possible sizes for start and end
     if end > 57 {
         panic!("Factorial of {} is too large to fit in 256 bits", end);
     }
 
-    (start + 1..=end).fold(U256::from(1_u64), |acc, x| {
-        acc.wrapping_mul(&U256::from(x as u64))
+    (start + 1..=end).fold(U256::from_u64(1_u64), |acc, x| {
+        acc.wrapping_mul(&U256::from_u64(x as u64))
     })
 }
 
 /// Feldman verification
 pub fn feldman_verify<C: CurveArithmetic>(
-    u_i_k: &[ProjectivePoint<C>],
+    u_i_k: &[C::ProjectivePoint],
     x_i: &NonZeroScalar<C>,
-    f_i_value: &Scalar<C>,
-    g: &ProjectivePoint<C>,
+    f_i_value: &C::Scalar,
+    g: &C::ProjectivePoint,
 ) -> Option<bool> {
     if u_i_k.is_empty() {
         return None;
     }
 
-    let mut point = ProjectivePoint::<C>::identity();
+    let mut point = C::ProjectivePoint::identity();
 
     for (i, coeff) in u_i_k.iter().enumerate() {
         // x_i^i mod p
@@ -250,25 +227,22 @@ where
     C: CurveArithmetic<Uint = U256>,
 {
     let mut v = vec![C::Scalar::ZERO; n];
-    v.iter_mut()
-        .enumerate()
-        .take(n)
-        .skip(n_i)
-        .for_each(|(idx, vi)| {
-            let num: C::Scalar = factorial_range(idx - n_i, idx).to_scalar::<C>();
-            let exponent = [(idx - n_i) as u64];
-            let result = x_i.pow_vartime(exponent);
-            *vi = num * result;
-        });
+
+    v.iter_mut().enumerate().skip(n_i).for_each(|(idx, vi)| {
+        let num = C::Scalar::reduce(factorial_range(idx - n_i, idx));
+        let exponent = [(idx - n_i) as u64];
+        let result = x_i.pow_vartime(exponent);
+        *vi = num * result;
+    });
 
     v
 }
 
 /// Get the birkhoff coefficients
-pub fn birkhoff_coeffs<C: CurveArithmetic>(params: &[(NonZeroScalar<C>, usize)]) -> Vec<C::Scalar>
+pub fn birkhoff_coeffs<C>(
+    params: &[(NonZeroScalar<C>, usize)],
+) -> Vec<C::Scalar>
 where
-    Vec<Vec<C::Scalar>>:
-        std::iter::FromIterator<std::vec::Vec<<C as elliptic_curve::CurveArithmetic>::Scalar>>,
     C: CurveArithmetic<Uint = U256>,
 {
     let n = params.len();
@@ -278,7 +252,7 @@ where
         .map(|(x_i, n_i)| polynomial_coeff_multipliers(x_i, *n_i, n))
         .collect();
 
-    let matrix_inv = matrix_inverse::<C>(matrix, n);
+    let mut matrix_inv = matrix_inverse::<C>(matrix, n);
 
-    matrix_inv[0].clone()
+    matrix_inv.swap_remove(0)
 }
