@@ -1,36 +1,140 @@
 use std::cmp::Ordering;
 use std::collections::{hash_map::Entry, BinaryHeap, HashMap};
-use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use tokio::{sync::oneshot, time::timeout};
+use tokio::sync::mpsc;
+
+pub use futures_util::{Sink, SinkExt, Stream, StreamExt};
 
 use crate::message::*;
 
-pub type BoxedFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
-
-pub type BoxedSend = BoxedFuture<()>;
-pub type BoxedRecv = BoxedFuture<Option<Vec<u8>>>;
-
-// TODO use #[async_trait] ?
-
-/// Object trait friendly definition of Message Relay interface.
-pub trait Relay: Send + Sync + 'static {
-    /// Send or Publish a message. In most implementations it means
-    /// to put into output queue and doesn't guarantee than anyone
-    /// actually receives this message.
-    fn send(&self, msg: Vec<u8>) -> BoxedSend;
-
-    /// Receive a message with given ID, waiting up to TTL seconds.
-    fn recv(&self, id: MsgId, ttl: u32) -> BoxedRecv;
-
-    /// A cheap way to clone the Relay object.
-    fn clone_relay(&self) -> BoxedRelay;
+pub trait Relay:
+    Stream<Item = Vec<u8>>
+    + Sink<Vec<u8>, Error = InvalidMessage>
+    + Unpin
+    + 'static
+{
 }
 
-pub type BoxedRelay = Box<dyn Relay>;
+impl<T> Relay for T
+where
+    T: Stream<Item = Vec<u8>>,
+    T: Sink<Vec<u8>, Error = InvalidMessage>,
+    T: Unpin,
+    T: 'static,
+{
+}
+
+pub struct BufferedMsgRelay<R: Relay> {
+    relay: R,
+    in_buf: Vec<Vec<u8>>,
+}
+
+impl<R: Relay> BufferedMsgRelay<R> {
+    pub fn new(relay: R) -> Self {
+        Self {
+            relay,
+            in_buf: vec![],
+        }
+    }
+
+    pub fn put(&mut self, msg: Vec<u8>) {
+        self.in_buf.push(msg)
+    }
+
+    pub async fn wait_for(
+        &mut self,
+        predicate: impl Fn(&MsgId) -> bool,
+    ) -> Option<Vec<u8>> {
+        // first, look into the input buffer
+        if let Some(idx) = self.in_buf.iter().position(|msg| {
+            MsgHdr::from(msg)
+                .filter(|hdr| predicate(&hdr.id))
+                .is_some()
+        }) {
+            // good catch, remove from the buffer and return
+            return Some(self.in_buf.swap_remove(idx));
+        }
+
+        loop {
+            // well, we have to poll_next() something suitable.
+            let msg = self.relay.next().await?;
+
+            let id = if let Some(hdr) = MsgHdr::from(&msg) {
+                hdr.id
+            } else {
+                // FIXME here we simple drop invaid message. How to handle?
+                continue;
+            };
+
+            if predicate(&id) {
+                // good, got it, return
+                return Some(msg);
+            } else {
+                // push into the buffer and try again
+                self.in_buf.push(msg);
+            }
+        }
+    }
+
+    pub async fn recv(&mut self, id: &MsgId, ttl: u32) -> Option<Vec<u8>> {
+        let msg = AskMsg::allocate(id, ttl);
+
+        self.send(msg).await.ok()?;
+
+        self.wait_for(|msg| msg.eq(id)).await
+    }
+}
+
+impl<R: Relay> Stream for BufferedMsgRelay<R> {
+    type Item = R::Item;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        if let Some(msg) = self.in_buf.pop() {
+            Poll::Ready(Some(msg))
+        } else {
+            self.relay.poll_next_unpin(cx)
+        }
+    }
+}
+
+impl<R: Relay> Sink<Vec<u8>> for BufferedMsgRelay<R> {
+    type Error = R::Error;
+
+    fn poll_ready(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.relay.poll_ready_unpin(cx)
+    }
+
+    fn start_send(
+        mut self: Pin<&mut Self>,
+        item: Vec<u8>,
+    ) -> Result<(), Self::Error> {
+        self.relay.start_send_unpin(item)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.relay.poll_flush_unpin(cx)
+    }
+
+    fn poll_close(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.relay.poll_close_unpin(cx)
+    }
+}
 
 #[derive(Debug)]
 struct Expire(Instant, MsgId, Kind);
@@ -57,74 +161,102 @@ impl Ord for Expire {
 
 #[derive(Debug)]
 enum MsgEntry {
-    Waiters((Instant, Vec<oneshot::Sender<Vec<u8>>>)),
+    Waiters((Instant, Vec<mpsc::Sender<Vec<u8>>>)),
     Ready(Vec<u8>),
 }
 
 /// Implementation of in-memory message relay to run local test etc.
-#[derive(Clone)]
 pub struct MessageRelay {
-    inner: Arc<Mutex<CoordInner>>,
+    rx: mpsc::Receiver<Vec<u8>>,
+    tx: mpsc::Sender<Vec<u8>>,
+    queue: Vec<Vec<u8>>,
+    inner: Arc<Mutex<Inner>>,
 }
-unsafe impl Send for MessageRelay {}
 
-impl MessageRelay {
-    /// Send or publish a message. Other parties could receive
-    /// the message by MsgId.
-    pub fn send(&self, msg: Vec<u8>) -> BoxedSend {
-        let inner = self.inner.clone();
-        Box::pin(async move {
-            inner.lock().unwrap().send(msg);
-        })
-    }
+impl Stream for MessageRelay {
+    type Item = Vec<u8>;
 
-    /// Ask the message relay for a message with given ID and
-    /// wait for it up to given timeout.
-    pub fn recv(&self, id: MsgId, ttl: u32) -> BoxedRecv {
-        let ttl = Duration::new(ttl as u64, 0);
-
-        let (tx, rx) = oneshot::channel();
-
-        self.inner.lock().unwrap().recv(id, ttl, tx);
-
-        Box::pin(
-            async move { timeout(ttl, async { rx.await.ok() }).await.ok()? },
-        )
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        if let Some(msg) = self.queue.pop() {
+            Poll::Ready(Some(msg))
+        } else {
+            self.rx.poll_recv(cx)
+        }
     }
 }
 
-impl Relay for MessageRelay {
-    fn send(&self, msg: Vec<u8>) -> BoxedSend {
-        self.send(msg)
+impl Sink<Vec<u8>> for MessageRelay {
+    type Error = InvalidMessage;
+
+    fn poll_ready(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
-    fn recv(&self, id: MsgId, ttl: u32) -> BoxedRecv {
-        self.recv(id, ttl)
+    fn start_send(
+        mut self: Pin<&mut Self>,
+        item: Vec<u8>,
+    ) -> Result<(), Self::Error> {
+        let this = &mut *self;
+
+        let hdr =
+            MsgHdr::from(&item).ok_or(InvalidMessage::MessageTooShort)?;
+
+        let mut inner = this.inner.lock().unwrap();
+
+        if hdr.kind == Kind::Ask {
+            if let Some(msg) = inner.recv(hdr.id, hdr.ttl, &this.tx) {
+                this.queue.push(msg);
+            }
+        } else {
+            tracing::info!("pub msg {:X}", hdr.id);
+            inner.send(item);
+        }
+
+        Ok(())
     }
 
-    fn clone_relay(&self) -> Box<dyn Relay> {
-        Box::new(self.clone())
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 }
-
-// TODO move SimpleMessageRelay to a separate module
 
 #[derive(Debug, Default)]
 pub struct SimpleMessageRelay {
-    inner: Arc<Mutex<CoordInner>>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl SimpleMessageRelay {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(Mutex::new(CoordInner::new())),
+            inner: Arc::new(Mutex::new(Inner::new())),
         }
     }
 
-    pub fn connect(&self) -> BoxedRelay {
-        Box::new(MessageRelay {
+    pub fn connect(&self) -> MessageRelay {
+        let (tx, rx) = mpsc::channel(100);
+
+        MessageRelay {
+            rx,
+            tx,
+            queue: vec![],
             inner: self.inner.clone(),
-        })
+        }
     }
 
     pub fn messages(&self) -> Vec<MsgId> {
@@ -139,12 +271,12 @@ impl SimpleMessageRelay {
 }
 
 #[derive(Debug, Default)]
-struct CoordInner {
+struct Inner {
     expire: BinaryHeap<Expire>,
     messages: HashMap<MsgId, MsgEntry>,
 }
 
-impl CoordInner {
+impl Inner {
     pub fn new() -> Self {
         Self {
             expire: BinaryHeap::new(),
@@ -197,7 +329,10 @@ impl CoordInner {
                 MsgEntry::Waiters((_, b)) => {
                     // wake up all waiters
                     for tx in b.drain(..) {
-                        let _ = tx.send(msg.clone());
+                        let msg = msg.clone();
+                        tokio::spawn(async move {
+                            let _ = tx.send(msg).await;
+                        });
                     }
                     // and replace with a Read message
                     ocp.insert(MsgEntry::Ready(msg));
@@ -223,8 +358,8 @@ impl CoordInner {
         &mut self,
         id: MsgId,
         ttl: Duration,
-        tx: oneshot::Sender<Vec<u8>>,
-    ) {
+        tx: &mpsc::Sender<Vec<u8>>,
+    ) -> Option<Vec<u8>> {
         let now = Instant::now();
         let expire = now + ttl;
 
@@ -236,7 +371,7 @@ impl CoordInner {
                 match ocp.get_mut() {
                     MsgEntry::Ready(msg) => {
                         // send the message immediately
-                        let _ = tx.send(msg.clone());
+                        return Some(msg.clone());
                     }
 
                     MsgEntry::Waiters((prev, b)) => {
@@ -244,7 +379,7 @@ impl CoordInner {
                         if *prev < expire {
                             *prev = expire;
                         }
-                        b.push(tx);
+                        b.push(tx.clone());
 
                         // remember to cleanup this entry later
                         self.cleanup_later(id, expire, Kind::Ask);
@@ -254,11 +389,13 @@ impl CoordInner {
 
             Entry::Vacant(vac) => {
                 // This is the first ASK for the message
-                vac.insert(MsgEntry::Waiters((expire, vec![tx])));
+                vac.insert(MsgEntry::Waiters((expire, vec![tx.clone()])));
 
                 self.cleanup_later(id, expire, Kind::Ask);
             }
         }
+
+        None
     }
 }
 
@@ -284,7 +421,7 @@ mod tests {
 
         let coord = SimpleMessageRelay::new();
 
-        let c1 = coord.connect();
+        let mut c1 = coord.connect();
 
         let msg_id = MsgId::new(
             &InstanceId::from([0; 32]),
@@ -302,11 +439,14 @@ mod tests {
             )
             .unwrap(),
         )
-        .await;
+        .await
+        .unwrap();
 
-        let c2 = coord.connect();
+        let mut c2 = coord.connect();
 
-        let mut msg = c2.recv(msg_id, 100).await.unwrap();
+        c2.send(AskMsg::allocate(&msg_id, 100)).await.unwrap();
+
+        let mut msg = c2.next().await.unwrap();
 
         let payload: (u32, u64) = Message::verify_and_decode(
             Message::from_buffer(&mut msg).unwrap(),
