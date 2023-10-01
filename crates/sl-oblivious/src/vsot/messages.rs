@@ -20,14 +20,14 @@ pub struct VSOTMsg1 {
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
 pub struct VSOTMsg2 {
     /// Encoded choice bits
-    pub encoded_choice_bits: Vec<Opaque<ProjectivePoint, GR>>,
+    pub encoded_choice_bits: Vec<Opaque<ProjectivePoint, GR>>, // size == BATCH_SIZE
 }
 
 /// VSOT Message 3
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
 pub struct VSOTMsg3 {
     ///  Challenges
-    pub challenges: [[u8; 32]; BATCH_SIZE],
+    pub challenges: Vec<[u8; 32]>, // size BATCH_SIZE,
 }
 
 /// VSOT Message 4

@@ -7,10 +7,8 @@ use elliptic_curve::{
 use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
 use rand::prelude::*;
-// use rayon::prelude::*;
-use sl_mpc_mate::{
-    message::*, xor_byte_arrays, HashBytes, SessionId,
-};
+use rayon::prelude::*;
+use sl_mpc_mate::{xor_byte_arrays, HashBytes, SessionId};
 
 use crate::{
     utils::{double_blake_hash_inter, ExtractBit},
@@ -36,7 +34,7 @@ pub struct InitRec {
 
 /// State of Receiver after processing Message 1.
 pub struct RecR1 {
-    rho_w_vec: [[u8; 32]; BATCH_SIZE],
+    rho_w_vec: Vec<[u8; 32]>, // size == BATCH_SIZE
     packed_choice_bits: [u8; BATCH_SIZE_BITS],
 }
 
@@ -44,7 +42,7 @@ pub struct RecR1 {
 #[derive(Debug, Clone)]
 pub struct RecR2 {
     rho_w_hashes: [[u8; 32]; BATCH_SIZE],
-    rho_w_vec: [[u8; 32]; BATCH_SIZE],
+    rho_w_vec: Vec<[u8; 32]>, // size == BATCH_SIZE
     packed_choice_bits: [u8; BATCH_SIZE_BITS],
 }
 
@@ -93,35 +91,40 @@ impl VSOTReceiver<InitRec> {
 
         let session_id = SessionId::new(hasher.finalize().into());
 
-        let mut encoded_choice_bits =
-            vec![Opaque::from(ProjectivePoint::IDENTITY); BATCH_SIZE];
+        let mut encoded_choice_bits = vec![];
+        let mut rho_w_vec = vec![];
 
-        let mut rho_w_vec = [[0u8; 32]; BATCH_SIZE];
+        self.state
+            .a_vec
+            .par_iter()
+            .enumerate()
+            .map(|(idx, a)| {
+                let option_0 = ProjectivePoint::GENERATOR * a;
+                let option_1 = option_0 + sender_pubkey.0;
 
-        self.state.a_vec.iter().enumerate().for_each(|(idx, a)| {
-            let option_0 = ProjectivePoint::GENERATOR * a;
-            let option_1 = option_0 + sender_pubkey.0;
+                let random_choice_bit =
+                    self.state.packed_choice_bits.extract_bit(idx);
 
-            let random_choice_bit =
-                self.state.packed_choice_bits.extract_bit(idx);
+                let rho_w_prehash = sender_pubkey.0 * a;
 
-            let rho_w_prehash = sender_pubkey.0 * a;
+                let mut hasher = blake3::Hasher::new();
+                hasher.update(b"SL-Seed-VSOT");
+                hasher.update(session_id.as_ref());
+                hasher.update((idx as u64).to_be_bytes().as_slice());
+                hasher
+                    .update(rho_w_prehash.to_encoded_point(true).as_bytes());
 
-            let mut hasher = blake3::Hasher::new();
-            hasher.update(b"SL-Seed-VSOT");
-            hasher.update(session_id.as_ref());
-            hasher.update((idx as u64).to_be_bytes().as_slice());
-            hasher.update(rho_w_prehash.to_encoded_point(true).as_bytes());
-
-            rho_w_vec[idx] = hasher.finalize().into();
-
-            encoded_choice_bits[idx] = ProjectivePoint::conditional_select(
-                &option_0,
-                &option_1,
-                Choice::from(random_choice_bit as u8),
-            )
-            .into();
-        });
+                (
+                    hasher.finalize().into(),
+                    ProjectivePoint::conditional_select(
+                        &option_0,
+                        &option_1,
+                        Choice::from(random_choice_bit as u8),
+                    )
+                    .into(),
+                )
+            })
+            .unzip_into_vecs(&mut rho_w_vec, &mut encoded_choice_bits);
 
         let msg2 = VSOTMsg2 {
             encoded_choice_bits,
@@ -225,14 +228,14 @@ impl VSOTReceiver<RecR2> {
 #[derive(Clone, Debug)]
 pub struct ReceiverOutput {
     pub(crate) packed_random_choice_bits: [u8; BATCH_SIZE_BITS], // batch_size bits
-    pub(crate) one_time_pad_decryption_keys: [[u8; 32]; BATCH_SIZE], // batch_size X 32 bytes
+    pub(crate) one_time_pad_decryption_keys: Vec<[u8; 32]>, // size == BATCH_SIZE
 }
 
 impl ReceiverOutput {
     /// Create a new `ReceiverOutput`.
     pub fn new(
         packed_random_choice_bits: [u8; BATCH_SIZE_BITS],
-        one_time_pad_decryption_keys: [[u8; 32]; BATCH_SIZE],
+        one_time_pad_decryption_keys: Vec<[u8; 32]>, // size == BATCH_SIZE
     ) -> Self {
         Self {
             packed_random_choice_bits,
