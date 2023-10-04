@@ -78,6 +78,9 @@ pub enum InvalidMessage {
 
     /// Missing expected message
     RecvError,
+
+    /// Send error
+    SendError,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -231,6 +234,10 @@ impl MsgHdr {
         } else {
             None
         }
+    }
+
+    pub fn id_eq(&self, id: &MsgId) -> bool {
+        self.id.eq(id)
     }
 }
 
