@@ -1,15 +1,22 @@
-use std::cmp::Ordering;
-use std::collections::{hash_map::Entry, BinaryHeap, HashMap};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::{
+    cmp::Ordering,
+    collections::{hash_map::Entry, BinaryHeap, HashMap},
+    pin::Pin,
+    sync::{Arc, Mutex},
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
 
 use tokio::sync::mpsc;
 
 pub use futures_util::{Sink, SinkExt, Stream, StreamExt};
 
 use crate::message::*;
+
+mod buffered;
+pub mod stats;
+
+pub use buffered::BufferedMsgRelay;
 
 pub trait Relay:
     Stream<Item = Vec<u8>>
@@ -26,114 +33,6 @@ where
     T: Unpin,
     T: 'static,
 {
-}
-
-pub struct BufferedMsgRelay<R: Relay> {
-    relay: R,
-    in_buf: Vec<Vec<u8>>,
-}
-
-impl<R: Relay> BufferedMsgRelay<R> {
-    pub fn new(relay: R) -> Self {
-        Self {
-            relay,
-            in_buf: vec![],
-        }
-    }
-
-    pub fn put(&mut self, msg: Vec<u8>) {
-        self.in_buf.push(msg)
-    }
-
-    pub async fn wait_for(
-        &mut self,
-        predicate: impl Fn(&MsgId) -> bool,
-    ) -> Option<Vec<u8>> {
-        // first, look into the input buffer
-        if let Some(idx) = self.in_buf.iter().position(|msg| {
-            MsgHdr::from(msg)
-                .filter(|hdr| predicate(&hdr.id))
-                .is_some()
-        }) {
-            // good catch, remove from the buffer and return
-            return Some(self.in_buf.swap_remove(idx));
-        }
-
-        loop {
-            // well, we have to poll_next() something suitable.
-            let msg = self.relay.next().await?;
-
-            let id = if let Some(hdr) = MsgHdr::from(&msg) {
-                hdr.id
-            } else {
-                // FIXME here we simple drop invaid message. How to handle?
-                continue;
-            };
-
-            if predicate(&id) {
-                // good, got it, return
-                return Some(msg);
-            } else {
-                // push into the buffer and try again
-                self.in_buf.push(msg);
-            }
-        }
-    }
-
-    pub async fn recv(&mut self, id: &MsgId, ttl: u32) -> Option<Vec<u8>> {
-        let msg = AskMsg::allocate(id, ttl);
-
-        self.send(msg).await.ok()?;
-
-        self.wait_for(|msg| msg.eq(id)).await
-    }
-}
-
-impl<R: Relay> Stream for BufferedMsgRelay<R> {
-    type Item = R::Item;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        if let Some(msg) = self.in_buf.pop() {
-            Poll::Ready(Some(msg))
-        } else {
-            self.relay.poll_next_unpin(cx)
-        }
-    }
-}
-
-impl<R: Relay> Sink<Vec<u8>> for BufferedMsgRelay<R> {
-    type Error = R::Error;
-
-    fn poll_ready(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
-        self.relay.poll_ready_unpin(cx)
-    }
-
-    fn start_send(
-        mut self: Pin<&mut Self>,
-        item: Vec<u8>,
-    ) -> Result<(), Self::Error> {
-        self.relay.start_send_unpin(item)
-    }
-
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
-        self.relay.poll_flush_unpin(cx)
-    }
-
-    fn poll_close(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
-        self.relay.poll_close_unpin(cx)
-    }
 }
 
 #[derive(Debug)]
@@ -376,9 +275,7 @@ impl Inner {
 
                     MsgEntry::Waiters((prev, b)) => {
                         // join other waiters
-                        if *prev < expire {
-                            *prev = expire;
-                        }
+                        *prev = expire.max(*prev);
                         b.push(tx.clone());
 
                         // remember to cleanup this entry later
