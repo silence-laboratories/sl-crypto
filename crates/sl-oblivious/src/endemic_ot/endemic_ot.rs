@@ -16,11 +16,12 @@ use crate::vsot::{OneTimePadEncryptionKeys, ReceiverOutput, SenderOutput};
 
 
 /// RO for EndemicOT
-fn h_function(session_id: &SessionId, pk: &[u8; 32]
+fn h_function(index: usize, session_id: &SessionId, pk: &[u8; 32]
     ) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"SL-Endemic-OT");
     hasher.update(session_id);
+    hasher.update(&(index as u16).to_be_bytes());
     hasher.update(pk);
     let digest = hasher.finalize().as_bytes().to_owned().into();
     digest
@@ -58,8 +59,8 @@ impl EndemicOTSender {
             |(idx, r_values)| {
                 let r_0 = r_values[0];
                 let r_1 = r_values[1];
-                let h_r_0 = h_function(&self.session_id, &r_0);
-                let h_r_1 = h_function(&self.session_id, &r_1);
+                let h_r_0 = h_function(idx, &self.session_id, &r_0);
+                let h_r_1 = h_function(idx, &self.session_id, &r_1);
                 let m_a_0 = PublicKey::from(xor_byte_arrays(&r_0, &h_r_1));
                 let m_a_1 = PublicKey::from(xor_byte_arrays(&r_1, &h_r_0));
                 let t_b_0 = &self.t_b_0_list[idx];
@@ -109,7 +110,7 @@ impl EndemicOTReceiver<RecR1> {
                 let m_a = PublicKey::from(t_a).to_bytes();
                 let random_choice_bit = packed_choice_bits.extract_bit(idx);
                 let r_other = r_other_list[idx];
-                let r_choice = xor_byte_arrays(&m_a, &h_function(&session_id, &r_other));
+                let r_choice = xor_byte_arrays(&m_a, &h_function(idx, &session_id, &r_other));
                 let mut r_values: [[u8; 32]; 2] = [[0; 32]; 2];
                 r_values[random_choice_bit as usize] = r_choice;
                 let index = ((random_choice_bit as usize) + 1) % 2;
