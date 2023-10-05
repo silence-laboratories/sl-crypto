@@ -11,6 +11,9 @@ pub mod soft_spoken_mod;
 
 pub mod zkproofs;
 
+/// Endemic 1 out of 2 Oblivious Transfer
+pub mod endemic_ot;
+
 /// Utility functions
 pub mod utils {
     use std::ops::Index;

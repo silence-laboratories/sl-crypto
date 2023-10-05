@@ -14,3 +14,5 @@ k256 = {version = "0.13", features = [ "ecdsa" ]}
 rand = "0.8"
 sha3 = "0.10.8"
 rayon = "1"
+x25519-dalek = { version = "2.0.0", features = [ "reusable_secrets" ] }
+
