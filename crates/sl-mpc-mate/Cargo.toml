@@ -28,7 +28,8 @@ base64 = "0.21.0"
 ripemd = "0.1.3"
 hex = "0.4.3"
 bs58 = "0.4.0"
-# rayon = '1'
+futures-util = { version = "0.3.0", features = [ "sink" ] }
+rayon = '1'
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "sync", "macros" ] }

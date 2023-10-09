@@ -258,28 +258,28 @@ pub fn eval_pprf(
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::array;
+    use std::iter::repeat_with;
 
     use rand::{thread_rng, Rng};
 
-    use crate::vsot::{OneTimePadEncryptionKeys, BATCH_SIZE_BITS};
+    use crate::vsot::{OneTimePadEncryptionKeys, BATCH_SIZE_BITS, BATCH_SIZE};
     use sl_mpc_mate::{HashBytes, SessionId};
 
     fn generate_seed_ot_for_test() -> (SenderOutput, ReceiverOutput) {
         let mut rng = thread_rng();
 
         let sender_ot_seed = SenderOutput {
-            one_time_pad_enc_keys: array::from_fn(|_| {
+            one_time_pad_enc_keys: repeat_with(|| {
                 let rho_0 = rng.gen();
                 let rho_1 = rng.gen();
 
                 OneTimePadEncryptionKeys { rho_0, rho_1 }
-            }),
+            }).take(BATCH_SIZE).collect::<Vec<_>>(),
         };
 
         let random_choices: [u8; BATCH_SIZE_BITS] = rng.gen();
 
-        let one_time_pad_enc_keys = array::from_fn(|i| {
+        let one_time_pad_enc_keys = (0..BATCH_SIZE).map(|i| {
             let choice = random_choices.extract_bit(i);
 
             let msg = HashBytes::conditional_select(
@@ -293,7 +293,7 @@ mod test {
             );
 
             msg.0
-        });
+        }).collect::<Vec<_>>();
 
         let receiver_ot_seed =
             ReceiverOutput::new(random_choices, one_time_pad_enc_keys);
