@@ -36,6 +36,8 @@ use elliptic_curve::{
     PrimeField,
 };
 use sha2::Sha256;
+use rand_core::CryptoRng;
+use rand_core::RngCore;
 
 pub use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
 pub use x25519_dalek::{PublicKey, ReusableSecret};
@@ -257,6 +259,10 @@ pub struct Signed;
 #[derive(Debug)]
 pub struct Encrypted;
 
+/// Marker for an seal encrypted message
+#[derive(Debug)]
+pub struct SealEncrypted;
+
 /// Builder of a message.
 #[derive(Debug)]
 pub struct Builder<K> {
@@ -381,6 +387,94 @@ impl Builder<Signed> {
 impl UnderConstruction for Builder<Signed> {
     fn writer(&mut self) -> SliceWriter {
         let last = self.buffer.len() - Signature::BYTE_SIZE;
+        SliceWriter::new(&mut self.buffer[MESSAGE_HEADER_SIZE..last])
+    }
+}
+
+impl Builder<SealEncrypted> {
+    /// Allocate a builder of an encrypted (usually P2P) message.
+    pub fn allocate(
+        id: &MsgId,
+        ttl: u32,
+        payload: impl IntoPayloadSize,
+    ) -> Builder<SealEncrypted> {
+        Self::allocate_inner(
+            id,
+            ttl,
+            payload.payload_size(),
+            TAG_SIZE + PUBLIC_KEY_LENGTH,
+        )
+    }
+
+    /// Encrypt message.
+    pub fn encrypt<T: RngCore + CryptoRng>(
+        self,
+        start: usize,
+        public_key: &PublicKey,
+        mut rng: T
+    ) -> Result<Vec<u8>, InvalidMessage> {
+        let Self {
+            mut buffer,
+            kind: _,
+        } = self;
+
+        let last = buffer.len() - (TAG_SIZE + PUBLIC_KEY_LENGTH);
+        let (msg, tail) = buffer.split_at_mut(last);
+        
+        let eph_secret = ReusableSecret::random_from_rng(&mut rng);
+        let eph_pk = PublicKey::from(&eph_secret);
+
+        // TODO Review key generation!!!
+        let shared_secret = eph_secret.diffie_hellman(public_key);
+
+        if !shared_secret.was_contributory() {
+            return Err(InvalidMessage::EncPublicKey);
+        }
+
+        let key = hchacha::<U10>(
+            GenericArray::from_slice(shared_secret.as_bytes()),
+            &GenericArray::default(),
+        );
+
+        let cipher = Aead::new(&key);
+
+        let (data, plaintext) = msg.split_at_mut(start);
+
+        let mut nonce = Nonce::<Aead>::default();
+        let digest: [u8; 32] = Sha256::new()
+                .chain_update(eph_pk.to_bytes())
+                .chain_update(public_key.to_bytes())
+                .finalize()
+                .into(); 
+        nonce.copy_from_slice(&digest[..12]);
+
+        let tag = cipher
+            .encrypt_in_place_detached(&nonce, data, plaintext)
+            .map_err(|_| InvalidMessage::BufferTooShort)?;
+
+        tail[..TAG_SIZE].copy_from_slice(&tag);
+        tail[TAG_SIZE..].copy_from_slice(eph_pk.as_bytes());
+
+        Ok(buffer)
+    }
+
+    /// Create encrypted message
+    pub fn encode<E: Encode, T: RngCore + CryptoRng>(
+        msg_id: &MsgId,
+        ttl: Duration,
+        public_key: &PublicKey,
+        msg: &E,
+        mut rng: T
+    ) -> Result<Vec<u8>, InvalidMessage> {
+        let mut buf = Self::allocate(msg_id, ttl.as_secs() as u32, msg);
+        buf.encode(msg).map_err(|_| InvalidMessage::DecodeError)?;
+        buf.encrypt(MESSAGE_HEADER_SIZE, public_key, &mut rng)
+    }
+}
+
+impl UnderConstruction for Builder<SealEncrypted> {
+    fn writer(&mut self) -> SliceWriter {
+        let last = self.buffer.len() - (TAG_SIZE + PUBLIC_KEY_LENGTH);
         SliceWriter::new(&mut self.buffer[MESSAGE_HEADER_SIZE..last])
     }
 }
@@ -608,6 +702,76 @@ impl<'a> Message<'a> {
         MessageReader::borrow_decode(reader)
             .map_err(|_| InvalidMessage::DecodeError)
     }
+
+    /// Decrypt sealed message and return payload reader.
+    pub fn decrypt_seal(
+        &mut self,
+        start: usize,
+        secret: &ReusableSecret,
+    ) -> Result<SliceReader, InvalidMessage> {
+        let (data, rest) = self.buffer.split_at_mut(start);
+
+        if rest.len() <= TAG_SIZE + PUBLIC_KEY_LENGTH {
+            return Err(InvalidMessage::MessageTooShort);
+        }
+
+        let (ciphertext, tail) =
+            rest.split_at_mut(rest.len() - TAG_SIZE - PUBLIC_KEY_LENGTH);
+
+        let tag = Tag::<Aead>::from_slice(&tail[..TAG_SIZE]);
+        let eph_pk: &[u8; 32] = &tail[TAG_SIZE..].try_into().unwrap();
+        let eph_pk = PublicKey::from(*eph_pk);
+        let public_key = PublicKey::from(secret);
+
+        let mut nonce = Nonce::<Aead>::default();
+        let digest: [u8; 32] = Sha256::new()
+                .chain_update(eph_pk.to_bytes())
+                .chain_update(public_key.to_bytes())
+                .finalize()
+                .into(); 
+        nonce.copy_from_slice(&digest[..12]);
+
+        // TODO Review key generation!!!
+        let shared_secret = secret.diffie_hellman(&eph_pk);
+
+        let key = hchacha::<U10>(
+            GenericArray::from_slice(shared_secret.as_bytes()),
+            &GenericArray::default(),
+        );
+
+        let cipher = Aead::new(&key);
+
+        cipher
+            .decrypt_in_place_detached(&nonce, data, ciphertext, tag)
+            .map_err(|_| InvalidMessage::InvalidTag)?;
+
+        Ok(SliceReader::new(ciphertext))
+    }
+    
+    /// Helper method to seal decrypt and decode message.
+    pub fn decrypt_seal_and_decode<D: Decode>(
+        &mut self,
+        start: usize,
+        secret: &ReusableSecret,
+    ) -> Result<D, InvalidMessage> {
+        let reader = self.decrypt_seal(start, secret)?;
+
+        MessageReader::decode(reader).map_err(|_| InvalidMessage::DecodeError)
+    }
+
+    /// The same as decrypt_and_decode() but using a borrow decoder.
+    pub fn decrypt_seal_and_borrow_decode<'de, D: BorrowDecode<'de>>(
+        &'de mut self,
+        start: usize,
+        secret: &ReusableSecret,
+    ) -> Result<D, InvalidMessage> {
+        let reader = self.decrypt_seal(start, secret)?;
+
+        MessageReader::borrow_decode(reader)
+            .map_err(|_| InvalidMessage::DecodeError)
+    }
+
+
 }
 
 pub struct MessageReader;
@@ -1001,6 +1165,46 @@ mod tests {
 
         let data: (u32, u64) = msg
             .decrypt_and_decode(MESSAGE_HEADER_SIZE, &en2, &pk1)
+            .unwrap();
+
+        assert_eq!(data, (1u32, 2u64));
+    }
+
+    #[test]
+    fn encrypt_seal_message() {
+        let mut rng = rand::thread_rng();
+
+        let inst = InstanceId::from(rand::random::<[u8; 32]>());
+
+        let sk1 = SigningKey::from_bytes(&rand::random());
+        let vk1 = sk1.verifying_key();
+
+        let sk2 = SigningKey::from_bytes(&rand::random());
+        let vk2 = sk2.verifying_key();
+
+        let en2 = ReusableSecret::random_from_rng(&mut rng);
+        let pk2 = PublicKey::from(&en2);
+
+        let msg_id = MsgId::new(
+            &inst,
+            vk1.as_bytes(),
+            Some(vk2.as_bytes()),
+            MessageTag::tag(1),
+        );
+
+        let mut msg = Builder::<SealEncrypted>::encode(
+            &msg_id,
+            Duration::new(10, 0),
+            &pk2,
+            &(1u32, 2u64),
+            &mut rng,
+        )
+        .unwrap();
+
+        let mut msg = Message::from_buffer(&mut msg).unwrap();
+
+        let data: (u32, u64) = msg
+            .decrypt_seal_and_decode(MESSAGE_HEADER_SIZE, &en2)
             .unwrap();
 
         assert_eq!(data, (1u32, 2u64));
