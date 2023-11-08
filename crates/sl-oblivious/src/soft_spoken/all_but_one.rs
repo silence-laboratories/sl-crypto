@@ -136,11 +136,11 @@ pub fn eval_pprf(
     let k = k as usize;
     let loop_count = (batch / k as u32) as usize;
     let mut all_but_one_receiver_seed = ReceiverOTSeed::default();
-    let two_power_k = 2usize.pow(k as u32);
+    let two_power_k = 1 << k; // 2usize.pow(k as u32);
 
     // TODO: fix clippy
-    for j in 0..loop_count {
-        let t_x_i = &output[j].t;
+    for (j, out) in output.iter().enumerate().take(loop_count) {
+        let t_x_i = &out.t;
         let mut s_star_i = vec![[0u8; DIGEST_SIZE]; two_power_k];
         let mut x_star_0: u8 = receiver_ot_seed
             .packed_random_choice_bits
@@ -186,7 +186,9 @@ pub fn eval_pprf(
 
             let ct_x = u8::conditional_select(&1, &0, Choice::from(x_star_i))
                 as usize;
+
             // TODO: fix clippy
+            #[allow(clippy::needless_range_loop)]
             for b_i in 0..DIGEST_SIZE {
                 s_star_i_plus_1[2 * y_star as usize + ct_x][b_i] =
                     t_x_i[i - 1][ct_x][b_i] ^ big_f_i_star[b_i];
@@ -207,11 +209,11 @@ pub fn eval_pprf(
 
         // Verify
         let mut s_tilda_star = vec![[0u8; DIGEST_SIZE * 2]; two_power_k];
-        let s_tilda_expected = output[j].s_tilda;
+        let s_tilda_expected = &out.s_tilda;
         let mut s_tilda_hasher = Shake256::default();
         s_tilda_hasher.update(session_id.as_ref());
         s_tilda_hasher.update(b"SL-SOFT-SPOKEN-PPRF-HASH");
-        let mut s_tilda_star_y_star = output[j].t_tilda;
+        let mut s_tilda_star_y_star = out.t_tilda;
 
         for y in 0..two_power_k {
             if y == (y_star as usize) {
@@ -240,7 +242,7 @@ pub fn eval_pprf(
         let mut s_tilda_digest = [0u8; DIGEST_SIZE * 2];
         s_tilda_hasher.finalize_xof().read(&mut s_tilda_digest);
 
-        let valid: bool = s_tilda_digest.ct_eq(&s_tilda_expected).into();
+        let valid: bool = s_tilda_digest.ct_eq(s_tilda_expected).into();
 
         if !valid {
             return Err("Invalid proof");
@@ -262,7 +264,9 @@ mod test {
 
     use rand::{thread_rng, Rng};
 
-    use crate::vsot::{OneTimePadEncryptionKeys, BATCH_SIZE_BITS, BATCH_SIZE};
+    use crate::vsot::{
+        OneTimePadEncryptionKeys, BATCH_SIZE, BATCH_SIZE_BITS,
+    };
     use sl_mpc_mate::{HashBytes, SessionId};
 
     fn generate_seed_ot_for_test() -> (SenderOutput, ReceiverOutput) {
@@ -274,26 +278,30 @@ mod test {
                 let rho_1 = rng.gen();
 
                 OneTimePadEncryptionKeys { rho_0, rho_1 }
-            }).take(BATCH_SIZE).collect::<Vec<_>>(),
+            })
+            .take(BATCH_SIZE)
+            .collect::<Vec<_>>(),
         };
 
         let random_choices: [u8; BATCH_SIZE_BITS] = rng.gen();
 
-        let one_time_pad_enc_keys = (0..BATCH_SIZE).map(|i| {
-            let choice = random_choices.extract_bit(i);
+        let one_time_pad_enc_keys = (0..BATCH_SIZE)
+            .map(|i| {
+                let choice = random_choices.extract_bit(i);
 
-            let msg = HashBytes::conditional_select(
-                &HashBytes::new(
-                    sender_ot_seed.one_time_pad_enc_keys[i].rho_0,
-                ),
-                &HashBytes::new(
-                    sender_ot_seed.one_time_pad_enc_keys[i].rho_1,
-                ),
-                Choice::from(choice as u8),
-            );
+                let msg = HashBytes::conditional_select(
+                    &HashBytes::new(
+                        sender_ot_seed.one_time_pad_enc_keys[i].rho_0,
+                    ),
+                    &HashBytes::new(
+                        sender_ot_seed.one_time_pad_enc_keys[i].rho_1,
+                    ),
+                    Choice::from(choice as u8),
+                );
 
-            msg.0
-        }).collect::<Vec<_>>();
+                msg.0
+            })
+            .collect::<Vec<_>>();
 
         let receiver_ot_seed =
             ReceiverOutput::new(random_choices, one_time_pad_enc_keys);

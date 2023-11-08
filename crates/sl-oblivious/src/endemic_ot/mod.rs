@@ -1,4 +1,6 @@
 mod messages;
+
+#[allow(clippy::module_inception)]
 mod endemic_ot;
 
 pub use messages::*;

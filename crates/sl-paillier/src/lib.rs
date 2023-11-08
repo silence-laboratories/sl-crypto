@@ -261,7 +261,7 @@ where
     let d = v_2.sub_mod(v_1, q);
 
     // u = (v_2 - v_1) C_2 mod q
-    let u: Uint<P> = Uint::const_rem_wide(d.mul_wide(&c_2), q).0;
+    let u: Uint<P> = Uint::const_rem_wide(d.mul_wide(c_2), q).0;
 
     // x = v_1 + u p
     Uint::from(u.mul_wide(p)).wrapping_add(&v_1.resize())
@@ -388,7 +388,7 @@ mod tests {
 
     use super::*;
     use crypto_bigint::{U1024, U2048, U4096};
-    use rand;
+    // use rand;
 
     static P: &str = "95779f0de6b61f3db4c53b1b32aa29e2efb52ebedab7968c37cb10917767547963a121d454c8024dc56f22c523da2dff553ad8a1621ad8f0c093ad09561165fce74fdf977ab1b5f57b4cdcce58f449bcce50cd80359ed0ec4083000c091fbb237e52b8237438ea82932ad0ed7d58fae54ea300461755a0dabc41b5e46af4cee1";
     static Q: &str = "a80137484b2e0082dbcc520642ea0fcff5652a2367084c052c340b15f0c3ecfeb334024e28e5a982c8971d06f332fc2e91ca985ee37a8e51daa2bae16841b75617a43b52fecea902c5858276ef3ab5282a0635ef34579d5ea2de61bd56f4d7ec26afbcb8ae127c4bc5c0a5799a48d41565a7656fffa056ac3b73ccb3fd0098d1";
@@ -408,7 +408,7 @@ mod tests {
     fn from_hex<const L: usize>(h: &str) -> Uint<L> {
         let mut r = Uint::<L>::ZERO;
 
-        assert!(h != "");
+        assert!(!h.is_empty());
 
         let total = (h.len() + 15) / 16; // round up
 
@@ -430,14 +430,14 @@ mod tests {
             let s = std::str::from_utf8(b).unwrap();
 
             limbs[i] = u64::from_str_radix(s, 16).unwrap();
-            i = i - 1;
+            i -= 1;
             h = &h[head..];
         }
 
         for b in h.chunks(16) {
             let s = std::str::from_utf8(b).unwrap();
             limbs[i] = u64::from_str_radix(s, 16).unwrap();
-            i = i - 1;
+            i -= 1;
         }
 
         r

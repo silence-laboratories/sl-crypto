@@ -57,8 +57,14 @@ impl<const T: usize> Deref for ByteArray<T> {
     }
 }
 
+impl<const T: usize> Default for ByteArray<T> {
+    fn default() -> Self {
+        Self([0; T])
+    }
+}
+
 impl<const T: usize> ByteArray<T> {
-    pub fn new(b: [u8; T]) -> Self {
+    pub const fn new(b: [u8; T]) -> Self {
         Self(b)
     }
 
