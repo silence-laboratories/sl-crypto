@@ -76,7 +76,7 @@ impl<C: CurveArithmetic> Polynomial<C> {
 }
 
 /// A polynomial with coefficients of type `ProjectivePoint`.
-#[derive(Debug, Clone, PartialEq, Eq, bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, bincode::Encode, bincode::Decode)]
 #[bincode(bounds = "C::ProjectivePoint: GroupEncoding")]
 pub struct GroupPolynomial<C: CurveArithmetic>
 where
@@ -92,6 +92,10 @@ where
     /// Create a new polynomial with the given coefficients.
     pub fn new(coeffs: Vec<Opaque<C::ProjectivePoint, GR>>) -> Self {
         Self { coeffs }
+    }
+
+    pub fn identity(size: usize) -> Self {
+        Self { coeffs: vec![Opaque::from(C::ProjectivePoint::identity()); size] }
     }
 
     /// Evaluate the polynomial at 0 (the constant term).

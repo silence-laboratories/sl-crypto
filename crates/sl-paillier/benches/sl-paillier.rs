@@ -34,7 +34,7 @@ fn from_hex<const L: usize>(h: &str) -> Uint<L> {
     for b in h.as_bytes().chunks(16) {
         let s = std::str::from_utf8(b).unwrap();
         limbs[i] = u64::from_str_radix(s, 16).unwrap();
-        i = i - 1;
+        i -= 1;
     }
 
     res

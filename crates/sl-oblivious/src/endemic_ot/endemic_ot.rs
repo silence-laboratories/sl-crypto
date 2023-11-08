@@ -23,7 +23,7 @@ fn h_function(index: usize, session_id: &SessionId, pk: &[u8; 32]
     hasher.update(session_id);
     hasher.update(&(index as u16).to_be_bytes());
     hasher.update(pk);
-    let digest = hasher.finalize().as_bytes().to_owned().into();
+    let digest = hasher.finalize().as_bytes().to_owned();
     digest
 }
 
@@ -36,16 +36,15 @@ pub struct EndemicOTSender {
 
 impl EndemicOTSender {
     /// Create a new instance of the EndemicOT sender.
-    pub fn new<R: RngCore + CryptoRng + Clone>(
+    pub fn new<R: RngCore + CryptoRng>(
         session_id: SessionId,
         rng: &mut R,
     ) -> Self {
-        let next_state = EndemicOTSender {
+        EndemicOTSender {
             session_id,
-            t_b_0_list: array::from_fn(|_| ReusableSecret::random_from_rng(rng.clone())),
-            t_b_1_list: array::from_fn(|_| ReusableSecret::random_from_rng(rng.clone())),
-        };
-        next_state
+            t_b_0_list: array::from_fn(|_| ReusableSecret::random_from_rng(&mut *rng)),
+            t_b_1_list: array::from_fn(|_| ReusableSecret::random_from_rng(&mut *rng)),
+        }
     }
 
     /// Process EndemicOTMsg1 from OTReceiver
@@ -95,12 +94,12 @@ pub struct RecR1 {
 
 impl EndemicOTReceiver<RecR1> {
     /// Create a new instance of the EndemicOT receiver.
-    pub fn new<R: CryptoRng + RngCore + Clone>(
+    pub fn new<R: RngCore + CryptoRng>(
         session_id: SessionId,
         rng: &mut R,
     ) -> (Self, EndemicOTMsg1) {
         let packed_choice_bits: [u8; BATCH_SIZE_BYTES] = rng.gen();
-        let t_a_list: [ReusableSecret; BATCH_SIZE] = array::from_fn(|_| ReusableSecret::random_from_rng(rng.clone()));
+        let t_a_list: [ReusableSecret; BATCH_SIZE] = array::from_fn(|_| ReusableSecret::random_from_rng(&mut *rng));
         let r_other_list: [[u8; 32]; BATCH_SIZE] = array::from_fn(|_| rng.gen());
         let mut r_list = vec![];
         t_a_list
@@ -114,7 +113,7 @@ impl EndemicOTReceiver<RecR1> {
                 let mut r_values: [[u8; 32]; 2] = [[0; 32]; 2];
                 r_values[random_choice_bit as usize] = r_choice;
                 let index = ((random_choice_bit as usize) + 1) % 2;
-                r_values[index] = r_other.clone();
+                r_values[index] = r_other;
                 r_values
             })
             .collect_into_vec(&mut r_list);

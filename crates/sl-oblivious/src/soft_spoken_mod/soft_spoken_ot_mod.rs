@@ -14,12 +14,13 @@ use sha3::{
 
 use sl_mpc_mate::{
     bincode::{
-        de::{read::Reader, Decoder, BorrowDecode, BorrowDecoder},
+        de::{read::Reader, BorrowDecode, BorrowDecoder, Decoder},
         enc::{write::Writer, Encoder},
         error::{DecodeError, EncodeError},
         Decode, Encode,
     },
-    random_bytes, SessionId, message::*,
+    message::*,
+    random_bytes, SessionId,
 };
 
 use crate::{
@@ -122,7 +123,7 @@ impl Decode for Round2Output {
             }
         }
 
-        Ok(Round2Output{ tau })
+        Ok(Round2Output { tau })
     }
 }
 
@@ -410,14 +411,14 @@ impl SoftSpokenOTSender {
     }
 }
 
+pub type SoftSpokenOTSenderResult =
+    Result<(Box<[[Scalar; OT_WIDTH]; ETA]>, Box<Round2Output>), &'static str>;
+
 impl SoftSpokenOTSender {
     pub fn process(
         self,
         message: (&Round1Output, &[[Scalar; OT_WIDTH]; ETA]),
-    ) -> Result<
-        (Box<[[Scalar; OT_WIDTH]; ETA]>, Box<Round2Output>),
-        &'static str,
-    > {
+    ) -> SoftSpokenOTSenderResult {
         let mut r_x = [[[0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
             KAPPA_DIV_SOFT_SPOKEN_K]; SOFT_SPOKEN_Q];
 

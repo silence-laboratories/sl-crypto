@@ -147,7 +147,7 @@ pub fn derive_child_pubkey(
         .map_err(|_| BIP32Error::InvalidChainCode)?;
 
     if child_number.is_normal() {
-        hmac_hasher.update(&parent_pubkey.to_encoded_point(true).as_bytes());
+        hmac_hasher.update(parent_pubkey.to_encoded_point(true).as_bytes());
     } else {
         return Err(BIP32Error::HardenedChildNotSupported);
     }
@@ -158,7 +158,7 @@ pub fn derive_child_pubkey(
     let il_int = U256::from_be_slice(il_int);
 
     // Has a chance of 1 in 2^127
-    if &il_int > &Secp256k1::ORDER {
+    if il_int > Secp256k1::ORDER {
         return Err(BIP32Error::InvalidChildScalar);
     }
 
@@ -214,7 +214,7 @@ pub fn derive_xpub(
     root_chain_code: [u8; 32],
     chain_path: DerivationPath,
 ) -> Result<XPubKey, BIP32Error> {
-    let mut pubkey = root_public_key.clone();
+    let mut pubkey = *root_public_key;
     let mut chain_code = root_chain_code;
     let mut parent_fingerprint: [u8; 4] = [0u8; 4];
 

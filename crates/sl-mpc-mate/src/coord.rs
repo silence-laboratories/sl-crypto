@@ -48,7 +48,7 @@ impl Eq for Expire {}
 
 impl PartialOrd for Expire {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0).map(Ordering::reverse)
+        Some(self.cmp(other))
     }
 }
 
@@ -322,7 +322,7 @@ mod tests {
 
         let msg_id = MsgId::new(
             &InstanceId::from([0; 32]),
-            &sk.verifying_key().as_bytes(),
+            sk.verifying_key().as_bytes(),
             None,
             MessageTag::tag(0),
         );

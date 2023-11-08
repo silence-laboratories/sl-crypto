@@ -191,6 +191,7 @@ pub enum Kind {
     Pub,
 }
 
+#[derive(Clone)]
 pub struct MsgHdr {
     pub id: MsgId,
     pub ttl: Duration,
@@ -628,7 +629,11 @@ impl<'a> Message<'a> {
     ) -> Result<D, InvalidMessage> {
         let reader = self.verify(verify_key)?;
 
-        MessageReader::decode(reader).map_err(|_| InvalidMessage::DecodeError)
+        let result = MessageReader::decode(reader)
+            .map_err(|_| InvalidMessage::DecodeError)?;
+
+
+        Ok(result)
     }
 
     /// The same as verify_and_decode() but decodes using borrow decoder.
@@ -1105,7 +1110,7 @@ mod tests {
 
         let msg_id = MsgId::new(
             &InstanceId::from([0; 32]),
-            &sk.verifying_key().as_bytes(),
+            sk.verifying_key().as_bytes(),
             None,
             MessageTag::tag(0),
         );
