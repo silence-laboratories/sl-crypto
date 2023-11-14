@@ -32,30 +32,29 @@ pub struct PPRFOutput {
 pub fn build_pprf(
     session_id: &SessionId,
     sender_ot_seed: &SenderOutput,
-    batch: u32,
-    k: u8,
+    batch: usize, // BATCH_SIZE
+    k: usize,
 ) -> (SenderOTSeed, Vec<PPRFOutput>) {
-    let k = k as u32;
     let mut all_but_one_sender_seed = SenderOTSeed::default();
-    let two_power_k = 2u32.pow(k);
-    let mut output = vec![];
+    let two_power_k = 1_usize << k;
+    let mut output = Vec::with_capacity(batch / k);
 
     for j in 0..(batch / k) {
-        let mut t_x_i = vec![[[0u8; DIGEST_SIZE]; 2]; (k - 1) as usize];
+        let mut t_x_i = vec![[[0u8; DIGEST_SIZE]; 2]; k - 1];
 
-        let mut s_i = vec![[0u8; DIGEST_SIZE]; two_power_k as usize];
+        let mut s_i = vec![[0u8; DIGEST_SIZE]; two_power_k];
 
-        let mut s_i_plus_1 = vec![[0u8; DIGEST_SIZE]; two_power_k as usize];
+        let mut s_i_plus_1 = vec![[0u8; DIGEST_SIZE]; two_power_k];
 
-        s_i[0] = sender_ot_seed.one_time_pad_enc_keys[(j * k) as usize].rho_0;
-        s_i[1] = sender_ot_seed.one_time_pad_enc_keys[(j * k) as usize].rho_1;
+        s_i[0] = sender_ot_seed.one_time_pad_enc_keys[j * k].rho_0;
+        s_i[1] = sender_ot_seed.one_time_pad_enc_keys[j * k].rho_1;
 
         // for k=1 case
         s_i_plus_1[0] = s_i[0];
         s_i_plus_1[1] = s_i[1];
 
-        for i in 1..k as usize {
-            s_i_plus_1 = vec![[0u8; DIGEST_SIZE]; two_power_k as usize];
+        for i in 1..k {
+            s_i_plus_1 = vec![[0u8; DIGEST_SIZE]; two_power_k];
 
             for y in 0..(2usize.pow(i as u32)) {
                 let mut shake = Shake256::default();
@@ -70,8 +69,7 @@ pub fn build_pprf(
                     hash[DIGEST_SIZE..].try_into().unwrap();
             }
 
-            let big_f_i =
-                &sender_ot_seed.one_time_pad_enc_keys[(j * k) as usize + i];
+            let big_f_i = &sender_ot_seed.one_time_pad_enc_keys[j * k + i];
             let big_f_i_0 = big_f_i.rho_0;
             let big_f_i_1 = big_f_i.rho_1;
             t_x_i[i - 1][0] = big_f_i_0;
@@ -93,11 +91,11 @@ pub fn build_pprf(
         s_tilda_hash.update(session_id.as_ref());
         s_tilda_hash.update(b"SL-SOFT-SPOKEN-PPRF-HASH");
 
-        for y in 0..two_power_k {
+        for y in s_i_plus_1.iter().take(two_power_k) {
             let mut shake = Shake256::default();
             shake.update(session_id.as_ref());
             shake.update(b"SL-SOFT-SPOKEN-PPRF-PROOF");
-            shake.update(&s_i_plus_1[y as usize]);
+            shake.update(y);
             let mut s_tilda_y = [0u8; DIGEST_SIZE * 2];
             shake.finalize_xof().read(&mut s_tilda_y);
 
@@ -129,16 +127,14 @@ pub fn build_pprf(
 pub fn eval_pprf(
     session_id: &SessionId,
     receiver_ot_seed: &ReceiverOutput,
-    batch: u32,
-    k: u8,
+    batch: usize,
+    k: usize,
     output: Vec<PPRFOutput>,
 ) -> Result<ReceiverOTSeed, &'static str> {
-    let k = k as usize;
-    let loop_count = (batch / k as u32) as usize;
+    let loop_count = batch / k;
     let mut all_but_one_receiver_seed = ReceiverOTSeed::default();
-    let two_power_k = 1 << k; // 2usize.pow(k as u32);
+    let two_power_k = 1 << k;
 
-    // TODO: fix clippy
     for (j, out) in output.iter().enumerate().take(loop_count) {
         let t_x_i = &out.t;
         let mut s_star_i = vec![[0u8; DIGEST_SIZE]; two_power_k];
@@ -313,7 +309,7 @@ mod test {
 
     #[test]
     fn test_pprf() {
-        let batch_size: u32 = 8;
+        let batch_size = 8;
         let mut rng = rand::thread_rng();
 
         let (sender_ot_seed, receiver_ot_seed) = generate_seed_ot_for_test();
