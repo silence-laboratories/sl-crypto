@@ -1,5 +1,5 @@
 use std::{
-    ops::{DerefMut, Deref},
+    ops::{Deref, DerefMut},
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},

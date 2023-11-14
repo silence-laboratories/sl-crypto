@@ -1,18 +1,14 @@
-use bs58::Alphabet;
-
-use elliptic_curve::{Curve, sec1::ToEncodedPoint};
-use elliptic_curve::ops::Reduce;
-use k256::{ProjectivePoint, Scalar, U256, Secp256k1};
-
-use derivation_path::{ChildIndex, DerivationPath};
-
 use base64::{engine::general_purpose, Engine as _};
+use bs58::Alphabet;
+use derivation_path::{ChildIndex, DerivationPath};
 use hmac::{Hmac, Mac};
-
+use k256::{
+    elliptic_curve::{ops::Reduce, sec1::ToEncodedPoint, Curve},
+    ProjectivePoint, Scalar, Secp256k1, U256,
+};
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-
 
 /// 4-byte Key fingerprint
 pub type KeyFingerPrint = [u8; 4];
@@ -125,9 +121,9 @@ impl XPubKey {
         ]
         .concat();
 
-        let serialized: [u8; 78] = serialized
-            .try_into()
-            .expect("Invalid serialized extended public key length, must be 78 bytes");
+        let serialized: [u8; 78] = serialized.try_into().expect(
+            "Invalid serialized extended public key length, must be 78 bytes",
+        );
 
         if encoded {
             base58_encode(serialized)
@@ -143,8 +139,9 @@ pub fn derive_child_pubkey(
     parent_chain_code: [u8; 32],
     child_number: &ChildIndex,
 ) -> Result<(Scalar, ProjectivePoint, [u8; 32]), BIP32Error> {
-    let mut hmac_hasher = Hmac::<sha2::Sha512>::new_from_slice(&parent_chain_code)
-        .map_err(|_| BIP32Error::InvalidChainCode)?;
+    let mut hmac_hasher =
+        Hmac::<sha2::Sha512>::new_from_slice(&parent_chain_code)
+            .map_err(|_| BIP32Error::InvalidChainCode)?;
 
     if child_number.is_normal() {
         hmac_hasher.update(parent_pubkey.to_encoded_point(true).as_bytes());
@@ -167,17 +164,22 @@ pub fn derive_child_pubkey(
     let child_pubkey = pubkey + parent_pubkey;
 
     // Return error if child pubkey is the point at infinity
-    if child_pubkey ==  ProjectivePoint::IDENTITY {
+    if child_pubkey == ProjectivePoint::IDENTITY {
         return Err(BIP32Error::PubkeyPointAtInfinity);
     }
 
-    Ok((Scalar::reduce(il_int), child_pubkey, child_chain_code.try_into().unwrap()))
+    Ok((
+        Scalar::reduce(il_int),
+        child_pubkey,
+        child_chain_code.try_into().unwrap(),
+    ))
 }
 
 /// Get the fingerprint of the root public key
 pub fn get_finger_print(public_key: &ProjectivePoint) -> KeyFingerPrint {
     let pubkey_bytes: [u8; 33] = public_key
-        .to_encoded_point(true).as_bytes()
+        .to_encoded_point(true)
+        .as_bytes()
         .as_ref()
         .try_into()
         .expect("compressed pubkey must be 33 bytes");
@@ -192,7 +194,10 @@ pub fn get_finger_print(public_key: &ProjectivePoint) -> KeyFingerPrint {
 /// * `root_chain_code` - Root chain code (32 bytes)
 /// # Returns
 /// * `key_id` - Base64 encoded string
-pub fn generate_key_id(root_pubkey: &ProjectivePoint, root_chain_code: [u8; 32]) -> String {
+pub fn generate_key_id(
+    root_pubkey: &ProjectivePoint,
+    root_chain_code: [u8; 32],
+) -> String {
     let id = sha2::Sha256::new()
         .chain_update(root_pubkey.to_encoded_point(true).as_bytes().as_ref())
         .chain_update(root_chain_code)
@@ -281,7 +286,10 @@ mod tests {
 
         println!("{}", xpub_string);
         println!("{}", hex::encode(root_chain_code));
-        println!("{}", hex::encode(root_public_key.to_encoded_point(true).as_bytes()));
+        println!(
+            "{}",
+            hex::encode(root_public_key.to_encoded_point(true).as_bytes())
+        );
     }
 
     #[test]

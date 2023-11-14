@@ -8,9 +8,7 @@ use sl_mpc_mate::message::*;
 use crate::utils::TranscriptProtocol;
 
 /// Non-interactive Proof of knowledge of discrete logarithm with Fiat-Shamir transform.
-#[derive(
-    Clone, Debug, PartialEq, Eq, bincode::Encode, bincode::Decode,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, bincode::Encode, bincode::Decode)]
 pub struct DLogProof {
     /// Public point `t`.
     pub t: Opaque<ProjectivePoint, GR>,
@@ -135,8 +133,7 @@ mod tests {
         let proof =
             DLogProof::prove(&x, &base_point, &mut transcript, &mut rng);
 
-        let mut verify_transcript =
-            Transcript::new(b"test-dlog-proof-wrong");
+        let mut verify_transcript = Transcript::new(b"test-dlog-proof-wrong");
 
         assert!(
             !proof.verify(&y, &base_point, &mut verify_transcript),

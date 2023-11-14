@@ -3,8 +3,8 @@ mod messages;
 #[allow(clippy::module_inception)]
 mod endemic_ot;
 
-pub use messages::*;
 pub use endemic_ot::*;
+pub use messages::*;
 
 pub const BATCH_SIZE: usize = 256;
 
@@ -21,7 +21,6 @@ mod test {
 
     #[test]
     fn test_endemic_ot() {
-
         let mut rng = rand::thread_rng();
         let session_id = SessionId::random(&mut rng);
 
@@ -38,7 +37,8 @@ mod test {
 
             let rec_pad = &receiver_output.one_time_pad_decryption_keys[i];
 
-            let bit = receiver_output.packed_random_choice_bits.extract_bit(i);
+            let bit =
+                receiver_output.packed_random_choice_bits.extract_bit(i);
             if bit {
                 assert_eq!(&sender_pad.rho_1, rec_pad);
             } else {

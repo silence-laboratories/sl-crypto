@@ -6,9 +6,9 @@ use rand::prelude::*;
 pub mod math;
 pub mod matrix;
 
+pub mod bip32;
 pub mod coord;
 pub mod message;
-pub mod bip32;
 
 /// Reexport bincode
 pub use bincode;

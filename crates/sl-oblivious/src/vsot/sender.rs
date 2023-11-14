@@ -1,9 +1,12 @@
-use elliptic_curve::{sec1::ToEncodedPoint, subtle::ConstantTimeEq};
-use k256::{ProjectivePoint, Scalar};
+use k256::{
+    elliptic_curve::{sec1::ToEncodedPoint, subtle::ConstantTimeEq},
+    ProjectivePoint, Scalar,
+};
 use merlin::Transcript;
-use rayon::prelude::*;
-use sl_mpc_mate::{xor_byte_arrays, SessionId};
 use rand::prelude::*;
+use rayon::prelude::*;
+
+use sl_mpc_mate::{xor_byte_arrays, SessionId};
 
 use crate::{
     vsot::{
@@ -29,7 +32,7 @@ pub struct SendR1;
 /// State of the sender after processing Message 2.
 pub struct SendR2 {
     /// One time pad encryption keys
-    pad_enc_keys: Vec<OneTimePadEncryptionKeys> // size BATCH_SIZE
+    pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size BATCH_SIZE
 }
 
 impl VSOTSender<SendR1> {
@@ -84,8 +87,10 @@ impl VSOTSender<SendR1> {
         let mut challenges = vec![];
         let mut pad_enc_keys = vec![];
 
-        msg2.encoded_choice_bits.par_iter().enumerate().map(
-            |(idx, encoded_choice)| {
+        msg2.encoded_choice_bits
+            .par_iter()
+            .enumerate()
+            .map(|(idx, encoded_choice)| {
                 let rho_0_prehash = encoded_choice.0 * self.secret_key;
                 let rho_1_prehash =
                     (encoded_choice.0 - self.public_key) * self.secret_key;
@@ -126,11 +131,10 @@ impl VSOTSender<SendR1> {
 
                 (
                     xor_byte_arrays(&rho_0_double_hash, &rho_1_double_hash),
-
-                    OneTimePadEncryptionKeys { rho_0, rho_1 }
+                    OneTimePadEncryptionKeys { rho_0, rho_1 },
                 )
-            },
-        ).unzip_into_vecs(&mut challenges, &mut pad_enc_keys);
+            })
+            .unzip_into_vecs(&mut challenges, &mut pad_enc_keys);
 
         let next_state = VSOTSender {
             session_id,
@@ -203,13 +207,13 @@ pub struct OneTimePadEncryptionKeys {
 /// The output of the VSOT receiver.
 #[derive(Clone, bincode::Encode, bincode::Decode)]
 pub struct SenderOutput {
-    pub one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys> // size == BATCH_SIZE
+    pub one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == BATCH_SIZE
 }
 
 impl SenderOutput {
     /// Create a new `SenderOutput`.
     pub fn new(
-        one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys> // size == BATCH_SIZE
+        one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == BATCH_SIZE
     ) -> Self {
         Self {
             one_time_pad_enc_keys,

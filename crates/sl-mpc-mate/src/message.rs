@@ -35,9 +35,9 @@ use elliptic_curve::{
     group::GroupEncoding, CurveArithmetic, FieldBytes, NonZeroScalar,
     PrimeField,
 };
-use sha2::Sha256;
 use rand_core::CryptoRng;
 use rand_core::RngCore;
+use sha2::Sha256;
 
 pub use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
 pub use x25519_dalek::{PublicKey, ReusableSecret};
@@ -408,11 +408,11 @@ impl Builder<SealEncrypted> {
     }
 
     /// Encrypt message.
-    pub fn encrypt<T: RngCore + CryptoRng>(
+    pub fn encrypt<R: RngCore + CryptoRng>(
         self,
         start: usize,
         public_key: &PublicKey,
-        mut rng: T
+        rng: R,
     ) -> Result<Vec<u8>, InvalidMessage> {
         let Self {
             mut buffer,
@@ -421,8 +421,8 @@ impl Builder<SealEncrypted> {
 
         let last = buffer.len() - (TAG_SIZE + PUBLIC_KEY_LENGTH);
         let (msg, tail) = buffer.split_at_mut(last);
-        
-        let eph_secret = ReusableSecret::random_from_rng(&mut rng);
+
+        let eph_secret = ReusableSecret::random_from_rng(rng);
         let eph_pk = PublicKey::from(&eph_secret);
 
         // TODO Review key generation!!!
@@ -443,10 +443,10 @@ impl Builder<SealEncrypted> {
 
         let mut nonce = Nonce::<Aead>::default();
         let digest: [u8; 32] = Sha256::new()
-                .chain_update(eph_pk.to_bytes())
-                .chain_update(public_key.to_bytes())
-                .finalize()
-                .into(); 
+            .chain_update(eph_pk.to_bytes())
+            .chain_update(public_key.to_bytes())
+            .finalize()
+            .into();
         nonce.copy_from_slice(&digest[..12]);
 
         let tag = cipher
@@ -460,16 +460,16 @@ impl Builder<SealEncrypted> {
     }
 
     /// Create encrypted message
-    pub fn encode<E: Encode, T: RngCore + CryptoRng>(
+    pub fn encode<E: Encode, R: RngCore + CryptoRng>(
         msg_id: &MsgId,
         ttl: Duration,
         public_key: &PublicKey,
         msg: &E,
-        mut rng: T
+        rng: R,
     ) -> Result<Vec<u8>, InvalidMessage> {
         let mut buf = Self::allocate(msg_id, ttl.as_secs() as u32, msg);
         buf.encode(msg).map_err(|_| InvalidMessage::DecodeError)?;
-        buf.encrypt(MESSAGE_HEADER_SIZE, public_key, &mut rng)
+        buf.encrypt(MESSAGE_HEADER_SIZE, public_key, rng)
     }
 }
 
@@ -632,7 +632,6 @@ impl<'a> Message<'a> {
         let result = MessageReader::decode(reader)
             .map_err(|_| InvalidMessage::DecodeError)?;
 
-
         Ok(result)
     }
 
@@ -730,10 +729,10 @@ impl<'a> Message<'a> {
 
         let mut nonce = Nonce::<Aead>::default();
         let digest: [u8; 32] = Sha256::new()
-                .chain_update(eph_pk.to_bytes())
-                .chain_update(public_key.to_bytes())
-                .finalize()
-                .into(); 
+            .chain_update(eph_pk.to_bytes())
+            .chain_update(public_key.to_bytes())
+            .finalize()
+            .into();
         nonce.copy_from_slice(&digest[..12]);
 
         // TODO Review key generation!!!
@@ -752,7 +751,7 @@ impl<'a> Message<'a> {
 
         Ok(SliceReader::new(ciphertext))
     }
-    
+
     /// Helper method to seal decrypt and decode message.
     pub fn decrypt_seal_and_decode<D: Decode>(
         &mut self,
@@ -775,8 +774,6 @@ impl<'a> Message<'a> {
         MessageReader::borrow_decode(reader)
             .map_err(|_| InvalidMessage::DecodeError)
     }
-
-
 }
 
 pub struct MessageReader;
