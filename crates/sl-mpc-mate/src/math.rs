@@ -15,7 +15,7 @@ pub struct Polynomial<C: CurveArithmetic> {
     pub coeffs: Vec<C::Scalar>,
 }
 
-impl<C: CurveArithmetic> Polynomial<C> {
+impl<C: CurveArithmetic<Uint = U256>> Polynomial<C> {
     /// Create a new polynomial with the given coefficients.
     pub fn new(coeffs: Vec<C::Scalar>) -> Self {
         Self { coeffs }
@@ -56,36 +56,38 @@ impl<C: CurveArithmetic> Polynomial<C> {
     ///
     /// `x`: point at which to compute the derivative.
     /// Arithmetic is done modulo the curve order
-    pub fn derivative_at(&self, n: usize, x: &C::Scalar) -> C::Scalar
-    where
-        C: CurveArithmetic<Uint = U256>,
-    {
-        (n..self.coeffs.len())
-            .map(|i| {
+    pub fn derivative_at(&self, n: usize, x: &C::Scalar) -> C::Scalar {
+        self.coeffs
+            .iter()
+            .enumerate()
+            .skip(n)
+            .map(|(i, coeff)| {
                 // TODO build static table of factorials ??
                 //      U256::wrapping_mul if const fn
-                let num: U256 = factorial_range(i - n, i);
+                let num: C::Uint = factorial_range(i - n, i); //
                 let scalar_num = C::Scalar::reduce(num);
-                let coeff = &self.coeffs[i];
                 let result = x.pow_vartime([(i - n) as u64]);
 
                 scalar_num * coeff * result
             })
-            .fold(C::Scalar::ZERO, |acc, x| acc + x)
+            .sum()
     }
 }
 
 /// A polynomial with coefficients of type `ProjectivePoint`.
-#[derive(Debug, Clone, PartialEq, Eq, Default, bincode::Encode, bincode::Decode)]
-#[bincode(bounds = "C::ProjectivePoint: GroupEncoding")]
-pub struct GroupPolynomial<C: CurveArithmetic>
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, bincode::Encode, bincode::Decode,
+)]
+#[bincode(bounds = "C: CurveArithmetic, C::ProjectivePoint: GroupEncoding")]
+pub struct GroupPolynomial<C>
 where
+    C: CurveArithmetic,
     C::ProjectivePoint: GroupEncoding,
 {
     pub coeffs: Vec<Opaque<C::ProjectivePoint, GR>>,
 }
 
-impl<C: CurveArithmetic> GroupPolynomial<C>
+impl<C: CurveArithmetic<Uint = U256>> GroupPolynomial<C>
 where
     C::ProjectivePoint: GroupEncoding,
 {
@@ -95,7 +97,9 @@ where
     }
 
     pub fn identity(size: usize) -> Self {
-        Self { coeffs: vec![Opaque::from(C::ProjectivePoint::identity()); size] }
+        Self {
+            coeffs: vec![Opaque::from(C::ProjectivePoint::identity()); size],
+        }
     }
 
     /// Evaluate the polynomial at 0 (the constant term).
@@ -116,28 +120,21 @@ where
     }
 
     /// Get the coeffs of the polynomial derivative
-    pub fn derivative_coeffs(&self, n: usize) -> Vec<C::ProjectivePoint>
+    pub fn derivative_coeffs(
+        &self,
+        n: usize,
+    ) -> impl Iterator<Item = C::ProjectivePoint> + '_
     where
         C: CurveArithmetic<Uint = U256>,
     {
         let (_, sub_v) = self.coeffs.split_at(n);
 
-        sub_v
-            .iter()
-            .enumerate()
-            .map(|(position, u_i)| {
-                *u_i * C::Scalar::reduce(factorial_range(
-                    position,
-                    position + n,
-                ))
-            })
-            .collect()
+        sub_v.iter().enumerate().map(move |(position, u_i)| {
+            u_i.0 * C::Scalar::reduce(factorial_range(position, position + n))
+        })
     }
 
-    pub fn points(
-        &self,
-    ) -> impl Iterator<Item = &'_ <C as CurveArithmetic>::ProjectivePoint>
-    {
+    pub fn points(&self) -> impl Iterator<Item = &'_ C::ProjectivePoint> {
         self.coeffs.iter().map(|p| &p.0)
     }
 
@@ -186,30 +183,31 @@ pub fn factorial_range(start: usize, end: usize) -> U256 {
         panic!("Factorial of {} is too large to fit in 256 bits", end);
     }
 
-    (start + 1..=end).fold(U256::from_u64(1_u64), |acc, x| {
-        acc.wrapping_mul(&U256::from_u64(x as u64))
+    (start + 1..=end).fold(U256::from(1_u64), |acc, x| {
+        acc.wrapping_mul(&U256::from(x as u64))
     })
 }
 
 /// Feldman verification
 pub fn feldman_verify<C: CurveArithmetic>(
-    u_i_k: &[C::ProjectivePoint],
+    u_i_k: impl Iterator<Item = C::ProjectivePoint>,
     x_i: &NonZeroScalar<C>,
     f_i_value: &C::Scalar,
     g: &C::ProjectivePoint,
 ) -> Option<bool> {
-    if u_i_k.is_empty() {
+    let point: C::ProjectivePoint = u_i_k
+        .enumerate()
+        .map(|(i, coeff)| {
+            // x_i^i mod p
+            let val = x_i.pow([i as u64]);
+
+            // x_i^i * coeff mod p
+            coeff * val
+        })
+        .sum();
+
+    if point.is_identity().into() {
         return None;
-    }
-
-    let mut point = C::ProjectivePoint::identity();
-
-    for (i, coeff) in u_i_k.iter().enumerate() {
-        // x_i^i mod p
-        let val = x_i.pow([i as u64]);
-
-        // x_i^i * coeff mod p
-        point += *coeff * val;
     }
 
     let expected_point = *g * f_i_value;
