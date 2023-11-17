@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 use elliptic_curve::subtle::{Choice, ConditionallySelectable};
 use rand::prelude::*;
@@ -54,6 +54,12 @@ impl<const T: usize> Deref for ByteArray<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl<const N: usize> DerefMut for ByteArray<N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

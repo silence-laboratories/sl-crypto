@@ -11,8 +11,7 @@ use crate::{matrix::matrix_inverse, message::*};
 
 /// A polynomial with coefficients of type `Scalar`.
 pub struct Polynomial<C: CurveArithmetic> {
-    /// The coefficients of the polynomial.
-    pub coeffs: Vec<C::Scalar>,
+    coeffs: Vec<C::Scalar>,
 }
 
 impl<C: CurveArithmetic<Uint = U256>> Polynomial<C> {
@@ -28,6 +27,11 @@ impl<C: CurveArithmetic<Uint = U256>> Polynomial<C> {
                 .map(|_| C::Scalar::random(&mut *rng))
                 .collect(),
         }
+    }
+
+    /// Set constant to Scalar::ZERO
+    pub fn reset_contant(&mut self) {
+        self.coeffs[0] = C::Scalar::ZERO;
     }
 
     /// Evaluate the polynomial at 0 (the constant term).
@@ -79,7 +83,7 @@ impl<C: CurveArithmetic<Uint = U256>> Polynomial<C> {
     Debug, Clone, PartialEq, Eq, Default, bincode::Encode, bincode::Decode,
 )]
 #[bincode(bounds = "C: CurveArithmetic, C::ProjectivePoint: GroupEncoding")]
-pub struct GroupPolynomial<C>
+pub struct GroupPolynomial<C> // FIXME should we make it zeroize ???
 where
     C: CurveArithmetic,
     C::ProjectivePoint: GroupEncoding,
@@ -103,8 +107,8 @@ where
     }
 
     /// Evaluate the polynomial at 0 (the constant term).
-    pub fn get_constant(&self) -> &C::ProjectivePoint {
-        &self.coeffs[0]
+    pub fn get_constant(&self) -> C::ProjectivePoint {
+        *self.coeffs[0]
     }
 
     /// Add another polynomial's coefficients element wise to this one inplace.

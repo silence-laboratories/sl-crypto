@@ -12,6 +12,8 @@ use sha3::{
     Shake256,
 };
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 use sl_mpc_mate::{
     bincode::{
         de::{read::Reader, BorrowDecode, BorrowDecoder, Decoder},
@@ -50,7 +52,8 @@ pub const RAND_EXTENSION_SIZE: usize =
     COT_EXTENDED_BLOCK_SIZE_BYTES - COT_BATCH_SIZE_BYTES;
 pub const SOFT_SPOKEN_LABEL: &[u8] = b"SL-SOFT-SPOKEN-OT";
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Round1Output {
     pub u: [[u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
     pub w_prime: [u8; SOFT_SPOKEN_S_BYTES],
@@ -96,7 +99,8 @@ impl Decode for Round1Output {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Round2Output {
     pub tau: [[Scalar; OT_WIDTH]; ETA],
 }

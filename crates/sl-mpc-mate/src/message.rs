@@ -38,6 +38,7 @@ use elliptic_curve::{
 use rand_core::CryptoRng;
 use rand_core::RngCore;
 use sha2::Sha256;
+use zeroize::{Zeroize, Zeroizing};
 
 pub use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
 pub use x25519_dalek::{PublicKey, ReusableSecret};
@@ -518,10 +519,10 @@ impl Builder<Encrypted> {
             return Err(InvalidMessage::EncPublicKey);
         }
 
-        let key = hchacha::<U10>(
+        let key = Zeroizing::new(hchacha::<U10>(
             GenericArray::from_slice(shared_secret.as_bytes()),
             &GenericArray::default(),
-        );
+        ));
 
         let cipher = Aead::new(&key);
 
@@ -805,6 +806,15 @@ impl MessageReader {
 /// Wrapper to provide bincode serialization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Opaque<T, K = ()>(pub T, pub PhantomData<K>);
+
+impl<Z, K> Zeroize for Opaque<Z, K>
+where
+    Z: Zeroize,
+{
+    fn zeroize(&mut self) {
+        self.0.zeroize()
+    }
+}
 
 impl<K, R, T: Mul<R>> Mul<R> for Opaque<T, K> {
     type Output = T::Output;

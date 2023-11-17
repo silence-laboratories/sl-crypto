@@ -138,7 +138,7 @@ impl EndemicOTReceiver<RecR1> {
         (next_state, msg1)
     }
 
-    pub fn process(self, msg2: EndemicOTMsg2) -> ReceiverOutput {
+    pub fn process(self, msg2: &EndemicOTMsg2) -> ReceiverOutput {
         let mut rho_w_vec = vec![];
         msg2.m_b_list
             .par_iter()

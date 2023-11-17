@@ -30,7 +30,7 @@ mod test {
 
         let (sender_output, msg2) = sender.process(msg1);
 
-        let receiver_output = receiver.process(msg2);
+        let receiver_output = receiver.process(&msg2);
 
         for i in 0..BATCH_SIZE {
             let sender_pad = &sender_output.one_time_pad_enc_keys[i];

@@ -6,6 +6,8 @@ use sha3::{
     Shake256,
 };
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 use sl_mpc_mate::SessionId;
 
 pub const DIGEST_SIZE: usize = 32;
@@ -19,6 +21,7 @@ use crate::{
 use super::ReceiverOTSeed;
 
 #[derive(Clone, Debug, bincode::Encode, bincode::Decode)]
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct PPRFOutput {
     pub t: Vec<[[u8; DIGEST_SIZE]; 2]>,
 
@@ -129,7 +132,7 @@ pub fn eval_pprf(
     receiver_ot_seed: &ReceiverOutput,
     batch: usize,
     k: usize,
-    output: Vec<PPRFOutput>,
+    output: &[PPRFOutput],
 ) -> Result<ReceiverOTSeed, &'static str> {
     let loop_count = batch / k;
     let mut all_but_one_receiver_seed = ReceiverOTSeed::default();
@@ -324,7 +327,7 @@ mod test {
             &receiver_ot_seed,
             batch_size,
             2,
-            output_2,
+            &output_2,
         )
         .unwrap();
     }
