@@ -15,7 +15,7 @@ pub const DIGEST_SIZE: usize = 32;
 use crate::{
     soft_spoken::SenderOTSeed,
     utils::ExtractBit,
-    vsot::{ReceiverOutput, SenderOutput},
+    endemic_ot::{ReceiverOutput, SenderOutput},
 };
 
 use super::ReceiverOTSeed;
@@ -263,8 +263,8 @@ mod test {
 
     use rand::{thread_rng, Rng};
 
-    use crate::vsot::{
-        OneTimePadEncryptionKeys, BATCH_SIZE, BATCH_SIZE_BITS,
+    use crate::endemic_ot::{
+        OneTimePadEncryptionKeys, BATCH_SIZE, BATCH_SIZE_BYTES,
     };
     use sl_mpc_mate::{HashBytes, SessionId};
 
@@ -282,7 +282,7 @@ mod test {
             .collect::<Vec<_>>(),
         };
 
-        let random_choices: [u8; BATCH_SIZE_BITS] = rng.gen();
+        let random_choices: [u8; BATCH_SIZE_BYTES] = rng.gen();
 
         let one_time_pad_enc_keys = (0..BATCH_SIZE)
             .map(|i| {

@@ -11,7 +11,6 @@ use crate::{
         EndemicOTMsg1, EndemicOTMsg2, BATCH_SIZE, BATCH_SIZE_BYTES,
     },
     utils::ExtractBit,
-    vsot::{OneTimePadEncryptionKeys, ReceiverOutput, SenderOutput},
 };
 
 /// RO for EndemicOT
@@ -154,5 +153,49 @@ impl EndemicOTReceiver<RecR1> {
             .collect_into_vec(&mut rho_w_vec);
 
         ReceiverOutput::new(self.packed_choice_bits, rho_w_vec)
+    }
+}
+
+/// The one time pad encryption keys for a single choice.
+#[derive(Default, Clone, Copy, bincode::Encode, bincode::Decode)]
+pub struct OneTimePadEncryptionKeys {
+    pub rho_0: [u8; 32],
+    pub rho_1: [u8; 32],
+}
+
+/// The output of the OT sender.
+#[derive(Clone, bincode::Encode, bincode::Decode)]
+pub struct SenderOutput {
+    pub one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == BATCH_SIZE
+}
+
+impl SenderOutput {
+    /// Create a new `SenderOutput`.
+    pub fn new(
+        one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == BATCH_SIZE
+    ) -> Self {
+        Self {
+            one_time_pad_enc_keys,
+        }
+    }
+}
+
+/// The output of the OT receiver.
+#[derive(Clone, Debug)]
+pub struct ReceiverOutput {
+    pub(crate) packed_random_choice_bits: [u8; BATCH_SIZE_BYTES], // batch_size bits
+    pub(crate) one_time_pad_decryption_keys: Vec<[u8; 32]>, // size == BATCH_SIZE
+}
+
+impl ReceiverOutput {
+    /// Create a new `ReceiverOutput`.
+    pub fn new(
+        packed_random_choice_bits: [u8; BATCH_SIZE_BYTES],
+        one_time_pad_decryption_keys: Vec<[u8; 32]>, // size == BATCH_SIZE
+    ) -> Self {
+        Self {
+            packed_random_choice_bits,
+            one_time_pad_decryption_keys,
+        }
     }
 }

@@ -1,14 +1,7 @@
-/// Correlated Oblivious Transfer
-pub mod cot;
-
-/// Verified Simplest Oblivious Transfer
-pub mod vsot;
-
 /// Soft spoken Oblivious Transfer
 pub mod soft_spoken;
 
-pub mod soft_spoken_mod;
-
+/// zkproofs
 pub mod zkproofs;
 
 /// Endemic 1 out of 2 Oblivious Transfer
