@@ -31,7 +31,7 @@ pub struct PPRFOutput {
 }
 
 /// Implements BuildPPRF and ProvePPRF functionality of
-/// https://eprint.iacr.org/2022/192.pdf p.22, fig. 13
+/// Fig.13 and Fig.14 https://eprint.iacr.org/2022/192.pdf
 pub fn build_pprf(
     session_id: &SessionId,
     sender_ot_seed: &SenderOutput,

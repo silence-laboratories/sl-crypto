@@ -29,6 +29,7 @@ fn h_function(
 }
 
 /// Sender of the Endemic OT protocol.
+/// 1 out of 2 Endemic OT Fig.8 https://eprint.iacr.org/2019/706.pdf
 pub struct EndemicOTSender {
     session_id: SessionId,
     t_b_0_list: [ReusableSecret; BATCH_SIZE],
@@ -86,6 +87,7 @@ impl EndemicOTSender {
 }
 
 /// EndemicOTReceiver
+/// 1 out of 2 Endemic OT Fig.8 https://eprint.iacr.org/2019/706.pdf
 pub struct EndemicOTReceiver<T> {
     packed_choice_bits: [u8; BATCH_SIZE_BYTES],
     state: T,

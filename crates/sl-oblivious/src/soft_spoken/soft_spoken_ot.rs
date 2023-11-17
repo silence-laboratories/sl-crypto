@@ -1,3 +1,8 @@
+///
+///  SoftSpokenOT protocol https://eprint.iacr.org/2022/192.pdf
+///  Instantiation of SoftSpokenOT based on Fig.10 https://eprint.iacr.org/2015/546.pdf
+///
+
 use std::array;
 
 use elliptic_curve::{
