@@ -26,7 +26,8 @@ pub mod paillier {
     // print-type-size     field `.pp_params`: 1032 bytes
     // print-type-size     field `.qq_params`: 1032 bytes
 
-    pub type SK2048 = SK<{ U4096::LIMBS }, { U2048::LIMBS }, { U1024::LIMBS }>;
+    pub type SK2048 =
+        SK<{ U4096::LIMBS }, { U2048::LIMBS }, { U1024::LIMBS }>;
     pub type PK2048 = PK<{ U4096::LIMBS }, { U2048::LIMBS }>;
 }
 
@@ -148,7 +149,7 @@ where
 
         // m = (c^phi mod N^2 - 1) / N
         let m: Uint<M> = c
-            .pow_bounded_exp(&self.phi.resize(), Uint::<M>::BITS)
+            .pow_bounded_exp(&self.phi.resize::<M>(), Uint::<M>::BITS)
             .retrieve()
             .wrapping_sub(&Uint::ONE)
             .wrapping_div(&self.n.resize::<C>())
@@ -186,16 +187,29 @@ where
             .sub_mod(&n_mod_pp, pp)
             .wrapping_sub(&Uint::ONE) // L_p(x) = (x-1)/p
             .wrapping_div(&p.resize()) // FIXME: var time on P
-            .inv_odd_mod_bounded(&p.resize(), Uint::<M>::BITS, Uint::<P>::BITS)
+            .inv_odd_mod_bounded(
+                &p.resize(),
+                Uint::<M>::BITS,
+                Uint::<P>::BITS,
+            )
             .0
             .resize() // dropping top half of bits
     }
 
-    fn mp(&self, cp: Uint<M>, p: &Uint<P>, hp: &Uint<P>, param: &DynResidueParams<M>) -> Uint<P> {
+    fn mp(
+        &self,
+        cp: Uint<M>,
+        p: &Uint<P>,
+        hp: &Uint<P>,
+        param: &DynResidueParams<M>,
+    ) -> Uint<P> {
         // L_p(cp^{p-1} mod p^2) h_p mod p
 
         let mp: Uint<P> = DynResidue::new(&cp, *param)
-            .pow_bounded_exp(&p.wrapping_sub(&Uint::ONE).resize(), Uint::<P>::BITS)
+            .pow_bounded_exp(
+                &p.wrapping_sub(&Uint::ONE).resize::<P>(),
+                Uint::<P>::BITS,
+            )
             .retrieve()
             .wrapping_sub(&Uint::ONE) // Lp(x) = (x-1)/p
             .wrapping_div(&p.resize())
@@ -317,16 +331,25 @@ where
         m.lt(&self.n).then_some(RawPlaintext(*m))
     }
 
-    pub fn encrypt(&self, m: &RawPlaintext<M>, rng: &mut impl CryptoRngCore) -> RawCiphertext<C> {
+    pub fn encrypt(
+        &self,
+        m: &RawPlaintext<M>,
+        rng: &mut impl CryptoRngCore,
+    ) -> RawCiphertext<C> {
         let r = self.gen_r(rng);
         self.encrypt_with_r(m, &r)
     }
 
-    pub fn encrypt_with_r(&self, m: &RawPlaintext<M>, r: &Uint<M>) -> RawCiphertext<C> {
+    pub fn encrypt_with_r(
+        &self,
+        m: &RawPlaintext<M>,
+        r: &Uint<M>,
+    ) -> RawCiphertext<C> {
         let r = DynResidue::new(&r.resize(), self.params);
 
         // r^N mod N^2
-        let r_pow_n = r.pow_bounded_exp(&self.n.resize(), Uint::<M>::BITS);
+        let r_pow_n =
+            r.pow_bounded_exp(&self.n.resize::<M>(), Uint::<M>::BITS);
 
         //
         // g == (1 + N)
@@ -348,7 +371,11 @@ where
         RawCiphertext(c.retrieve())
     }
 
-    pub fn add(&self, c_1: &RawCiphertext<C>, c_2: &RawCiphertext<C>) -> RawCiphertext<C> {
+    pub fn add(
+        &self,
+        c_1: &RawCiphertext<C>,
+        c_2: &RawCiphertext<C>,
+    ) -> RawCiphertext<C> {
         // c_1 * c_2 mod N^2
         let c_1 = DynResidue::new(&c_1.0, self.params);
         let c_2 = DynResidue::new(&c_2.0, self.params);
@@ -356,21 +383,29 @@ where
         RawCiphertext(c_1.mul(&c_2).retrieve())
     }
 
-    pub fn mul(&self, c: &RawCiphertext<C>, m: &RawPlaintext<M>) -> RawCiphertext<C> {
+    pub fn mul(
+        &self,
+        c: &RawCiphertext<C>,
+        m: &RawPlaintext<M>,
+    ) -> RawCiphertext<C> {
         // c = c^m mod N^2
         let c = DynResidue::new(&c.0, self.params)
-            .pow_bounded_exp(&m.0.resize(), Uint::<M>::BITS)
+            .pow_bounded_exp(&m.0.resize::<M>(), Uint::<M>::BITS)
             .retrieve();
 
         RawCiphertext(c)
     }
 
-    pub fn mul_vartime(&self, c: &RawCiphertext<C>, m: &RawPlaintext<M>) -> RawCiphertext<C> {
+    pub fn mul_vartime(
+        &self,
+        c: &RawCiphertext<C>,
+        m: &RawPlaintext<M>,
+    ) -> RawCiphertext<C> {
         let bits = m.0.bits_vartime();
 
         // c = c^m mod N^2
         let c = DynResidue::new(&c.0, self.params)
-            .pow_bounded_exp(&m.0.resize(), bits)
+            .pow_bounded_exp(&m.0.resize::<M>(), bits)
             .retrieve();
 
         RawCiphertext(c)
@@ -456,7 +491,9 @@ mod tests {
 
             let mr = SK.decrypt_fast(&c3);
 
-            mr == RawPlaintext(Uint::from_u64(x).wrapping_add(&Uint::from_u64(y)))
+            mr == RawPlaintext(
+                Uint::from_u64(x).wrapping_add(&Uint::from_u64(y)),
+            )
         }
 
         quickcheck(prop as fn(u64, u64) -> bool)
@@ -473,7 +510,9 @@ mod tests {
 
             let mr = SK.decrypt_fast(&c3);
 
-            mr == RawPlaintext(Uint::from_u64(x).wrapping_mul(&Uint::from_u64(y)))
+            mr == RawPlaintext(
+                Uint::from_u64(x).wrapping_mul(&U4096::from_u64(y)),
+            )
         }
 
         quickcheck(prop as fn(u64, u64) -> bool)
