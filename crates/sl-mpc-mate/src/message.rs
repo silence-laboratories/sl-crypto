@@ -41,7 +41,7 @@ use sha2::Sha256;
 use zeroize::{Zeroize, Zeroizing};
 
 pub use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
-pub use x25519_dalek::{PublicKey, ReusableSecret};
+pub use x25519_dalek::{PublicKey, ReusableSecret, StaticSecret};
 
 use crate::ByteArray;
 
@@ -712,7 +712,7 @@ impl<'a> Message<'a> {
     pub fn decrypt_seal(
         &mut self,
         start: usize,
-        secret: &ReusableSecret,
+        secret: &StaticSecret,
     ) -> Result<SliceReader, InvalidMessage> {
         let (data, rest) = self.buffer.split_at_mut(start);
 
@@ -757,7 +757,7 @@ impl<'a> Message<'a> {
     pub fn decrypt_seal_and_decode<D: Decode>(
         &mut self,
         start: usize,
-        secret: &ReusableSecret,
+        secret: &StaticSecret,
     ) -> Result<D, InvalidMessage> {
         let reader = self.decrypt_seal(start, secret)?;
 
@@ -768,7 +768,7 @@ impl<'a> Message<'a> {
     pub fn decrypt_seal_and_borrow_decode<'de, D: BorrowDecode<'de>>(
         &'de mut self,
         start: usize,
-        secret: &ReusableSecret,
+        secret: &StaticSecret,
     ) -> Result<D, InvalidMessage> {
         let reader = self.decrypt_seal(start, secret)?;
 
@@ -1194,7 +1194,7 @@ mod tests {
         let sk2 = SigningKey::from_bytes(&rand::random());
         let vk2 = sk2.verifying_key();
 
-        let en2 = ReusableSecret::random_from_rng(&mut rng);
+        let en2 = StaticSecret::random_from_rng(&mut rng);
         let pk2 = PublicKey::from(&en2);
 
         let msg_id = MsgId::new(
