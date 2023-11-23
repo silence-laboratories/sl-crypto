@@ -34,6 +34,11 @@ impl<C: CurveArithmetic<Uint = U256>> Polynomial<C> {
         self.coeffs[0] = C::Scalar::ZERO;
     }
 
+    /// Set constant
+    pub fn set_constant(&mut self, scalar: C::Scalar) {
+        self.coeffs[0] = scalar;
+    }
+
     /// Evaluate the polynomial at 0 (the constant term).
     pub fn get_constant(&self) -> &C::Scalar {
         &self.coeffs[0]
