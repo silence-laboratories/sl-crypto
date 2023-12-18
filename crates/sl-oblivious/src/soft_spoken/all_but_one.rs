@@ -13,15 +13,16 @@ use sl_mpc_mate::SessionId;
 pub const DIGEST_SIZE: usize = 32;
 
 use crate::{
+    endemic_ot::{ReceiverOutput, SenderOutput},
     soft_spoken::SenderOTSeed,
     utils::ExtractBit,
-    endemic_ot::{ReceiverOutput, SenderOutput},
 };
 
 use super::ReceiverOTSeed;
 
-#[derive(Clone, Debug, bincode::Encode, bincode::Decode)]
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(
+    Clone, Debug, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
+)]
 pub struct PPRFOutput {
     pub t: Vec<[[u8; DIGEST_SIZE]; 2]>,
 

@@ -3,8 +3,8 @@ use crypto_bigint::*;
 
 use curv::arithmetic::Converter;
 use kzen_paillier::{
-    Add, BigInt, Decrypt, DecryptionKey, EncryptWithChosenRandomness, EncryptionKey, Mul, Paillier,
-    Randomness, RawPlaintext as KzRawPlaintext,
+    Add, BigInt, Decrypt, DecryptionKey, EncryptWithChosenRandomness,
+    EncryptionKey, Mul, Paillier, Randomness, RawPlaintext as KzRawPlaintext,
 };
 
 static P: &str = "95779f0de6b61f3db4c53b1b32aa29e2efb52ebedab7968c37cb10917767547963a121d454c8024dc56f22c523da2dff553ad8a1621ad8f0c093ad09561165fce74fdf977ab1b5f57b4cdcce58f449bcce50cd80359ed0ec4083000c091fbb237e52b8237438ea82932ad0ed7d58fae54ea300461755a0dabc41b5e46af4cee1";
@@ -55,7 +55,9 @@ fn sl_gen_sk(c: &mut Criterion) {
     let p: U1024 = from_hex(P);
     let q: U1024 = from_hex(Q);
 
-    c.bench_function("sl-gen-sk", |b| b.iter(|| black_box(SK::from_pq(&p, &q))));
+    c.bench_function("sl-gen-sk", |b| {
+        b.iter(|| black_box(SK::from_pq(&p, &q)))
+    });
 }
 
 fn sl_encrypt(c: &mut Criterion) {
@@ -203,7 +205,9 @@ fn kz_mul(c: &mut Criterion) {
     });
 }
 
-criterion_group!(sl_benches, sl_gen_sk, sl_encrypt, sl_decrypt, sl_add, sl_mul);
+criterion_group!(
+    sl_benches, sl_gen_sk, sl_encrypt, sl_decrypt, sl_add, sl_mul
+);
 
 criterion_group!(kz_benches, kz_encrypt, kz_decrypt, kz_add, kz_mul);
 

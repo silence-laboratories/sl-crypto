@@ -2,7 +2,6 @@
 ///  SoftSpokenOT protocol https://eprint.iacr.org/2022/192.pdf
 ///  Instantiation of SoftSpokenOT based on Fig.10 https://eprint.iacr.org/2015/546.pdf
 ///
-
 use std::array;
 
 use elliptic_curve::{
@@ -37,7 +36,6 @@ use crate::{
 
 use super::mul_poly::binary_field_multiply_gf_2_128;
 
-
 pub const KAPPA: usize = 256;
 pub const KAPPA_BYTES: usize = KAPPA >> 3;
 pub const S: usize = 128;
@@ -58,22 +56,34 @@ pub const RAND_EXTENSION_SIZE: usize =
     COT_EXTENDED_BLOCK_SIZE_BYTES - COT_BATCH_SIZE_BYTES;
 pub const SOFT_SPOKEN_LABEL: &[u8] = b"SL-SOFT-SPOKEN-OT";
 
-
-#[derive(Debug, Default, Clone, bincode::Encode, bincode::Decode)]
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    bincode::Encode,
+    bincode::Decode,
+    Zeroize,
+    ZeroizeOnDrop,
+)]
 pub struct SenderOTSeed {
     pub one_time_pad_enc_keys: Vec<Vec<[u8; DIGEST_SIZE]>>, // 256 * SOFT_SPOKEN_K * DIGEST
 }
 
-#[derive(Debug, Default, Clone, bincode::Encode, bincode::Decode)]
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    bincode::Encode,
+    bincode::Decode,
+    Zeroize,
+    ZeroizeOnDrop,
+)]
 pub struct ReceiverOTSeed {
     pub random_choices: Vec<u8>,
     pub one_time_pad_dec_keys: Vec<Vec<[u8; DIGEST_SIZE]>>,
 }
 
-#[derive(Debug)]
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct Round1Output {
     pub u: [[u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
     pub w_prime: [u8; SOFT_SPOKEN_S_BYTES],
@@ -119,8 +129,7 @@ impl Decode for Round1Output {
     }
 }
 
-#[derive(Debug)]
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct Round2Output {
     pub tau: [[Scalar; OT_WIDTH]; ETA],
 }
@@ -721,7 +730,3 @@ mod tests {
         }
     }
 }
-
-
-
-

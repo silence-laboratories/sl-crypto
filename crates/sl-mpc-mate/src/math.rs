@@ -88,7 +88,8 @@ impl<C: CurveArithmetic<Uint = U256>> Polynomial<C> {
     Debug, Clone, PartialEq, Eq, Default, bincode::Encode, bincode::Decode,
 )]
 #[bincode(bounds = "C: CurveArithmetic, C::ProjectivePoint: GroupEncoding")]
-pub struct GroupPolynomial<C> // FIXME should we make it zeroize ???
+pub struct GroupPolynomial<C>
+// FIXME should we make it zeroize ???
 where
     C: CurveArithmetic,
     C::ProjectivePoint: GroupEncoding,

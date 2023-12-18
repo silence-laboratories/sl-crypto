@@ -3,6 +3,7 @@ name = "sl-mpc-mate"
 version = "0.1.0"
 edition = "2021"
 description = "Utilities for secure multi-party computation"
+publish = false
 
 [dependencies]
 bincode = { version = "2.0.0-rc.3" }
