@@ -129,6 +129,14 @@ impl Decode for Round1Output {
     }
 }
 
+impl<'de> BorrowDecode<'de> for Round1Output {
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        Self::decode(decoder)
+    }
+}
+
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct Round2Output {
     pub tau: [[Scalar; OT_WIDTH]; ETA],
