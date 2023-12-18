@@ -512,7 +512,6 @@ impl Builder<Encrypted> {
         let last = buffer.len() - (TAG_SIZE + NONCE_SIZE);
         let (msg, tail) = buffer.split_at_mut(last);
 
-        // TODO Review key generation!!!
         let shared_secret = secret.diffie_hellman(public_key);
 
         if !shared_secret.was_contributory() {
@@ -523,6 +522,12 @@ impl Builder<Encrypted> {
             GenericArray::from_slice(shared_secret.as_bytes()),
             &GenericArray::default(),
         ));
+
+        let key = Zeroizing::new(
+            Sha256::new_with_prefix(public_key)
+                .chain_update(key)
+                .finalize(),
+        );
 
         let cipher = Aead::new(&key);
 
@@ -666,12 +671,17 @@ impl<'a> Message<'a> {
         let tag = Tag::<Aead>::from_slice(&tail[..TAG_SIZE]);
         let nonce = Nonce::<Aead>::from_slice(&tail[TAG_SIZE..]);
 
-        // TODO Review key generation!!!
         let shared_secret = secret.diffie_hellman(public_key);
 
-        let key = hchacha::<U10>(
+        let key = Zeroizing::new(hchacha::<U10>(
             GenericArray::from_slice(shared_secret.as_bytes()),
             &GenericArray::default(),
+        ));
+
+        let key = Zeroizing::new(
+            Sha256::new_with_prefix(PublicKey::from(secret))
+                .chain_update(key)
+                .finalize(),
         );
 
         let cipher = Aead::new(&key);
