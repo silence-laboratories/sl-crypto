@@ -12,6 +12,7 @@ use crate::{
     },
     utils::ExtractBit,
 };
+use crate::endemic_ot::constants::ENDEMIC_OT_LABEL;
 
 /// RO for EndemicOT
 fn h_function(
@@ -20,7 +21,7 @@ fn h_function(
     pk: &[u8; 32],
 ) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"SL-Endemic-OT");
+    hasher.update(ENDEMIC_OT_LABEL);
     hasher.update(session_id);
     hasher.update(&(index as u16).to_be_bytes());
     hasher.update(pk);

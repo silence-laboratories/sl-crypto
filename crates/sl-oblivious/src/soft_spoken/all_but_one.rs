@@ -17,6 +17,7 @@ use crate::{
     soft_spoken::SenderOTSeed,
     utils::ExtractBit,
 };
+use crate::soft_spoken::constants::{ALL_BUT_ONE_LABEL, ALL_BUT_ONE_PPRF_HASH_LABEL, ALL_BUT_ONE_PPRF_LABEL, ALL_BUT_ONE_PPRF_PROOF_LABEL};
 
 use super::ReceiverOTSeed;
 
@@ -62,9 +63,10 @@ pub fn build_pprf(
 
             for y in 0..(2usize.pow(i as u32)) {
                 let mut shake = Shake256::default();
+                shake.update(ALL_BUT_ONE_LABEL);
                 shake.update(session_id.as_ref());
-                shake.update(b"SL-SOFT-SPOKEN-PPRF");
                 shake.update(&s_i[y]);
+                shake.update(ALL_BUT_ONE_PPRF_LABEL);
                 let mut reader = shake.finalize_xof();
                 let mut hash = [0u8; DIGEST_SIZE * 2];
                 reader.read(&mut hash);
@@ -92,14 +94,15 @@ pub fn build_pprf(
         // Prove
         let mut t_tilda = [0u8; DIGEST_SIZE * 2];
         let mut s_tilda_hash = Shake256::default();
+        s_tilda_hash.update(ALL_BUT_ONE_LABEL);
         s_tilda_hash.update(session_id.as_ref());
-        s_tilda_hash.update(b"SL-SOFT-SPOKEN-PPRF-HASH");
 
         for y in s_i_plus_1.iter().take(two_power_k) {
             let mut shake = Shake256::default();
+            shake.update(ALL_BUT_ONE_LABEL);
             shake.update(session_id.as_ref());
-            shake.update(b"SL-SOFT-SPOKEN-PPRF-PROOF");
             shake.update(y);
+            shake.update(ALL_BUT_ONE_PPRF_PROOF_LABEL);
             let mut s_tilda_y = [0u8; DIGEST_SIZE * 2];
             shake.finalize_xof().read(&mut s_tilda_y);
 
@@ -116,6 +119,7 @@ pub fn build_pprf(
             .push(s_i_plus_1);
 
         let mut s_tilda = [0u8; DIGEST_SIZE * 2];
+        s_tilda_hash.update(ALL_BUT_ONE_PPRF_HASH_LABEL);
         s_tilda_hash.finalize_xof().read(&mut s_tilda);
 
         output.push(PPRFOutput {
@@ -163,9 +167,10 @@ pub fn eval_pprf(
                 ) as usize;
 
                 let mut shake = Shake256::default();
+                shake.update(ALL_BUT_ONE_LABEL);
                 shake.update(session_id.as_ref());
-                shake.update(b"SL-SOFT-SPOKEN-PPRF");
                 shake.update(&s_star_i[choice_index][y]);
+                shake.update(ALL_BUT_ONE_PPRF_LABEL);
                 let mut res = [0u8; DIGEST_SIZE * 2];
                 shake.finalize_xof().read(&mut res);
                 s_star_i_plus_1[choice_index][2 * y] =
@@ -210,8 +215,8 @@ pub fn eval_pprf(
         let mut s_tilda_star = vec![vec![[0u8; DIGEST_SIZE * 2]; two_power_k]; 2];
         let s_tilda_expected = &out.s_tilda;
         let mut s_tilda_hasher = Shake256::default();
+        s_tilda_hasher.update(ALL_BUT_ONE_LABEL);
         s_tilda_hasher.update(session_id.as_ref());
-        s_tilda_hasher.update(b"SL-SOFT-SPOKEN-PPRF-HASH");
         let mut s_tilda_star_y_star = vec![out.t_tilda, [0u8; 64]];
 
         for y in 0..two_power_k {
@@ -220,10 +225,11 @@ pub fn eval_pprf(
             ) as usize;
 
             let mut shake = Shake256::default();
+            shake.update(ALL_BUT_ONE_LABEL);
             shake.update(session_id.as_ref());
-            shake.update(b"SL-SOFT-SPOKEN-PPRF-PROOF");
             shake.update(&s_star_i[choice_index][y]);
             let mut res = [0u8; DIGEST_SIZE * 2];
+            shake.update(ALL_BUT_ONE_PPRF_PROOF_LABEL);
             shake.finalize_xof().read(&mut res);
             s_tilda_star[choice_index][y] = res;
 
@@ -239,6 +245,7 @@ pub fn eval_pprf(
         });
 
         let mut s_tilda_digest = [0u8; DIGEST_SIZE * 2];
+        s_tilda_hasher.update(ALL_BUT_ONE_PPRF_HASH_LABEL);
         s_tilda_hasher.finalize_xof().read(&mut s_tilda_digest);
 
         let valid: bool = s_tilda_digest.ct_eq(s_tilda_expected).into();
