@@ -34,6 +34,7 @@ use crate::{
     utils::{bit_to_bit_mask, ExtractBit},
 };
 use crate::soft_spoken::constants::{SOFT_SPOKEN_EXPAND_LABEL, SOFT_SPOKEN_LABEL, SOFT_SPOKEN_MATRIX_HASH_LABEL, SOFT_SPOKEN_RANDOMIZE_LABEL};
+use crate::soft_spoken::types::SoftSpokenOTError;
 
 use super::mul_poly::binary_field_multiply_gf_2_128;
 
@@ -68,7 +69,7 @@ pub const RAND_EXTENSION_SIZE: usize =
     ZeroizeOnDrop,
 )]
 pub struct SenderOTSeed {
-    pub one_time_pad_enc_keys: Vec<Vec<[u8; DIGEST_SIZE]>>, // 256 * SOFT_SPOKEN_K * DIGEST
+    pub one_time_pad_enc_keys: Vec<Vec<[u8; DIGEST_SIZE]>>,  // [256 / SOFT_SPOKEN_K][SOFT_SPOKEN_Q][DIGEST]
 }
 
 #[derive(
@@ -81,8 +82,8 @@ pub struct SenderOTSeed {
     ZeroizeOnDrop,
 )]
 pub struct ReceiverOTSeed {
-    pub random_choices: Vec<u8>,
-    pub one_time_pad_dec_keys: Vec<Vec<[u8; DIGEST_SIZE]>>,
+    pub random_choices: Vec<u8>,  // [256 / SOFT_SPOKEN_K]
+    pub one_time_pad_dec_keys: Vec<Vec<[u8; DIGEST_SIZE]>>,  // [256 / SOFT_SPOKEN_K][SOFT_SPOKEN_Q][DIGEST]
 }
 
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
@@ -453,7 +454,7 @@ impl SoftSpokenOTSender {
 }
 
 pub type SoftSpokenOTSenderResult =
-    Result<(Box<[[Scalar; OT_WIDTH]; ETA]>, Box<Round2Output>), &'static str>;
+    Result<(Box<[[Scalar; OT_WIDTH]; ETA]>, Box<Round2Output>), SoftSpokenOTError>;
 
 impl SoftSpokenOTSender {
     pub fn process(
@@ -571,7 +572,7 @@ impl SoftSpokenOTSender {
                 });
 
             if q_row != t_i_plus_delta_i_times_x {
-                return Err("Consistency check failed");
+                return Err(SoftSpokenOTError::AbortProtocolAndBanReceiver);
             }
         }
 
