@@ -204,7 +204,7 @@ pub fn feldman_verify<C: CurveArithmetic>(
     x_i: &NonZeroScalar<C>,
     f_i_value: &C::Scalar,
     g: &C::ProjectivePoint,
-) -> Option<bool> {
+) -> bool {
     let point: C::ProjectivePoint = u_i_k
         .enumerate()
         .map(|(i, coeff)| {
@@ -217,12 +217,12 @@ pub fn feldman_verify<C: CurveArithmetic>(
         .sum();
 
     if point.is_identity().into() {
-        return None;
+        return false;
     }
 
     let expected_point = *g * f_i_value;
 
-    Some(point == expected_point)
+    point == expected_point
 }
 
 /// Get the multipliers for the coefficients of the polynomial,
