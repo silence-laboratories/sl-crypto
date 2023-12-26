@@ -6,13 +6,13 @@ use x25519_dalek::{PublicKey, ReusableSecret};
 
 use sl_mpc_mate::{xor_byte_arrays, SessionId};
 
+use crate::endemic_ot::constants::ENDEMIC_OT_LABEL;
 use crate::{
     endemic_ot::{
         EndemicOTMsg1, EndemicOTMsg2, BATCH_SIZE, BATCH_SIZE_BYTES,
     },
     utils::ExtractBit,
 };
-use crate::endemic_ot::constants::ENDEMIC_OT_LABEL;
 
 /// RO for EndemicOT
 fn h_function(

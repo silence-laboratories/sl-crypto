@@ -1,4 +1,4 @@
-mod dlog_proof;
 mod constants;
+mod dlog_proof;
 
 pub use dlog_proof::DLogProof;

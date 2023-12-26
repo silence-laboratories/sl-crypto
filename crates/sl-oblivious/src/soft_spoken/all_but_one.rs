@@ -12,12 +12,15 @@ use sl_mpc_mate::SessionId;
 
 pub const DIGEST_SIZE: usize = 32;
 
+use crate::soft_spoken::constants::{
+    ALL_BUT_ONE_LABEL, ALL_BUT_ONE_PPRF_HASH_LABEL, ALL_BUT_ONE_PPRF_LABEL,
+    ALL_BUT_ONE_PPRF_PROOF_LABEL,
+};
 use crate::{
     endemic_ot::{ReceiverOutput, SenderOutput},
     soft_spoken::SenderOTSeed,
     utils::ExtractBit,
 };
-use crate::soft_spoken::constants::{ALL_BUT_ONE_LABEL, ALL_BUT_ONE_PPRF_HASH_LABEL, ALL_BUT_ONE_PPRF_LABEL, ALL_BUT_ONE_PPRF_PROOF_LABEL};
 
 use super::ReceiverOTSeed;
 
@@ -160,10 +163,13 @@ pub fn eval_pprf(
         let mut y_star = x_star_0;
 
         for i in 1..k {
-            let mut s_star_i_plus_1 = vec![vec![[0u8; DIGEST_SIZE]; two_power_k]; 2];
+            let mut s_star_i_plus_1 =
+                vec![vec![[0u8; DIGEST_SIZE]; two_power_k]; 2];
             for y in 0..2usize.pow(i as u32) {
                 let choice_index = u8::conditional_select(
-                    &0, &1, Choice::from((y == y_star as usize) as u8)
+                    &0,
+                    &1,
+                    Choice::from((y == y_star as usize) as u8),
                 ) as usize;
 
                 let mut shake = Shake256::default();
@@ -199,10 +205,13 @@ pub fn eval_pprf(
 
                 for y in 0..2usize.pow(i as u32) {
                     let choice_index = u8::conditional_select(
-                        &0, &1, Choice::from((y == y_star as usize) as u8)
+                        &0,
+                        &1,
+                        Choice::from((y == y_star as usize) as u8),
                     ) as usize;
 
-                    s_star_i_plus_1[choice_index][2 * (y_star as usize) + ct_x][b_i] ^=
+                    s_star_i_plus_1[choice_index]
+                        [2 * (y_star as usize) + ct_x][b_i] ^=
                         s_star_i_plus_1[choice_index][2 * y + ct_x][b_i];
                 }
             }
@@ -212,7 +221,8 @@ pub fn eval_pprf(
         }
 
         // Verify
-        let mut s_tilda_star = vec![vec![[0u8; DIGEST_SIZE * 2]; two_power_k]; 2];
+        let mut s_tilda_star =
+            vec![vec![[0u8; DIGEST_SIZE * 2]; two_power_k]; 2];
         let s_tilda_expected = &out.s_tilda;
         let mut s_tilda_hasher = Shake256::default();
         s_tilda_hasher.update(ALL_BUT_ONE_LABEL);
@@ -221,7 +231,9 @@ pub fn eval_pprf(
 
         for y in 0..two_power_k {
             let choice_index = u8::conditional_select(
-                &0, &1, Choice::from((y == y_star as usize) as u8)
+                &0,
+                &1,
+                Choice::from((y == y_star as usize) as u8),
             ) as usize;
 
             let mut shake = Shake256::default();
@@ -234,7 +246,8 @@ pub fn eval_pprf(
             s_tilda_star[choice_index][y] = res;
 
             (0..DIGEST_SIZE * 2).for_each(|b_i| {
-                s_tilda_star_y_star[choice_index][b_i] ^= s_tilda_star[choice_index][y][b_i];
+                s_tilda_star_y_star[choice_index][b_i] ^=
+                    s_tilda_star[choice_index][y][b_i];
             })
         }
 

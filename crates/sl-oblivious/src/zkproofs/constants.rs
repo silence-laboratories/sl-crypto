@@ -1,2 +1,3 @@
 /// LABEL for Discrete Log Proof challenge
-pub const DLOG_CHALLENGE_LABEL: &[u8] = b"SilenceLaboratories-DLOG-CHALLENGE-v1.0";
+pub const DLOG_CHALLENGE_LABEL: &[u8] =
+    b"SilenceLaboratories-DLOG-CHALLENGE-v1.0";

@@ -1,6 +1,5 @@
 use thiserror::Error;
 
-
 /// SoftSpokenOT errors
 #[derive(Error, Debug)]
 pub enum SoftSpokenOTError {
