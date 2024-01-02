@@ -227,7 +227,7 @@ pub fn eval_pprf(
         let mut s_tilda_hasher = Shake256::default();
         s_tilda_hasher.update(ALL_BUT_ONE_LABEL);
         s_tilda_hasher.update(session_id.as_ref());
-        let mut s_tilda_star_y_star = vec![out.t_tilda, [0u8; 64]];
+        let mut s_tilda_star_y_star = [out.t_tilda, [0u8; 64]];
 
         for y in 0..two_power_k {
             let choice_index = u8::conditional_select(
