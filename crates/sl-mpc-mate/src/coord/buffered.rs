@@ -12,6 +12,7 @@ pub struct BufferedMsgRelay<R: Relay> {
 }
 
 impl<R: Relay> BufferedMsgRelay<R> {
+    /// Construct a BufferedMsgRelay by wrapping up a Relay object
     pub fn new(relay: R) -> Self {
         Self {
             relay,
@@ -19,6 +20,14 @@ impl<R: Relay> BufferedMsgRelay<R> {
         }
     }
 
+    pub fn with_capacity(relay: R, capacity: usize) -> Self {
+        Self {
+            relay,
+            in_buf: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Wait for particular messages based on predicate.
     pub async fn wait_for(
         &mut self,
         predicate: impl Fn(&MsgId) -> bool,
@@ -52,12 +61,23 @@ impl<R: Relay> BufferedMsgRelay<R> {
         }
     }
 
+    /// Function to receive message based on certain ID
     pub async fn recv(&mut self, id: &MsgId, ttl: u32) -> Option<Vec<u8>> {
         let msg = AskMsg::allocate(id, ttl);
 
         self.relay.send(msg).await.ok()?;
 
         self.wait_for(|msg| msg.eq(id)).await
+    }
+
+    /// Return all buffered messages
+    pub fn buffered(&self) -> impl Iterator<Item = &[u8]> {
+        self.in_buf.iter().map(|m| m.as_ref())
+    }
+
+    /// Return all buffered messages and allow change
+    pub fn buffered_mut(&mut self) -> impl Iterator<Item = &mut [u8]> {
+        self.in_buf.iter_mut().map(|m| m.as_mut())
     }
 }
 

@@ -76,10 +76,10 @@ pub enum InvalidMessage {
     /// Message decryption failed
     InvalidTag,
 
-    ///
+    /// Message payload decode error
     DecodeError,
 
-    /// Missing expected message
+    /// Received an unexpected message
     RecvError,
 
     /// Send error
@@ -177,6 +177,11 @@ impl MsgId {
         tag: MessageTag,
     ) -> Self {
         Self::new(instance, sender_pk, None, tag)
+    }
+
+    /// Return as slice of bytes
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -616,6 +621,11 @@ impl<'a> Message<'a> {
         &self,
         verify_key: &VerifyingKey,
     ) -> Result<SliceReader, InvalidMessage> {
+        // make sure message contains at least message header and signature
+        if self.buffer.len() < Self::HDR_SIZE + Self::SIGN_SIZE {
+            return Err(InvalidMessage::InvalidSignature);
+        }
+
         let (msg, sign) =
             self.buffer.split_at(self.buffer.len() - Self::SIGN_SIZE);
         let sign = Signature::from_slice(sign)
@@ -659,6 +669,10 @@ impl<'a> Message<'a> {
         secret: &ReusableSecret,
         public_key: &PublicKey,
     ) -> Result<SliceReader, InvalidMessage> {
+        if self.buffer.len() < start {
+            return Err(InvalidMessage::MessageTooShort);
+        }
+
         let (data, rest) = self.buffer.split_at_mut(start);
 
         if rest.len() <= TAG_SIZE + NONCE_SIZE {
