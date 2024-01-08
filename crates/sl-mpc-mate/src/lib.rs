@@ -8,6 +8,7 @@ pub mod matrix;
 
 pub mod bip32;
 pub mod coord;
+pub mod label;
 pub mod message;
 
 /// Reexport bincode

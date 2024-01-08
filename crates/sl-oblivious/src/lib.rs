@@ -1,3 +1,6 @@
+/// Domain labels
+pub mod constants;
+
 /// Soft spoken Oblivious Transfer
 pub mod soft_spoken;
 

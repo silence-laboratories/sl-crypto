@@ -29,7 +29,7 @@ use sl_mpc_mate::{
     random_bytes, SessionId,
 };
 
-use crate::soft_spoken::constants::{
+use crate::constants::{
     SOFT_SPOKEN_EXPAND_LABEL, SOFT_SPOKEN_LABEL,
     SOFT_SPOKEN_MATRIX_HASH_LABEL, SOFT_SPOKEN_RANDOMIZE_LABEL,
 };
@@ -245,18 +245,18 @@ impl SoftSpokenOTRec<RecR0> {
         let u = &mut output.u;
 
         let mut matrix_hasher = blake3::Hasher::new();
-        matrix_hasher.update(SOFT_SPOKEN_LABEL);
+        matrix_hasher.update(&SOFT_SPOKEN_LABEL);
         matrix_hasher.update(&self.session_id);
 
         for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
             for (j, r_x_j) in r_x.iter_mut().enumerate() {
                 let mut shake = Shake256::default();
-                shake.update(SOFT_SPOKEN_LABEL);
+                shake.update(&SOFT_SPOKEN_LABEL);
                 shake.update(&self.session_id);
                 shake.update(
                     &self.seed_ot_results.one_time_pad_enc_keys[i][j],
                 );
-                shake.update(SOFT_SPOKEN_EXPAND_LABEL);
+                shake.update(&SOFT_SPOKEN_EXPAND_LABEL);
                 shake.finalize_xof().read(&mut r_x_j[i]);
             }
 
@@ -290,7 +290,7 @@ impl SoftSpokenOTRec<RecR0> {
             }
         }
 
-        matrix_hasher.update(SOFT_SPOKEN_MATRIX_HASH_LABEL);
+        matrix_hasher.update(&SOFT_SPOKEN_MATRIX_HASH_LABEL);
         let digest_matrix_u = matrix_hasher.finalize().as_bytes().to_owned();
 
         for j in 0..SOFT_SPOKEN_M {
@@ -377,11 +377,11 @@ impl SoftSpokenOTRec<RecR1> {
         output_additive_shares.iter_mut().enumerate().for_each(
             |(j, additive_shares_j)| {
                 let mut shake = Shake256::default();
-                shake.update(SOFT_SPOKEN_LABEL);
+                shake.update(&SOFT_SPOKEN_LABEL);
                 shake.update(self.session_id.as_ref());
                 shake.update(&(j as u16).to_be_bytes());
                 shake.update(self.state.psi[j].as_ref());
-                shake.update(SOFT_SPOKEN_RANDOMIZE_LABEL);
+                shake.update(&SOFT_SPOKEN_RANDOMIZE_LABEL);
                 let mut column = [0u8; DIGEST_SIZE * OT_WIDTH];
                 shake.finalize_xof().read(&mut column);
                 let bit = self.state.extended_packed_choices.extract_bit(j);
@@ -473,13 +473,13 @@ impl SoftSpokenOTSender {
                     rx_j[i].fill(0); // = [0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
                 } else {
                     let mut shake = Shake256::default();
-                    shake.update(SOFT_SPOKEN_LABEL);
+                    shake.update(&SOFT_SPOKEN_LABEL);
                     shake.update(self.session_id.as_ref());
                     shake.update(
                         self.seed_ot_results.one_time_pad_dec_keys[i][j]
                             .as_ref(),
                     );
-                    shake.update(SOFT_SPOKEN_EXPAND_LABEL);
+                    shake.update(&SOFT_SPOKEN_EXPAND_LABEL);
                     //let mut r_x_ij = [0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
                     shake.finalize_xof().read(&mut rx_j[i]);
                     // rx_j[i] = r_x_ij;
@@ -490,7 +490,7 @@ impl SoftSpokenOTSender {
         let mut w_matrix = [[0u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA];
 
         let mut hash_matrix_u = blake3::Hasher::new();
-        hash_matrix_u.update(SOFT_SPOKEN_LABEL);
+        hash_matrix_u.update(&SOFT_SPOKEN_LABEL);
         hash_matrix_u.update(&self.session_id);
 
         for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
@@ -529,7 +529,7 @@ impl SoftSpokenOTSender {
             }
         }
 
-        hash_matrix_u.update(SOFT_SPOKEN_MATRIX_HASH_LABEL);
+        hash_matrix_u.update(&SOFT_SPOKEN_MATRIX_HASH_LABEL);
         let digest_matrix_u = hash_matrix_u.finalize();
 
         let mut chi_matrix = [[0u8; SOFT_SPOKEN_S_BYTES]; SOFT_SPOKEN_M];
@@ -592,11 +592,11 @@ impl SoftSpokenOTSender {
 
         for j in 0..ETA {
             let mut shake = Shake256::default();
-            shake.update(SOFT_SPOKEN_LABEL);
+            shake.update(&SOFT_SPOKEN_LABEL);
             shake.update(self.session_id.as_ref());
             shake.update(&(j as u16).to_be_bytes());
             shake.update(&zeta[j]);
-            shake.update(SOFT_SPOKEN_RANDOMIZE_LABEL);
+            shake.update(&SOFT_SPOKEN_RANDOMIZE_LABEL);
             let mut column = [0u8; DIGEST_SIZE * OT_WIDTH];
             shake.finalize_xof().read(&mut column);
 
@@ -616,11 +616,11 @@ impl SoftSpokenOTSender {
                 .for_each(|(i, b)| zeta[j][i] ^= b);
 
             let mut shake = Shake256::default();
-            shake.update(SOFT_SPOKEN_LABEL);
+            shake.update(&SOFT_SPOKEN_LABEL);
             shake.update(&self.session_id);
             shake.update(&(j as u16).to_be_bytes());
             shake.update(&zeta[j]);
-            shake.update(SOFT_SPOKEN_RANDOMIZE_LABEL);
+            shake.update(&SOFT_SPOKEN_RANDOMIZE_LABEL);
             let mut column = [0u8; DIGEST_SIZE * OT_WIDTH];
             shake.finalize_xof().read(&mut column);
 

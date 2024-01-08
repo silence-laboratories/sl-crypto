@@ -5,8 +5,8 @@ use rand::prelude::*;
 
 use sl_mpc_mate::message::*;
 
+use crate::constants::DLOG_CHALLENGE_LABEL;
 use crate::utils::TranscriptProtocol;
-use crate::zkproofs::constants::DLOG_CHALLENGE_LABEL;
 
 /// Non-interactive Proof of knowledge of discrete logarithm with Fiat-Shamir transform.
 #[derive(Clone, Debug, PartialEq, Eq, bincode::Encode, bincode::Decode)]
@@ -64,7 +64,7 @@ impl DLogProof {
         transcript.append_point(b"y", y);
         transcript.append_point(b"t", t);
         transcript.append_point(b"base-point", base_point);
-        transcript.challenge_scalar(DLOG_CHALLENGE_LABEL)
+        transcript.challenge_scalar(&DLOG_CHALLENGE_LABEL)
     }
 }
 

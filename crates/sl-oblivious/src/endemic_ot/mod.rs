@@ -1,6 +1,5 @@
 mod messages;
 
-mod constants;
 #[allow(clippy::module_inception)]
 mod endemic_ot;
 

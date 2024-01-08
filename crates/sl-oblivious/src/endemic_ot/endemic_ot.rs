@@ -6,27 +6,27 @@ use x25519_dalek::{PublicKey, ReusableSecret};
 
 use sl_mpc_mate::{xor_byte_arrays, SessionId};
 
-use crate::endemic_ot::constants::ENDEMIC_OT_LABEL;
 use crate::{
+    constants::ENDEMIC_OT_LABEL,
     endemic_ot::{
         EndemicOTMsg1, EndemicOTMsg2, BATCH_SIZE, BATCH_SIZE_BYTES,
     },
     utils::ExtractBit,
 };
 
-/// RO for EndemicOT
+// RO for EndemicOT
 fn h_function(
     index: usize,
     session_id: &SessionId,
     pk: &[u8; 32],
 ) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(ENDEMIC_OT_LABEL);
+    hasher.update(&ENDEMIC_OT_LABEL);
     hasher.update(session_id);
     hasher.update(&(index as u16).to_be_bytes());
     hasher.update(pk);
-    let digest = hasher.finalize().as_bytes().to_owned();
-    digest
+
+    hasher.finalize().into()
 }
 
 /// Sender of the Endemic OT protocol.
