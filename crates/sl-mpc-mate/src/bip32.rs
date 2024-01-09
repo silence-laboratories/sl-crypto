@@ -117,7 +117,7 @@ impl XPubKey {
             &self.parent_fingerprint,
             &self.child_number.to_be_bytes(),
             self.chain_code.as_slice(),
-            &self.pubkey.to_encoded_point(true).as_bytes(),
+            self.pubkey.to_encoded_point(true).as_bytes(),
         ]
         .concat();
 

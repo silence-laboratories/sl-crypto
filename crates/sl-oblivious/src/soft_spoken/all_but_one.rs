@@ -12,16 +12,21 @@ use sl_mpc_mate::SessionId;
 
 pub const DIGEST_SIZE: usize = 32;
 
+use crate::constants::{
+    ALL_BUT_ONE_LABEL, ALL_BUT_ONE_PPRF_HASH_LABEL, ALL_BUT_ONE_PPRF_LABEL,
+    ALL_BUT_ONE_PPRF_PROOF_LABEL,
+};
 use crate::{
+    endemic_ot::{ReceiverOutput, SenderOutput},
     soft_spoken::SenderOTSeed,
     utils::ExtractBit,
-    endemic_ot::{ReceiverOutput, SenderOutput},
 };
 
 use super::ReceiverOTSeed;
 
-#[derive(Clone, Debug, bincode::Encode, bincode::Decode)]
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(
+    Clone, Debug, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
+)]
 pub struct PPRFOutput {
     pub t: Vec<[[u8; DIGEST_SIZE]; 2]>,
 
@@ -61,9 +66,10 @@ pub fn build_pprf(
 
             for y in 0..(2usize.pow(i as u32)) {
                 let mut shake = Shake256::default();
+                shake.update(&ALL_BUT_ONE_LABEL);
                 shake.update(session_id.as_ref());
-                shake.update(b"SL-SOFT-SPOKEN-PPRF");
                 shake.update(&s_i[y]);
+                shake.update(&ALL_BUT_ONE_PPRF_LABEL);
                 let mut reader = shake.finalize_xof();
                 let mut hash = [0u8; DIGEST_SIZE * 2];
                 reader.read(&mut hash);
@@ -91,14 +97,15 @@ pub fn build_pprf(
         // Prove
         let mut t_tilda = [0u8; DIGEST_SIZE * 2];
         let mut s_tilda_hash = Shake256::default();
+        s_tilda_hash.update(&ALL_BUT_ONE_LABEL);
         s_tilda_hash.update(session_id.as_ref());
-        s_tilda_hash.update(b"SL-SOFT-SPOKEN-PPRF-HASH");
 
         for y in s_i_plus_1.iter().take(two_power_k) {
             let mut shake = Shake256::default();
+            shake.update(&ALL_BUT_ONE_LABEL);
             shake.update(session_id.as_ref());
-            shake.update(b"SL-SOFT-SPOKEN-PPRF-PROOF");
             shake.update(y);
+            shake.update(&ALL_BUT_ONE_PPRF_PROOF_LABEL);
             let mut s_tilda_y = [0u8; DIGEST_SIZE * 2];
             shake.finalize_xof().read(&mut s_tilda_y);
 
@@ -115,6 +122,7 @@ pub fn build_pprf(
             .push(s_i_plus_1);
 
         let mut s_tilda = [0u8; DIGEST_SIZE * 2];
+        s_tilda_hash.update(&ALL_BUT_ONE_PPRF_HASH_LABEL);
         s_tilda_hash.finalize_xof().read(&mut s_tilda);
 
         output.push(PPRFOutput {
@@ -140,7 +148,7 @@ pub fn eval_pprf(
 
     for (j, out) in output.iter().enumerate().take(loop_count) {
         let t_x_i = &out.t;
-        let mut s_star_i = vec![[0u8; DIGEST_SIZE]; two_power_k];
+        let mut s_star_i = vec![vec![[0u8; DIGEST_SIZE]; two_power_k]; 2];
         let mut x_star_0: u8 = receiver_ot_seed
             .packed_random_choice_bits
             .extract_bit(j * k)
@@ -150,27 +158,30 @@ pub fn eval_pprf(
             receiver_ot_seed.one_time_pad_decryption_keys[j * k];
 
         let selected = u8::conditional_select(&1, &0, Choice::from(x_star_0));
-        s_star_i[selected as usize] = big_f_i_star;
+        s_star_i[0][selected as usize] = big_f_i_star;
 
         let mut y_star = x_star_0;
 
         for i in 1..k {
-            let mut s_star_i_plus_1 = vec![[0u8; DIGEST_SIZE]; two_power_k];
+            let mut s_star_i_plus_1 =
+                vec![vec![[0u8; DIGEST_SIZE]; two_power_k]; 2];
             for y in 0..2usize.pow(i as u32) {
-                // TODO: Constant time?
-                if y == (y_star as usize) {
-                    continue;
-                }
+                let choice_index = u8::conditional_select(
+                    &0,
+                    &1,
+                    Choice::from((y == y_star as usize) as u8),
+                ) as usize;
 
                 let mut shake = Shake256::default();
+                shake.update(&ALL_BUT_ONE_LABEL);
                 shake.update(session_id.as_ref());
-                shake.update(b"SL-SOFT-SPOKEN-PPRF");
-                shake.update(&s_star_i[y]);
+                shake.update(&s_star_i[choice_index][y]);
+                shake.update(&ALL_BUT_ONE_PPRF_LABEL);
                 let mut res = [0u8; DIGEST_SIZE * 2];
                 shake.finalize_xof().read(&mut res);
-                s_star_i_plus_1[2 * y] =
+                s_star_i_plus_1[choice_index][2 * y] =
                     res[0..DIGEST_SIZE].try_into().unwrap();
-                s_star_i_plus_1[2 * y + 1] =
+                s_star_i_plus_1[choice_index][2 * y + 1] =
                     res[DIGEST_SIZE..].try_into().unwrap();
             }
 
@@ -189,16 +200,19 @@ pub fn eval_pprf(
             // TODO: fix clippy
             #[allow(clippy::needless_range_loop)]
             for b_i in 0..DIGEST_SIZE {
-                s_star_i_plus_1[2 * y_star as usize + ct_x][b_i] =
+                s_star_i_plus_1[0][2 * y_star as usize + ct_x][b_i] =
                     t_x_i[i - 1][ct_x][b_i] ^ big_f_i_star[b_i];
 
                 for y in 0..2usize.pow(i as u32) {
-                    if y == y_star as usize {
-                        continue;
-                    }
+                    let choice_index = u8::conditional_select(
+                        &0,
+                        &1,
+                        Choice::from((y == y_star as usize) as u8),
+                    ) as usize;
 
-                    s_star_i_plus_1[2 * (y_star as usize) + ct_x][b_i] ^=
-                        s_star_i_plus_1[2 * y + ct_x][b_i];
+                    s_star_i_plus_1[choice_index]
+                        [2 * (y_star as usize) + ct_x][b_i] ^=
+                        s_star_i_plus_1[choice_index][2 * y + ct_x][b_i];
                 }
             }
 
@@ -207,38 +221,44 @@ pub fn eval_pprf(
         }
 
         // Verify
-        let mut s_tilda_star = vec![[0u8; DIGEST_SIZE * 2]; two_power_k];
+        let mut s_tilda_star =
+            vec![vec![[0u8; DIGEST_SIZE * 2]; two_power_k]; 2];
         let s_tilda_expected = &out.s_tilda;
         let mut s_tilda_hasher = Shake256::default();
+        s_tilda_hasher.update(&ALL_BUT_ONE_LABEL);
         s_tilda_hasher.update(session_id.as_ref());
-        s_tilda_hasher.update(b"SL-SOFT-SPOKEN-PPRF-HASH");
-        let mut s_tilda_star_y_star = out.t_tilda;
+        let mut s_tilda_star_y_star = [out.t_tilda, [0u8; 64]];
 
         for y in 0..two_power_k {
-            if y == (y_star as usize) {
-                continue;
-            }
+            let choice_index = u8::conditional_select(
+                &0,
+                &1,
+                Choice::from((y == y_star as usize) as u8),
+            ) as usize;
 
             let mut shake = Shake256::default();
+            shake.update(&ALL_BUT_ONE_LABEL);
             shake.update(session_id.as_ref());
-            shake.update(b"SL-SOFT-SPOKEN-PPRF-PROOF");
-            shake.update(&s_star_i[y]);
+            shake.update(&s_star_i[choice_index][y]);
             let mut res = [0u8; DIGEST_SIZE * 2];
+            shake.update(&ALL_BUT_ONE_PPRF_PROOF_LABEL);
             shake.finalize_xof().read(&mut res);
-            s_tilda_star[y] = res;
+            s_tilda_star[choice_index][y] = res;
 
             (0..DIGEST_SIZE * 2).for_each(|b_i| {
-                s_tilda_star_y_star[b_i] ^= s_tilda_star[y][b_i];
+                s_tilda_star_y_star[choice_index][b_i] ^=
+                    s_tilda_star[choice_index][y][b_i];
             })
         }
 
-        s_tilda_star[y_star as usize] = s_tilda_star_y_star;
+        s_tilda_star[0][y_star as usize] = s_tilda_star_y_star[0];
 
         (0..two_power_k).for_each(|y| {
-            s_tilda_hasher.update(&s_tilda_star[y]);
+            s_tilda_hasher.update(&s_tilda_star[0][y]);
         });
 
         let mut s_tilda_digest = [0u8; DIGEST_SIZE * 2];
+        s_tilda_hasher.update(&ALL_BUT_ONE_PPRF_HASH_LABEL);
         s_tilda_hasher.finalize_xof().read(&mut s_tilda_digest);
 
         let valid: bool = s_tilda_digest.ct_eq(s_tilda_expected).into();
@@ -250,7 +270,7 @@ pub fn eval_pprf(
         all_but_one_receiver_seed.random_choices.push(y_star);
         all_but_one_receiver_seed
             .one_time_pad_dec_keys
-            .push(s_star_i);
+            .push(s_star_i[0].clone());
     }
 
     Ok(all_but_one_receiver_seed)

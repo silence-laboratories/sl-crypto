@@ -1,3 +1,6 @@
+/// Domain labels
+pub mod constants;
+
 /// Soft spoken Oblivious Transfer
 pub mod soft_spoken;
 
@@ -19,26 +22,6 @@ pub mod utils {
     use sl_mpc_mate::SessionId;
 
     pub use blake3::Hasher;
-
-    /// Compute the double blake hash of a byte array.
-    pub fn double_blake_hash(data: &[u8]) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(data);
-        let hash = hasher.finalize();
-
-        hasher.reset().update(hash.as_bytes()).finalize().into()
-    }
-
-    /// Compute the double blake hash of a byte array, and return both the hash and the double hash.
-    pub fn double_blake_hash_inter(data: &[u8]) -> ([u8; 32], [u8; 32]) {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(data);
-        let hash = hasher.finalize();
-
-        let double_hash = hasher.reset().update(hash.as_bytes()).finalize();
-
-        (hash.into(), double_hash.into())
-    }
 
     /// Custom extension trait for the merlin transcript.
     pub trait TranscriptProtocol {

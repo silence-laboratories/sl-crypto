@@ -2,7 +2,6 @@
 ///  SoftSpokenOT protocol https://eprint.iacr.org/2022/192.pdf
 ///  Instantiation of SoftSpokenOT based on Fig.10 https://eprint.iacr.org/2015/546.pdf
 ///
-
 use std::array;
 
 use elliptic_curve::{
@@ -30,13 +29,17 @@ use sl_mpc_mate::{
     random_bytes, SessionId,
 };
 
+use crate::constants::{
+    SOFT_SPOKEN_EXPAND_LABEL, SOFT_SPOKEN_LABEL,
+    SOFT_SPOKEN_MATRIX_HASH_LABEL, SOFT_SPOKEN_RANDOMIZE_LABEL,
+};
+use crate::soft_spoken::types::SoftSpokenOTError;
 use crate::{
     soft_spoken::DIGEST_SIZE,
     utils::{bit_to_bit_mask, ExtractBit},
 };
 
 use super::mul_poly::binary_field_multiply_gf_2_128;
-
 
 pub const KAPPA: usize = 256;
 pub const KAPPA_BYTES: usize = KAPPA >> 3;
@@ -56,24 +59,35 @@ pub const SOFT_SPOKEN_M: usize = ETA / SOFT_SPOKEN_S; // SOFT_SPOKEN_S;
 pub const KAPPA_DIV_SOFT_SPOKEN_K: usize = KAPPA / SOFT_SPOKEN_K;
 pub const RAND_EXTENSION_SIZE: usize =
     COT_EXTENDED_BLOCK_SIZE_BYTES - COT_BATCH_SIZE_BYTES;
-pub const SOFT_SPOKEN_LABEL: &[u8] = b"SL-SOFT-SPOKEN-OT";
 
-
-#[derive(Debug, Default, Clone, bincode::Encode, bincode::Decode)]
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    bincode::Encode,
+    bincode::Decode,
+    Zeroize,
+    ZeroizeOnDrop,
+)]
 pub struct SenderOTSeed {
-    pub one_time_pad_enc_keys: Vec<Vec<[u8; DIGEST_SIZE]>>, // 256 * SOFT_SPOKEN_K * DIGEST
+    pub one_time_pad_enc_keys: Vec<Vec<[u8; DIGEST_SIZE]>>, // [256 / SOFT_SPOKEN_K][SOFT_SPOKEN_Q][DIGEST]
 }
 
-#[derive(Debug, Default, Clone, bincode::Encode, bincode::Decode)]
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    bincode::Encode,
+    bincode::Decode,
+    Zeroize,
+    ZeroizeOnDrop,
+)]
 pub struct ReceiverOTSeed {
-    pub random_choices: Vec<u8>,
-    pub one_time_pad_dec_keys: Vec<Vec<[u8; DIGEST_SIZE]>>,
+    pub random_choices: Vec<u8>, // [256 / SOFT_SPOKEN_K]
+    pub one_time_pad_dec_keys: Vec<Vec<[u8; DIGEST_SIZE]>>, // [256 / SOFT_SPOKEN_K][SOFT_SPOKEN_Q][DIGEST]
 }
 
-#[derive(Debug)]
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct Round1Output {
     pub u: [[u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
     pub w_prime: [u8; SOFT_SPOKEN_S_BYTES],
@@ -119,8 +133,15 @@ impl Decode for Round1Output {
     }
 }
 
-#[derive(Debug)]
-#[derive(Zeroize, ZeroizeOnDrop)]
+impl<'de> BorrowDecode<'de> for Round1Output {
+    fn borrow_decode<D: BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        Self::decode(decoder)
+    }
+}
+
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct Round2Output {
     pub tau: [[Scalar; OT_WIDTH]; ETA],
 }
@@ -224,28 +245,24 @@ impl SoftSpokenOTRec<RecR0> {
         let u = &mut output.u;
 
         let mut matrix_hasher = blake3::Hasher::new();
+        matrix_hasher.update(&SOFT_SPOKEN_LABEL);
+        matrix_hasher.update(&self.session_id);
 
         for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
             for (j, r_x_j) in r_x.iter_mut().enumerate() {
                 let mut shake = Shake256::default();
-
+                shake.update(&SOFT_SPOKEN_LABEL);
                 shake.update(&self.session_id);
-                shake.update(SOFT_SPOKEN_LABEL);
                 shake.update(
                     &self.seed_ot_results.one_time_pad_enc_keys[i][j],
                 );
+                shake.update(&SOFT_SPOKEN_EXPAND_LABEL);
                 shake.finalize_xof().read(&mut r_x_j[i]);
             }
 
             for (j, choice) in extended_packed_choices.iter().enumerate() {
                 for r_x_k in &r_x {
-                    if r_x_k[i][j] == 0 {
-                        continue;
-                    }
                     u[i][j] ^= r_x_k[i][j];
-                }
-                if choice == &0u8 {
-                    continue;
                 }
                 u[i][j] ^= choice;
             }
@@ -273,6 +290,7 @@ impl SoftSpokenOTRec<RecR0> {
             }
         }
 
+        matrix_hasher.update(&SOFT_SPOKEN_MATRIX_HASH_LABEL);
         let digest_matrix_u = matrix_hasher.finalize().as_bytes().to_owned();
 
         for j in 0..SOFT_SPOKEN_M {
@@ -359,10 +377,11 @@ impl SoftSpokenOTRec<RecR1> {
         output_additive_shares.iter_mut().enumerate().for_each(
             |(j, additive_shares_j)| {
                 let mut shake = Shake256::default();
+                shake.update(&SOFT_SPOKEN_LABEL);
                 shake.update(self.session_id.as_ref());
-                shake.update(SOFT_SPOKEN_LABEL);
                 shake.update(&(j as u16).to_be_bytes());
                 shake.update(self.state.psi[j].as_ref());
+                shake.update(&SOFT_SPOKEN_RANDOMIZE_LABEL);
                 let mut column = [0u8; DIGEST_SIZE * OT_WIDTH];
                 shake.finalize_xof().read(&mut column);
                 let bit = self.state.extended_packed_choices.extract_bit(j);
@@ -435,8 +454,10 @@ impl SoftSpokenOTSender {
     }
 }
 
-pub type SoftSpokenOTSenderResult =
-    Result<(Box<[[Scalar; OT_WIDTH]; ETA]>, Box<Round2Output>), &'static str>;
+pub type SoftSpokenOTSenderResult = Result<
+    (Box<[[Scalar; OT_WIDTH]; ETA]>, Box<Round2Output>),
+    SoftSpokenOTError,
+>;
 
 impl SoftSpokenOTSender {
     pub fn process(
@@ -452,12 +473,13 @@ impl SoftSpokenOTSender {
                     rx_j[i].fill(0); // = [0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
                 } else {
                     let mut shake = Shake256::default();
+                    shake.update(&SOFT_SPOKEN_LABEL);
                     shake.update(self.session_id.as_ref());
-                    shake.update(SOFT_SPOKEN_LABEL);
                     shake.update(
                         self.seed_ot_results.one_time_pad_dec_keys[i][j]
                             .as_ref(),
                     );
+                    shake.update(&SOFT_SPOKEN_EXPAND_LABEL);
                     //let mut r_x_ij = [0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
                     shake.finalize_xof().read(&mut rx_j[i]);
                     // rx_j[i] = r_x_ij;
@@ -468,6 +490,8 @@ impl SoftSpokenOTSender {
         let mut w_matrix = [[0u8; COT_EXTENDED_BLOCK_SIZE_BYTES]; KAPPA];
 
         let mut hash_matrix_u = blake3::Hasher::new();
+        hash_matrix_u.update(&SOFT_SPOKEN_LABEL);
+        hash_matrix_u.update(&self.session_id);
 
         for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
             let delta = self.seed_ot_results.random_choices[i];
@@ -505,6 +529,7 @@ impl SoftSpokenOTSender {
             }
         }
 
+        hash_matrix_u.update(&SOFT_SPOKEN_MATRIX_HASH_LABEL);
         let digest_matrix_u = hash_matrix_u.finalize();
 
         let mut chi_matrix = [[0u8; SOFT_SPOKEN_S_BYTES]; SOFT_SPOKEN_M];
@@ -550,7 +575,7 @@ impl SoftSpokenOTSender {
                 });
 
             if q_row != t_i_plus_delta_i_times_x {
-                return Err("Consistency check failed");
+                return Err(SoftSpokenOTError::AbortProtocolAndBanReceiver);
             }
         }
 
@@ -567,10 +592,11 @@ impl SoftSpokenOTSender {
 
         for j in 0..ETA {
             let mut shake = Shake256::default();
+            shake.update(&SOFT_SPOKEN_LABEL);
             shake.update(self.session_id.as_ref());
-            shake.update(SOFT_SPOKEN_LABEL);
             shake.update(&(j as u16).to_be_bytes());
             shake.update(&zeta[j]);
+            shake.update(&SOFT_SPOKEN_RANDOMIZE_LABEL);
             let mut column = [0u8; DIGEST_SIZE * OT_WIDTH];
             shake.finalize_xof().read(&mut column);
 
@@ -590,10 +616,11 @@ impl SoftSpokenOTSender {
                 .for_each(|(i, b)| zeta[j][i] ^= b);
 
             let mut shake = Shake256::default();
+            shake.update(&SOFT_SPOKEN_LABEL);
             shake.update(&self.session_id);
-            shake.update(SOFT_SPOKEN_LABEL);
             shake.update(&(j as u16).to_be_bytes());
             shake.update(&zeta[j]);
+            shake.update(&SOFT_SPOKEN_RANDOMIZE_LABEL);
             let mut column = [0u8; DIGEST_SIZE * OT_WIDTH];
             shake.finalize_xof().read(&mut column);
 
@@ -721,7 +748,3 @@ mod tests {
         }
     }
 }
-
-
-
-

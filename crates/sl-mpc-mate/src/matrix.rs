@@ -1,10 +1,10 @@
-use std::ops::Sub;
+use std::ops::{MulAssign, Sub};
 
 use elliptic_curve::{CurveArithmetic, Field};
 use rayon::prelude::*;
 
-/// Compute minor of a matrix.
-pub fn matrix_minor<C: CurveArithmetic>(
+// Compute minor of a matrix.
+fn matrix_minor<C: CurveArithmetic>(
     matrix: &[Vec<C::Scalar>],
     i: usize,
     j: usize,
@@ -23,29 +23,30 @@ pub fn matrix_minor<C: CurveArithmetic>(
         .collect::<Vec<_>>()
 }
 
-/// Transpose a matrix
-pub fn transpose<C: CurveArithmetic>(
-    v: Vec<Vec<C::Scalar>>,
+// Transpose a matrix
+fn transpose<C: CurveArithmetic>(
+    mut v: Vec<Vec<C::Scalar>>,
 ) -> Vec<Vec<C::Scalar>> {
     let len = v[0].len();
-    let mut iters: Vec<_> = v.into_iter().map(|n| n.into_iter()).collect();
-    (0..len)
-        .map(|_| {
-            iters
-                .iter_mut()
-                .map(|n| n.next().unwrap())
-                .collect::<Vec<C::Scalar>>()
-        })
-        .collect()
+
+    for n in 0..len - 1 {
+        for m in n + 1..len {
+            let nm = &mut v[n][m] as *mut C::Scalar;
+            let mn = &mut v[m][n] as *mut C::Scalar;
+
+            // SAFETY: n != m, so nm and mn always points to separate locations
+            unsafe { core::ptr::swap_nonoverlapping(nm, mn, 1) }
+        }
+    }
+
+    v
 }
 
-/// Get the matrix determinant
-pub fn mod_bareiss_determinant<C: CurveArithmetic>(
+// Get the matrix determinant
+fn mod_bareiss_determinant<C: CurveArithmetic>(
     mut matrix: Vec<Vec<C::Scalar>>,
     rows: usize,
-) -> Result<C::Scalar, &'static str>
-where
-{
+) -> Result<C::Scalar, &'static str> {
     if matrix.len() != rows || matrix[0].len() != rows {
         return Err("Not a square matrix");
     }
@@ -80,8 +81,7 @@ where
                     if inv.is_none().into() {
                         return Err("Modular inverse does not exist while computing determinant, Given ranks setup might not be valid");
                     }
-                    matrix[j][k] =
-                        matrix[j][k] * matrix[i - 1][i - 1].invert().unwrap()
+                    matrix[j][k] *= inv.unwrap()
                 }
             }
         }
@@ -130,12 +130,15 @@ pub fn matrix_inverse<C: CurveArithmetic>(
         })
         .collect::<Vec<_>>();
 
-    let transposed = transpose::<C>(cofactors);
+    let mut transposed = transpose::<C>(cofactors);
+
+    for row in &mut transposed {
+        for x in row {
+            x.mul_assign(determinant_inv);
+        }
+    }
 
     transposed
-        .into_iter()
-        .map(|row| row.into_iter().map(|x| x * determinant_inv).collect())
-        .collect::<Vec<_>>()
 }
 
 #[cfg(test)]
@@ -180,6 +183,43 @@ mod tests {
             vec![
                 vec![Scalar::from(1_u64), Scalar::from(3_u64)],
                 vec![Scalar::from(2_u64), Scalar::from(4_u64)],
+            ]
+        );
+
+        assert_eq!(
+            transpose::<Secp256k1>(vec![
+                vec![
+                    Scalar::from(1_u64),
+                    Scalar::from(2_u64),
+                    Scalar::from(3_u64)
+                ],
+                vec![
+                    Scalar::from(4_u64),
+                    Scalar::from(5_u64),
+                    Scalar::from(6_u64)
+                ],
+                vec![
+                    Scalar::from(7_u64),
+                    Scalar::from(8_u64),
+                    Scalar::from(9_u64)
+                ],
+            ]),
+            vec![
+                vec![
+                    Scalar::from(1_u64),
+                    Scalar::from(4_u64),
+                    Scalar::from(7_u64)
+                ],
+                vec![
+                    Scalar::from(2_u64),
+                    Scalar::from(5_u64),
+                    Scalar::from(8_u64)
+                ],
+                vec![
+                    Scalar::from(3_u64),
+                    Scalar::from(6_u64),
+                    Scalar::from(9_u64)
+                ],
             ]
         );
     }
