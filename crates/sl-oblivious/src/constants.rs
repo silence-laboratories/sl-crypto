@@ -32,3 +32,12 @@ pub const SOFT_SPOKEN_MATRIX_HASH_LABEL: Label = Label::new(VERSION, 9);
 
 /// LABEL for SoftSpokenOT randomize
 pub const SOFT_SPOKEN_RANDOMIZE_LABEL: Label = Label::new(VERSION, 10);
+
+/// LABEL for RandomVOLE gadget vector
+pub const RANDOM_VOLE_GADGET_VECTOR_LABEL: Label = Label::new(VERSION, 11);
+
+/// LABEL for RandomVOLE theta
+pub const RANDOM_VOLE_THETA_LABEL: Label = Label::new(VERSION, 12);
+
+/// LABEL for RandomVOLE mu
+pub const RANDOM_VOLE_MU_LABEL: Label = Label::new(VERSION, 13);
