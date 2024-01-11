@@ -10,6 +10,9 @@ pub mod zkproofs;
 /// Endemic 1 out of 2 Oblivious Transfer
 pub mod endemic_ot;
 
+/// Random Vector OLE
+pub mod rvole;
+
 /// Utility functions
 pub mod utils {
     use std::ops::Index;
