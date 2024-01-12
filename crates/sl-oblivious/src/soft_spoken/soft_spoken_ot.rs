@@ -9,7 +9,6 @@
 use std::array;
 
 use elliptic_curve::rand_core::CryptoRngCore;
-use rand::Rng;
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
     Shake256,
@@ -63,6 +62,7 @@ pub const RAND_EXTENSION_SIZE: usize = L_PRIME_BYTES - L_BYTES;
     Zeroize,
     ZeroizeOnDrop,
 )]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SenderOTSeed {
     pub one_time_pad_enc_keys: Vec<Vec<[u8; DIGEST_SIZE]>>, // [256 / SOFT_SPOKEN_K][SOFT_SPOKEN_Q][DIGEST]
 }
@@ -76,16 +76,52 @@ pub struct SenderOTSeed {
     Zeroize,
     ZeroizeOnDrop,
 )]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReceiverOTSeed {
     pub random_choices: Vec<u8>, // [256 / SOFT_SPOKEN_K]
     pub one_time_pad_dec_keys: Vec<Vec<[u8; DIGEST_SIZE]>>, // [256 / SOFT_SPOKEN_K][SOFT_SPOKEN_Q][DIGEST]
 }
 
-#[derive(Debug, Zeroize, ZeroizeOnDrop)]
+#[derive(Debug, Clone, PartialEq, Zeroize, ZeroizeOnDrop)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Round1Output {
+    #[cfg_attr(feature = "serde", serde(with = "ser_u"))]
     pub u: [[u8; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
     pub x: [u8; S_BYTES],
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     pub t: [[u8; S_BYTES]; KAPPA], // U128
+}
+
+// Why we need this hack? COT_EXTENDED_BLOCK_SIZE_BYTES > 32
+// and serde_array can't serialize
+// [[u8; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K]
+#[cfg(feature = "serde")]
+mod ser_u {
+    use sl_mpc_mate::ser::Visitor;
+
+    use serde::{Deserializer, Serialize, Serializer};
+
+    pub fn serialize<const N: usize, const M: usize, S>(
+        arr: &[[u8; N]; M],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Serialize [[u8; N]; M] array as [u8; N*M]
+        let bytes: &[u8] = bytemuck::try_cast_slice(arr).unwrap();
+
+        Serialize::serialize(bytes, serializer)
+    }
+
+    pub fn deserialize<'de, const N: usize, const M: usize, D>(
+        d: D,
+    ) -> Result<[[u8; N]; M], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        d.deserialize_bytes(Visitor::new())
+    }
 }
 
 //
@@ -135,20 +171,26 @@ impl<'de> BorrowDecode<'de> for Round1Output {
     }
 }
 
-/// The extended output of the OT sender.
-#[derive(Clone, bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SenderExtendedOutput {
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     pub v_0: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     pub v_1: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
 }
 
 /// The extended output of the OT receiver.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReceiverExtendedOutput {
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     pub choices: [u8; L_BYTES], // L bits
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     pub v_x: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SoftSpokenOTReceiver {
     session_id: SessionId,
     seed_ot_results: SenderOTSeed,
@@ -355,6 +397,7 @@ fn transpose_bool_matrix(
     output
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SoftSpokenOTSender {
     session_id: SessionId,
     seed_ot_results: ReceiverOTSeed,
@@ -543,6 +586,8 @@ impl SoftSpokenOTSender {
 pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
     rng: &mut R,
 ) -> (SenderOTSeed, ReceiverOTSeed) {
+    use rand::prelude::*;
+
     let mut one_time_pad_enc_keys = Vec::new();
     let mut one_time_pad_dec_keys = Vec::new();
 
@@ -577,7 +622,6 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
 
 #[cfg(test)]
 mod tests {
-
     use crate::soft_spoken::{
         generate_all_but_one_seed_ot, SoftSpokenOTReceiver,
         SoftSpokenOTSender, L, L_BYTES, OT_WIDTH,

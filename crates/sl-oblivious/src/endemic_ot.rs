@@ -2,7 +2,7 @@ use std::array;
 
 use rand::prelude::*;
 use rayon::prelude::*;
-use x25519_dalek::{PublicKey, ReusableSecret};
+use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use sl_mpc_mate::{xor_byte_arrays, SessionId};
@@ -18,6 +18,7 @@ pub const BATCH_SIZE_BYTES: usize = BATCH_SIZE / 8;
 #[derive(
     Debug, Clone, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
 )]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EndemicOTMsg1 {
     /// values r_0 and r_1 from OTReceiver to OTSender
     pub r_list: Vec<[[u8; 32]; 2]>, // size == BATCH_SIZE
@@ -27,6 +28,7 @@ pub struct EndemicOTMsg1 {
 #[derive(
     Debug, Clone, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
 )]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EndemicOTMsg2 {
     /// values m_b_0 and m_b_1 from OTSender to OTReceiver
     pub m_b_list: Vec<[[u8; 32]; 2]>, // size == BATCH_SIZE
@@ -69,10 +71,13 @@ fn h_function(
 
 /// Sender of the Endemic OT protocol.
 /// 1 out of 2 Endemic OT Fig.8 https://eprint.iacr.org/2019/706.pdf
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EndemicOTSender {
     session_id: SessionId,
-    t_b_0_list: [ReusableSecret; BATCH_SIZE],
-    t_b_1_list: [ReusableSecret; BATCH_SIZE],
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
+    t_b_0_list: [StaticSecret; BATCH_SIZE],
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
+    t_b_1_list: [StaticSecret; BATCH_SIZE],
 }
 
 impl EndemicOTSender {
@@ -84,10 +89,10 @@ impl EndemicOTSender {
         EndemicOTSender {
             session_id,
             t_b_0_list: array::from_fn(|_| {
-                ReusableSecret::random_from_rng(&mut *rng)
+                StaticSecret::random_from_rng(&mut *rng)
             }),
             t_b_1_list: array::from_fn(|_| {
-                ReusableSecret::random_from_rng(&mut *rng)
+                StaticSecret::random_from_rng(&mut *rng)
             }),
         }
     }
@@ -135,9 +140,11 @@ impl EndemicOTSender {
 
 /// EndemicOTReceiver
 /// 1 out of 2 Endemic OT Fig.8 https://eprint.iacr.org/2019/706.pdf
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EndemicOTReceiver {
     packed_choice_bits: [u8; BATCH_SIZE_BYTES],
-    t_a_list: [ReusableSecret; BATCH_SIZE],
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
+    t_a_list: [StaticSecret; BATCH_SIZE],
 }
 
 impl EndemicOTReceiver {
@@ -147,10 +154,8 @@ impl EndemicOTReceiver {
         rng: &mut R,
     ) -> (Self, EndemicOTMsg1) {
         let packed_choice_bits: [u8; BATCH_SIZE_BYTES] = rng.gen();
-
-        let t_a_list: [ReusableSecret; BATCH_SIZE] =
-            array::from_fn(|_| ReusableSecret::random_from_rng(&mut *rng));
-
+        let t_a_list: [StaticSecret; BATCH_SIZE] =
+            array::from_fn(|_| StaticSecret::random_from_rng(&mut *rng));
         let r_other_list: [[u8; 32]; BATCH_SIZE] =
             array::from_fn(|_| rng.gen());
 

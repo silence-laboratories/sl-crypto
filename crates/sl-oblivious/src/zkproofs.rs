@@ -1,5 +1,7 @@
-use elliptic_curve::{subtle::ConstantTimeEq, Field};
-use k256::{ProjectivePoint, Scalar};
+use elliptic_curve::{
+    group::prime::PrimeCurveAffine, subtle::ConstantTimeEq, Field,
+};
+use k256::{AffinePoint, ProjectivePoint, Scalar};
 use merlin::Transcript;
 use rand::prelude::*;
 
@@ -10,9 +12,10 @@ use crate::utils::TranscriptProtocol;
 
 /// Non-interactive Proof of knowledge of discrete logarithm with Fiat-Shamir transform.
 #[derive(Clone, Debug, PartialEq, Eq, bincode::Encode, bincode::Decode)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DLogProof {
     /// Public point `t`.
-    pub t: Opaque<ProjectivePoint, GR>,
+    pub t: Opaque<AffinePoint, GR>,
 
     /// Challenge response
     pub s: Opaque<Scalar, PF>,
@@ -35,7 +38,7 @@ impl DLogProof {
         let s = r + c * x;
 
         Self {
-            t: t.into(),
+            t: t.to_affine().into(),
             s: s.into(),
         }
     }
@@ -47,9 +50,10 @@ impl DLogProof {
         base_point: &ProjectivePoint,
         transcript: &mut Transcript,
     ) -> bool {
-        let c = Self::fiat_shamir(y, &self.t, base_point, transcript);
+        let t = self.t.to_curve();
+        let c = Self::fiat_shamir(y, &t, base_point, transcript);
         let lhs = base_point * &self.s.0;
-        let rhs = self.t + y * &c;
+        let rhs = t + y * &c;
 
         lhs.ct_eq(&rhs).into()
     }

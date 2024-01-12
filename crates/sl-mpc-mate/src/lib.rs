@@ -94,3 +94,134 @@ impl<const N: usize> From<&[u8; N]> for ByteArray<N> {
         ByteArray(*b)
     }
 }
+
+#[cfg(feature = "serde")]
+pub mod ser {
+    use std::marker::PhantomData;
+    use std::{array, fmt};
+
+    use super::*;
+
+    impl<const N: usize> serde::Serialize for ByteArray<N> {
+        fn serialize<S>(
+            &self,
+            serializer: S,
+        ) -> core::result::Result<S::Ok, S::Error>
+        where
+            S: serde::ser::Serializer,
+        {
+            serializer.serialize_bytes(&self.0)
+        }
+    }
+
+    pub struct Visitor<const N: usize, const M: usize>(
+        PhantomData<[[u8; N]; M]>,
+    );
+
+    impl<const N: usize, const M: usize> Visitor<N, M> {
+        #[allow(clippy::new_without_default)]
+        pub fn new() -> Self {
+            Self(PhantomData)
+        }
+    }
+
+    impl<'de, const N: usize, const M: usize> serde::de::Visitor<'de>
+        for Visitor<N, M>
+    {
+        type Value = [[u8; N]; M];
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            write!(formatter, "a {} bytes array", N)
+        }
+
+        fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if v.len() != N * M {
+                return Err(serde::de::Error::invalid_length(
+                    N * M,
+                    &"bytes",
+                ));
+            }
+
+            Ok(array::from_fn(|i| v[i * N..][..N].try_into().unwrap()))
+        }
+
+        fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            self.visit_bytes(v.as_ref())
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut b = [[0u8; N]; M];
+
+            for r in &mut b {
+                for c in r {
+                    if let Some(b) = seq.next_element()? {
+                        *c = b;
+                    } else {
+                        return Err(serde::de::Error::invalid_length(
+                            N * M,
+                            &"bytes",
+                        ));
+                    }
+                }
+            }
+
+            Ok(b)
+        }
+    }
+
+    impl<'de, const N: usize> serde::Deserialize<'de> for ByteArray<N> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::de::Deserializer<'de>,
+        {
+            let bytes: [[u8; N]; 1] =
+                deserializer.deserialize_bytes(Visitor::new())?;
+
+            Ok(ByteArray::new(bytes[0]))
+        }
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod ser_tests {
+    use crate::ByteArray;
+
+    #[test]
+    fn cbor_bytes() {
+        let b = ByteArray::<32>::default();
+        let mut w = vec![];
+
+        ciborium::ser::into_writer(&b, &mut w).unwrap();
+
+        let r: ByteArray<32> =
+            ciborium::de::from_reader(&w as &[u8]).unwrap();
+
+        assert_eq!(b, r);
+
+        assert!(
+            ciborium::de::from_reader::<ByteArray<16>, &[u8]>(&w).is_err()
+        );
+    }
+
+    #[test]
+    fn json_bytes() {
+        let b = ByteArray::<32>::default();
+
+        let w = serde_json::to_string(&b).unwrap();
+
+        let r: ByteArray<32> = serde_json::from_str(&w).unwrap();
+
+        assert_eq!(b, r);
+
+        assert!(serde_json::from_str::<ByteArray<16>>(&w).is_err());
+    }
+}

@@ -4,7 +4,7 @@ use derivation_path::{ChildIndex, DerivationPath};
 use hmac::{Hmac, Mac};
 use k256::{
     elliptic_curve::{ops::Reduce, sec1::ToEncodedPoint, Curve},
-    ProjectivePoint, Scalar, Secp256k1, U256,
+    AffinePoint, ProjectivePoint, Scalar, Secp256k1, U256,
 };
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
@@ -176,16 +176,36 @@ pub fn derive_child_pubkey(
 }
 
 /// Get the fingerprint of the root public key
-pub fn get_finger_print(public_key: &ProjectivePoint) -> KeyFingerPrint {
+pub fn get_finger_print(public_key: &AffinePoint) -> KeyFingerPrint {
     let pubkey_bytes: [u8; 33] = public_key
         .to_encoded_point(true)
         .as_bytes()
-        .as_ref()
         .try_into()
         .expect("compressed pubkey must be 33 bytes");
 
     let digest = Ripemd160::digest(Sha256::digest(pubkey_bytes));
     digest[..4].try_into().expect("digest truncated")
+}
+
+/// Get the additive offset of a key share for a given derivation path
+pub fn derive_with_offset(
+    public_key: &ProjectivePoint,
+    root_chain_code: &[u8; 32],
+    chain_path: &DerivationPath,
+) -> Result<(Scalar, ProjectivePoint), BIP32Error> {
+    let mut pubkey = *public_key;
+    let mut chain_code = *root_chain_code;
+    let mut additive_offset = Scalar::ZERO;
+    for child_num in chain_path.into_iter() {
+        let (il_int, child_pubkey, child_chain_code) =
+            derive_child_pubkey(&pubkey, chain_code, child_num)?;
+        pubkey = child_pubkey;
+        chain_code = child_chain_code;
+        additive_offset += il_int;
+    }
+
+    // Perform the mod q operation to get the additive offset
+    Ok((additive_offset, pubkey))
 }
 
 /// Generate a key ID from a root public key and root chain code
@@ -234,7 +254,7 @@ pub fn derive_xpub(
     };
 
     for child_num in path {
-        parent_fingerprint = get_finger_print(&pubkey);
+        parent_fingerprint = get_finger_print(&pubkey.to_affine());
         let (_, child_pubkey, child_chain_code) =
             derive_child_pubkey(&pubkey, chain_code, child_num)?;
         pubkey = child_pubkey;

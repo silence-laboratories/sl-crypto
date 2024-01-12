@@ -11,9 +11,15 @@ sl-mpc-mate = {path ="../sl-mpc-mate" }
 blake3 = { version = "1.4", features = ["pure"] }
 merlin = "3.0.0"
 elliptic-curve = { version ="0.13" }
-k256 = { version = "0.13", default-features = false, features = [ "ecdsa" ]}
+k256 = { version = "0.13", default-features = false, features = [ "ecdsa", "arithmetic" ]}
 rand = "0.8"
 sha3 = "0.10.8"
 rayon = "1"
-x25519-dalek = { version = "2.0.0", features = [ "reusable_secrets", "zeroize" ] }
+x25519-dalek = { version = "2.0.0", features = [ "static_secrets", "reusable_secrets", "zeroize" ] }
 zeroize = "1.6.1"
+serde = { version = "1", optional = true }
+serde_arrays = { version = "0.1", optional = true }
+bytemuck = { version = "1.14.0", features = [ "min_const_generics" ], optional = true }
+
+[features]
+serde = [ "dep:serde", "bytemuck", "serde_arrays", "serde/derive", "k256/serde", "x25519-dalek/serde", "sl-mpc-mate/serde" ]

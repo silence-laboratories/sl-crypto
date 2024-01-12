@@ -45,8 +45,8 @@ pub const L_BATCH: usize = 2;
 pub const RHO: usize = 1;
 pub const L_BATCH_PLUS_RHO: usize = L_BATCH + RHO; // should be equal to OT_WIDTH
 
-fn generate_gadget_vec(session_id: &SessionId) -> Box<[Scalar; XI]> {
-    let mut gadget_vec = [Scalar::ZERO; XI];
+fn generate_gadget_vec(session_id: &SessionId) -> Vec<Scalar> {
+    let mut gadget_vec = vec![Scalar::ZERO; XI];
     let mut h = Hasher::new();
     h.update(&RANDOM_VOLE_GADGET_VECTOR_LABEL);
     h.update(session_id);
@@ -62,14 +62,17 @@ fn generate_gadget_vec(session_id: &SessionId) -> Box<[Scalar; XI]> {
             *g = Reduce::<U256>::reduce_bytes(digest);
         });
 
-    Box::new(gadget_vec)
+    gadget_vec
 }
 
 /// Message output in RVOLE protocol
-#[derive(Debug, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RVOLEOutput {
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     a_tilde: [[Scalar; L_BATCH_PLUS_RHO]; XI],
     eta: [Scalar; RHO],
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     mu_hash: [u8; 64],
 }
 
@@ -124,19 +127,23 @@ impl<'de> BorrowDecode<'de> for RVOLEOutput {
 }
 
 ///
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RVOLEReceiver<T> {
     session_id: SessionId,
-    gadget_vector: Box<[Scalar; XI]>,
+    gadget_vector: Vec<Scalar>,
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     beta: [u8; L_BYTES],
     state: T,
 }
 
 /// Initial state of the RVOLEReceiver
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RVOLEReceiverR0 {
     cot_receiver: SoftSpokenOTReceiver,
 }
 
 /// State of RVOLEReceiver after processing Round 1 output
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RVOLEReceiverR1 {
     receiver_extended_output: Box<ReceiverExtendedOutput>,
 }
@@ -307,9 +314,10 @@ impl RVOLEReceiver<RVOLEReceiverR1> {
 }
 
 ///
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RVOLESender {
     session_id: SessionId,
-    gadget_vector: Box<[Scalar; XI]>,
+    gadget_vector: Vec<Scalar>,
     a_hat: [Scalar; RHO],
     cot_sender: SoftSpokenOTSender,
 }
@@ -324,7 +332,7 @@ impl RVOLESender {
     ) -> Self {
         let cot_sender =
             SoftSpokenOTSender::new(session_id, seed_ot_results.clone());
-        let gadget_vec = generate_gadget_vec(&session_id);
+        let gadget_vector = generate_gadget_vec(&session_id);
         let mut a_hat = [Scalar::ZERO; RHO];
         #[allow(clippy::needless_range_loop)]
         for i in 0..RHO {
@@ -333,7 +341,7 @@ impl RVOLESender {
 
         Self {
             session_id,
-            gadget_vector: gadget_vec,
+            gadget_vector,
             a_hat,
             cot_sender,
         }

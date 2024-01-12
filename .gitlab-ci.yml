@@ -46,3 +46,9 @@ test:
   needs: [ "lint" ]
   script:
     - cargo test --release
+
+test-serde:
+  stage: test
+  needs: [ "lint" ]
+  script:
+    - cargo test -F serde -p sl-mpc-mate -p sl-oblivious

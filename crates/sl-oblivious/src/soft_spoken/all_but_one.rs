@@ -1,3 +1,6 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use elliptic_curve::subtle::{
     Choice, ConditionallySelectable, ConstantTimeEq,
 };
@@ -27,11 +30,14 @@ use super::ReceiverOTSeed;
 #[derive(
     Clone, Debug, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
 )]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PPRFOutput {
     pub t: Vec<[[u8; DIGEST_SIZE]; 2]>,
 
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     pub s_tilda: [u8; DIGEST_SIZE * 2],
 
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     pub t_tilda: [u8; DIGEST_SIZE * 2],
 }
 

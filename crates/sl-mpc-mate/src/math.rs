@@ -9,12 +9,33 @@ use elliptic_curve::{
 
 use crate::{matrix::matrix_inverse, message::*};
 
+#[cfg(feature = "serde")]
+pub trait Serializable:
+    serde::Serialize + serde::de::DeserializeOwned
+{
+}
+#[cfg(feature = "serde")]
+impl<T: serde::Serialize + serde::de::DeserializeOwned> Serializable for T {}
+
+#[cfg(not(feature = "serde"))]
+pub trait Serializable {}
+#[cfg(not(feature = "serde"))]
+impl<T> Serializable for T {}
+
 /// A polynomial with coefficients of type `Scalar`.
-pub struct Polynomial<C: CurveArithmetic> {
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Polynomial<C>
+where
+    C: CurveArithmetic,
+    C::Scalar: Serializable,
+{
     coeffs: Vec<C::Scalar>,
 }
 
-impl<C: CurveArithmetic<Uint = U256>> Polynomial<C> {
+impl<C: CurveArithmetic<Uint = U256>> Polynomial<C>
+where
+    C::Scalar: Serializable,
+{
     /// Create a new polynomial with the given coefficients.
     pub fn new(coeffs: Vec<C::Scalar>) -> Self {
         Self { coeffs }
@@ -153,7 +174,10 @@ where
     }
 }
 
-impl<C: CurveArithmetic> Deref for Polynomial<C> {
+impl<C: CurveArithmetic> Deref for Polynomial<C>
+where
+    C::Scalar: Serializable,
+{
     type Target = [C::Scalar];
 
     fn deref(&self) -> &Self::Target {
@@ -161,17 +185,52 @@ impl<C: CurveArithmetic> Deref for Polynomial<C> {
     }
 }
 
-// impl<C> Deref for GroupPolynomial<C>
-// where
-//     C: CurveArithmetic,
-//     C::ProjectivePoint: GroupEncoding,
-// {
-//     type Target = [C::ProjectivePoint];
+#[cfg(feature = "serde")]
+mod ser {
+    use elliptic_curve::group::Curve;
 
-//     fn deref(&self) -> &Self::Target {
-//         &self.coeffs
-//     }
-// }
+    use super::*;
+
+    impl<C: CurveArithmetic> serde::Serialize for GroupPolynomial<C>
+    where
+        C::ProjectivePoint: GroupEncoding,
+        C::AffinePoint: Serializable,
+    {
+        fn serialize<S>(
+            &self,
+            serializer: S,
+        ) -> core::result::Result<S::Ok, S::Error>
+        where
+            S: serde::ser::Serializer,
+        {
+            // Serialize as Vec<C::AffinePoint>
+            self.coeffs
+                .iter()
+                .map(|p| p.0.to_affine())
+                .collect::<Vec<_>>()
+                .serialize(serializer)
+        }
+    }
+
+    impl<'de, C> serde::Deserialize<'de> for GroupPolynomial<C>
+    where
+        C: CurveArithmetic,
+        C::ProjectivePoint: GroupEncoding,
+        C::AffinePoint: Serializable,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::de::Deserializer<'de>,
+        {
+            let coeffs = <Vec<C::AffinePoint>>::deserialize(deserializer)?
+                .into_iter()
+                .map(|p| Opaque::from(C::ProjectivePoint::from(p)))
+                .collect();
+
+            Ok(Self { coeffs })
+        }
+    }
+}
 
 /// Computes the factorial of a number, n <= 57 (the largest factorial that fits in 256 bits)
 /// This is okay for our purposes because we expect threshold values to be less than 57
