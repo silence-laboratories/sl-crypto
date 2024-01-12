@@ -84,8 +84,8 @@ pub struct ReceiverOTSeed {
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct Round1Output {
     pub u: [[u8; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
-    pub w_prime: [u8; S_BYTES],
-    pub v_prime: [[u8; S_BYTES]; KAPPA], // U128
+    pub x: [u8; S_BYTES],
+    pub t: [[u8; S_BYTES]; KAPPA], // U128
 }
 
 //
@@ -95,9 +95,9 @@ impl Encode for Round1Output {
             encoder.writer().write(u)?;
         }
 
-        encoder.writer().write(&self.w_prime)?;
+        encoder.writer().write(&self.x)?;
 
-        for v in &self.v_prime {
+        for v in &self.t {
             encoder.writer().write(v)?;
         }
 
@@ -109,17 +109,17 @@ impl Decode for Round1Output {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let mut r = Round1Output {
             u: [[0; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
-            w_prime: [0; S_BYTES],
-            v_prime: [[0; S_BYTES]; KAPPA],
+            x: [0; S_BYTES],
+            t: [[0; S_BYTES]; KAPPA],
         };
 
         for u in &mut r.u {
             decoder.reader().read(u)?;
         }
 
-        decoder.reader().read(&mut r.w_prime)?;
+        decoder.reader().read(&mut r.x)?;
 
-        for v in &mut r.v_prime {
+        for v in &mut r.t {
             decoder.reader().read(v)?;
         }
 
@@ -187,13 +187,13 @@ impl SoftSpokenOTReceiver {
             [[[0u8; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K]; SOFT_SPOKEN_Q];
 
         let mut output = Round1Output {
-            w_prime: [0u8; S_BYTES],
-            v_prime: [[0u8; S_BYTES]; KAPPA],
+            x: [0u8; S_BYTES],
+            t: [[0u8; S_BYTES]; KAPPA],
             u: [[0u8; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
         };
 
-        let w_prime = &mut output.w_prime;
-        let v_prime = &mut output.v_prime;
+        let x = &mut output.x;
+        let t = &mut output.t;
         let u = &mut output.u;
 
         let mut matrix_hasher = blake3::Hasher::new();
@@ -264,7 +264,7 @@ impl SoftSpokenOTReceiver {
                 binary_field_multiply_gf_2_128(x_hat_j, &chi_j);
 
             for k in 0..S_BYTES {
-                w_prime[k] ^= x_hat_j_times_chi_j[k];
+                x[k] ^= x_hat_j_times_chi_j[k];
             }
 
             for i in 0..KAPPA {
@@ -275,7 +275,7 @@ impl SoftSpokenOTReceiver {
                     binary_field_multiply_gf_2_128(t_hat_j, &chi_j);
 
                 (0..S_BYTES).for_each(|k| {
-                    v_prime[i][k] ^= t_hat_j_times_chi_j[k];
+                    t[i][k] ^= t_hat_j_times_chi_j[k];
                 })
             }
         }
@@ -286,15 +286,15 @@ impl SoftSpokenOTReceiver {
         let x_hat_m_plus_1 = &extended_packed_choices[from_index..to_index];
 
         for k in 0..S_BYTES {
-            w_prime[k] ^= x_hat_m_plus_1[k];
+            x[k] ^= x_hat_m_plus_1[k];
         }
 
         for i in 0..KAPPA {
-            let v_prime_i = &mut v_prime[i];
+            let t_i = &mut t[i];
 
             let t_hat_m_plus_1 = &v[i][from_index..to_index];
             (0..S_BYTES).for_each(|k| {
-                v_prime_i[k] ^= t_hat_m_plus_1[k];
+                t_i[k] ^= t_hat_m_plus_1[k];
             })
         }
 
@@ -482,7 +482,7 @@ impl SoftSpokenOTSender {
 
             let t_i_plus_delta_i_times_x: [u8; S_BYTES] =
                 array::from_fn(|k| {
-                    message.v_prime[i][k] ^ (bit_mask & message.w_prime[k])
+                    message.t[i][k] ^ (bit_mask & message.x[k])
                 });
 
             if q_row != t_i_plus_delta_i_times_x {
