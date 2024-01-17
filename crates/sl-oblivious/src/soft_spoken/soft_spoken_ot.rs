@@ -12,7 +12,7 @@ use elliptic_curve::rand_core::CryptoRngCore;
 use rand::Rng;
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
-    Shake256,
+    Digest, Sha3_256, Shake256,
 };
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -39,18 +39,25 @@ use crate::{
 
 use super::mul_poly::binary_field_multiply_gf_2_128;
 
-pub const KAPPA: usize = 256;
+pub const KAPPA: usize = 256; // Bits on underlying Scalar
 pub const KAPPA_BYTES: usize = KAPPA >> 3;
-pub const S: usize = 128;
+
+pub const S: usize = 128; // 16 bytes == 128 bits
 pub const S_BYTES: usize = S >> 3;
+
 pub const L: usize = KAPPA + 2 * S; // L is divisible by S
-pub const L_PRIME: usize = L + S;
-pub const SOFT_SPOKEN_M: usize = L / S;
 pub const L_BYTES: usize = L >> 3;
-pub const OT_WIDTH: usize = 3;
+
+pub const L_PRIME: usize = L + S;
 pub const L_PRIME_BYTES: usize = L_PRIME >> 3;
+
+pub const SOFT_SPOKEN_M: usize = L / S;
+
+pub const OT_WIDTH: usize = 3; // === L_BATCH + RHO
+
 pub const SOFT_SPOKEN_K: usize = 4;
 pub const SOFT_SPOKEN_Q: usize = 1 << SOFT_SPOKEN_K; // 2usize.pow(SOFT_SPOKEN_K as u32);
+
 pub const KAPPA_DIV_SOFT_SPOKEN_K: usize = KAPPA / SOFT_SPOKEN_K;
 pub const RAND_EXTENSION_SIZE: usize = L_PRIME_BYTES - L_BYTES;
 
@@ -64,21 +71,15 @@ pub const RAND_EXTENSION_SIZE: usize = L_PRIME_BYTES - L_BYTES;
     ZeroizeOnDrop,
 )]
 pub struct SenderOTSeed {
-    pub one_time_pad_enc_keys: Vec<Vec<[u8; DIGEST_SIZE]>>, // [256 / SOFT_SPOKEN_K][SOFT_SPOKEN_Q][DIGEST]
+    pub one_time_pad_enc_keys: Vec<[[u8; DIGEST_SIZE]; SOFT_SPOKEN_Q]>, // [256 / SOFT_SPOKEN_K]
 }
 
 #[derive(
-    Debug,
-    Default,
-    Clone,
-    bincode::Encode,
-    bincode::Decode,
-    Zeroize,
-    ZeroizeOnDrop,
+    Debug, Clone, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
 )]
 pub struct ReceiverOTSeed {
-    pub random_choices: Vec<u8>, // [256 / SOFT_SPOKEN_K]
-    pub one_time_pad_dec_keys: Vec<Vec<[u8; DIGEST_SIZE]>>, // [256 / SOFT_SPOKEN_K][SOFT_SPOKEN_Q][DIGEST]
+    pub random_choices: [u8; KAPPA_DIV_SOFT_SPOKEN_K], // FIXME: define range of random_choices[i]
+    pub one_time_pad_dec_keys: Vec<[[u8; DIGEST_SIZE]; SOFT_SPOKEN_Q]>, // [256 / SOFT_SPOKEN_K]
 }
 
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
@@ -196,9 +197,13 @@ impl SoftSpokenOTReceiver {
         let t = &mut output.t;
         let u = &mut output.u;
 
-        let mut matrix_hasher = blake3::Hasher::new();
-        matrix_hasher.update(&SOFT_SPOKEN_LABEL);
-        matrix_hasher.update(&self.session_id);
+        // we have both Update and Digest traits on the scope.
+        // both traits define method update() and Sha3_256 implements both.
+        //
+
+        let mut matrix_hasher = Sha3_256::default()
+            .chain_update(&SOFT_SPOKEN_LABEL)
+            .chain_update(self.session_id);
 
         for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
             for (j, r_x_j) in r_x.iter_mut().enumerate() {
@@ -219,7 +224,7 @@ impl SoftSpokenOTReceiver {
                 u[i][j] ^= choice;
             }
 
-            matrix_hasher.update(u[i].as_ref());
+            matrix_hasher = matrix_hasher.chain_update(u[i].as_ref());
         }
 
         // matrix V [KAPPA][COT_EXTENDED_BLOCK_SIZE_BYTES] byte
@@ -242,8 +247,11 @@ impl SoftSpokenOTReceiver {
             }
         }
 
-        matrix_hasher.update(&SOFT_SPOKEN_MATRIX_HASH_LABEL);
-        let digest_matrix_u = matrix_hasher.finalize().as_bytes().to_owned();
+        // matrix_hasher.update(&SOFT_SPOKEN_MATRIX_HASH_LABEL);
+        let digest_matrix_u: [u8; 32] = matrix_hasher
+            .chain_update(&SOFT_SPOKEN_MATRIX_HASH_LABEL)
+            .finalize()
+            .into();
 
         for j in 0..SOFT_SPOKEN_M {
             let mut shake = Shake256::default();
@@ -402,9 +410,9 @@ impl SoftSpokenOTSender {
 
         let mut w_matrix = [[0u8; L_PRIME_BYTES]; KAPPA];
 
-        let mut hash_matrix_u = blake3::Hasher::new();
-        hash_matrix_u.update(&SOFT_SPOKEN_LABEL);
-        hash_matrix_u.update(&self.session_id);
+        let mut hash_matrix_u = Sha3_256::default()
+            .chain_update(&SOFT_SPOKEN_LABEL)
+            .chain_update(self.session_id);
 
         for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
             let delta = self.seed_ot_results.random_choices[i];
@@ -427,7 +435,7 @@ impl SoftSpokenOTSender {
                 }
             }
 
-            hash_matrix_u.update(&message.u[i]);
+            hash_matrix_u = hash_matrix_u.chain_update(message.u[i]);
         }
 
         let mut packed_nabla = [0u8; KAPPA_BYTES];
@@ -442,15 +450,17 @@ impl SoftSpokenOTSender {
             }
         }
 
-        hash_matrix_u.update(&SOFT_SPOKEN_MATRIX_HASH_LABEL);
-        let digest_matrix_u = hash_matrix_u.finalize();
+        let digest_matrix_u: [u8; 32] = hash_matrix_u
+            .chain_update(&SOFT_SPOKEN_MATRIX_HASH_LABEL)
+            .finalize()
+            .into();
 
         let mut chi_matrix = [[0u8; S_BYTES]; SOFT_SPOKEN_M];
 
         chi_matrix.iter_mut().enumerate().for_each(|(j, chi_j)| {
             let mut shake = Shake256::default();
             shake.update((j as u16).to_be_bytes().as_ref());
-            shake.update(digest_matrix_u.as_bytes());
+            shake.update(&digest_matrix_u);
             shake.finalize_xof().read(chi_j);
         });
 
@@ -547,16 +557,15 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
     let mut one_time_pad_dec_keys = Vec::new();
 
     for _ in 0..(crate::soft_spoken::KAPPA_DIV_SOFT_SPOKEN_K) {
-        let ot_sender_messages = (0..crate::soft_spoken::SOFT_SPOKEN_Q)
-            .map(|_| random_bytes(rng))
-            .collect::<Vec<_>>();
-        one_time_pad_enc_keys.push(ot_sender_messages.clone());
+        let ot_sender_messages: [[u8; DIGEST_SIZE]; SOFT_SPOKEN_Q] =
+            std::array::from_fn(|_| random_bytes(rng));
+
+        one_time_pad_enc_keys.push(ot_sender_messages);
         one_time_pad_dec_keys.push(ot_sender_messages);
     }
 
-    let random_choices = (0..KAPPA_DIV_SOFT_SPOKEN_K)
-        .map(|_| rng.gen_range(0..=SOFT_SPOKEN_Q - 1) as u8)
-        .collect::<Vec<_>>();
+    let random_choices =
+        std::array::from_fn(|_| rng.gen_range(0..=SOFT_SPOKEN_Q - 1) as u8);
 
     for i in 0..(KAPPA_DIV_SOFT_SPOKEN_K) {
         let choice = random_choices[i];
@@ -586,17 +595,6 @@ mod tests {
     use sl_mpc_mate::SessionId;
 
     use crate::utils::ExtractBit;
-
-    // #[derive(Debug, Clone, Serialize, Deserialize)]
-    // pub struct RandomValues {
-    //     ot_sender_msgs: Vec<Vec<[u8; 32]>>,
-    //     random_choices: Vec<u8>,
-    //     session_id: SessionId,
-    //     #[serde(with = "serde_arrays")]
-    //     choices: [u8; 64],
-    //     input_data: Vec<[Scalar; 3]>,
-    //     number_random_bytes: [u8; RAND_EXTENSION_SIZE],
-    // }
 
     #[test]
     fn test_soft_spoken() {

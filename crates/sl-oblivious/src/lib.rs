@@ -24,8 +24,6 @@ pub mod utils {
     use merlin::Transcript;
     use sl_mpc_mate::SessionId;
 
-    pub use blake3::Hasher;
-
     /// Custom extension trait for the merlin transcript.
     pub trait TranscriptProtocol {
         /// Append a point to the transcript.
@@ -55,6 +53,13 @@ pub mod utils {
             action: &[u8],
             label: &'static [u8],
         ) -> Transcript;
+
+        ///
+        fn challenge_bytes(
+            &mut self,
+            label: &'static [u8],
+            buffer: &mut [u8],
+        );
     }
 
     impl TranscriptProtocol for Transcript {
@@ -99,6 +104,14 @@ pub mod utils {
             let mut buf = [0u8; 32];
             self.challenge_bytes(label, &mut buf);
             Scalar::<Secp256k1>::reduce(U256::from_be_bytes(buf))
+        }
+
+        fn challenge_bytes(
+            &mut self,
+            label: &'static [u8],
+            buffer: &mut [u8],
+        ) {
+            self.challenge_bytes(label, buffer)
         }
     }
 

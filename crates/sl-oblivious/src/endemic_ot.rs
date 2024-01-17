@@ -2,16 +2,17 @@ use std::array;
 
 use rand::prelude::*;
 use rayon::prelude::*;
+use sha3::{Digest, Sha3_256};
 use x25519_dalek::{PublicKey, ReusableSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use sl_mpc_mate::{xor_byte_arrays, SessionId};
+use sl_mpc_mate::SessionId;
 
 use crate::{constants::ENDEMIC_OT_LABEL, utils::ExtractBit};
 
 pub const BATCH_SIZE: usize = 256;
 
-// size of u8 array to hold BATCH_SIZE.
+// size of u8 array to hold BATCH_SIZE bits.
 pub const BATCH_SIZE_BYTES: usize = BATCH_SIZE / 8;
 
 /// EndemicOT Message 1
@@ -58,10 +59,11 @@ fn h_function(
     session_id: &SessionId,
     pk: &[u8; 32],
 ) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
+    let mut hasher = Sha3_256::new();
+
     hasher.update(&ENDEMIC_OT_LABEL);
     hasher.update(session_id);
-    hasher.update(&(index as u16).to_be_bytes());
+    hasher.update((index as u16).to_be_bytes());
     hasher.update(pk);
 
     hasher.finalize().into()
@@ -232,6 +234,11 @@ impl ReceiverOutput {
             one_time_pad_decryption_keys,
         }
     }
+}
+
+/// XOR two byte arrays.
+fn xor_byte_arrays<const T: usize>(a: &[u8; T], b: &[u8; T]) -> [u8; T] {
+    std::array::from_fn(|i| a[i] ^ b[i])
 }
 
 #[cfg(test)]

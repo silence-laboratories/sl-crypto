@@ -19,11 +19,6 @@ pub type SessionId = ByteArray<32>;
 
 pub type HashBytes = ByteArray<32>;
 
-/// XOR two byte arrays.
-pub fn xor_byte_arrays<const T: usize>(a: &[u8; T], b: &[u8; T]) -> [u8; T] {
-    std::array::from_fn(|i| a[i] ^ b[i])
-}
-
 /// Generate a random byte array
 pub fn random_bytes<const N: usize, R: CryptoRng + RngCore>(
     rng: &mut R,
