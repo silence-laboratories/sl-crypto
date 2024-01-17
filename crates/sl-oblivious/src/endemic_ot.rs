@@ -10,10 +10,15 @@ use sl_mpc_mate::SessionId;
 
 use crate::{constants::ENDEMIC_OT_LABEL, utils::ExtractBit};
 
-pub const BATCH_SIZE: usize = 256;
+// Computational security parameter, fixed to /lambda_c = 256
+// 256 OT seeds each 256-bit
+pub const LAMBDA_C: usize = 256;
 
-// size of u8 array to hold BATCH_SIZE bits.
-pub const BATCH_SIZE_BYTES: usize = BATCH_SIZE / 8;
+// size of u8 array to hold LAMBDA_C bits.
+pub const LAMBDA_C_BYTES: usize = LAMBDA_C / 8;
+
+//
+pub const BATCH_SIZE: usize = LAMBDA_C;
 
 /// EndemicOT Message 1
 #[derive(
@@ -21,7 +26,7 @@ pub const BATCH_SIZE_BYTES: usize = BATCH_SIZE / 8;
 )]
 pub struct EndemicOTMsg1 {
     /// values r_0 and r_1 from OTReceiver to OTSender
-    pub r_list: Vec<[[u8; 32]; 2]>, // size == BATCH_SIZE
+    pub r_list: Vec<[[u8; 32]; 2]>, // size == LAMBDA_C
 }
 
 /// EndemicOT Message 2
@@ -30,7 +35,7 @@ pub struct EndemicOTMsg1 {
 )]
 pub struct EndemicOTMsg2 {
     /// values m_b_0 and m_b_1 from OTSender to OTReceiver
-    pub m_b_list: Vec<[[u8; 32]; 2]>, // size == BATCH_SIZE
+    pub m_b_list: Vec<[[u8; 32]; 2]>, // size == LAMBDA_C
 }
 
 /// The one time pad encryption keys for a single choice.
@@ -43,14 +48,14 @@ pub struct OneTimePadEncryptionKeys {
 /// The output of the OT sender.
 #[derive(Clone, bincode::Encode, bincode::Decode)]
 pub struct SenderOutput {
-    pub one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == BATCH_SIZE
+    pub one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == LAMBDA_C
 }
 
 /// The output of the OT receiver.
 #[derive(Clone, Debug)]
 pub struct ReceiverOutput {
-    pub(crate) packed_random_choice_bits: [u8; BATCH_SIZE_BYTES], // batch_size bits
-    pub(crate) one_time_pad_decryption_keys: Vec<[u8; 32]>, // size == BATCH_SIZE
+    pub(crate) packed_random_choice_bits: [u8; LAMBDA_C_BYTES], // LAMBDA_C bits
+    pub(crate) one_time_pad_decryption_keys: Vec<[u8; 32]>, // size == LAMBDA_C
 }
 
 // RO for EndemicOT
@@ -73,8 +78,8 @@ fn h_function(
 /// 1 out of 2 Endemic OT Fig.8 https://eprint.iacr.org/2019/706.pdf
 pub struct EndemicOTSender {
     session_id: SessionId,
-    t_b_0_list: [ReusableSecret; BATCH_SIZE],
-    t_b_1_list: [ReusableSecret; BATCH_SIZE],
+    t_b_0_list: [ReusableSecret; LAMBDA_C],
+    t_b_1_list: [ReusableSecret; LAMBDA_C],
 }
 
 impl EndemicOTSender {
@@ -138,8 +143,8 @@ impl EndemicOTSender {
 /// EndemicOTReceiver
 /// 1 out of 2 Endemic OT Fig.8 https://eprint.iacr.org/2019/706.pdf
 pub struct EndemicOTReceiver {
-    packed_choice_bits: [u8; BATCH_SIZE_BYTES],
-    t_a_list: [ReusableSecret; BATCH_SIZE],
+    packed_choice_bits: [u8; LAMBDA_C_BYTES],
+    t_a_list: [ReusableSecret; LAMBDA_C],
 }
 
 impl EndemicOTReceiver {
@@ -148,12 +153,12 @@ impl EndemicOTReceiver {
         session_id: SessionId,
         rng: &mut R,
     ) -> (Self, EndemicOTMsg1) {
-        let packed_choice_bits: [u8; BATCH_SIZE_BYTES] = rng.gen();
+        let packed_choice_bits: [u8; LAMBDA_C_BYTES] = rng.gen();
 
-        let t_a_list: [ReusableSecret; BATCH_SIZE] =
+        let t_a_list: [ReusableSecret; LAMBDA_C] =
             array::from_fn(|_| ReusableSecret::random_from_rng(&mut *rng));
 
-        let r_other_list: [[u8; 32]; BATCH_SIZE] =
+        let r_other_list: [[u8; 32]; LAMBDA_C] =
             array::from_fn(|_| rng.gen());
 
         let mut r_list = vec![];
@@ -215,7 +220,7 @@ impl EndemicOTReceiver {
 impl SenderOutput {
     /// Create a new `SenderOutput`.
     pub fn new(
-        one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == BATCH_SIZE
+        one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == LAMBDA_C
     ) -> Self {
         Self {
             one_time_pad_enc_keys,
@@ -226,8 +231,8 @@ impl SenderOutput {
 impl ReceiverOutput {
     /// Create a new `ReceiverOutput`.
     pub fn new(
-        packed_random_choice_bits: [u8; BATCH_SIZE_BYTES],
-        one_time_pad_decryption_keys: Vec<[u8; 32]>, // size == BATCH_SIZE
+        packed_random_choice_bits: [u8; LAMBDA_C_BYTES],
+        one_time_pad_decryption_keys: Vec<[u8; 32]>, // size == LAMBDA_CLAMBDA_C
     ) -> Self {
         Self {
             packed_random_choice_bits,
@@ -258,7 +263,7 @@ mod test {
 
         let receiver_output = receiver.process(&msg2);
 
-        for i in 0..BATCH_SIZE {
+        for i in 0..LAMBDA_C {
             let sender_pad = &sender_output.one_time_pad_enc_keys[i];
 
             let rec_pad = &receiver_output.one_time_pad_decryption_keys[i];

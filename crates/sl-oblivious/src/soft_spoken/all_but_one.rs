@@ -6,11 +6,9 @@ use merlin::Transcript;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
-    endemic_ot::BATCH_SIZE,
+    endemic_ot::{LAMBDA_C, LAMBDA_C_BYTES},
     soft_spoken::{SOFT_SPOKEN_K, SOFT_SPOKEN_Q},
 };
-
-pub const DIGEST_SIZE: usize = 32;
 
 use crate::constants::{
     ALL_BUT_ONE_LABEL, ALL_BUT_ONE_PPRF_HASH_LABEL, ALL_BUT_ONE_PPRF_LABEL,
@@ -22,17 +20,17 @@ use crate::{
     utils::ExtractBit,
 };
 
-use super::{ReceiverOTSeed, KAPPA_DIV_SOFT_SPOKEN_K};
+use super::{ReceiverOTSeed, LAMBDA_C_DIV_SOFT_SPOKEN_K};
 
 #[derive(
     Clone, Debug, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
 )]
 pub struct PPRFOutput {
-    pub t: [[[u8; DIGEST_SIZE]; 2]; SOFT_SPOKEN_K - 1],
+    pub t: [[[u8; LAMBDA_C_BYTES]; 2]; SOFT_SPOKEN_K - 1],
 
-    pub s_tilda: [u8; DIGEST_SIZE * 2],
+    pub s_tilda: [u8; LAMBDA_C_BYTES * 2],
 
-    pub t_tilda: [u8; DIGEST_SIZE * 2],
+    pub t_tilda: [u8; LAMBDA_C_BYTES * 2],
 }
 
 /// Implements BuildPPRF and ProvePPRF functionality of
@@ -42,12 +40,12 @@ pub fn build_pprf(
     sender_ot_seed: &SenderOutput,
 ) -> (SenderOTSeed, Vec<PPRFOutput>) {
     let mut all_but_one_sender_seed = SenderOTSeed::default();
-    let mut output = Vec::with_capacity(BATCH_SIZE / SOFT_SPOKEN_K);
+    let mut output = Vec::with_capacity(LAMBDA_C / SOFT_SPOKEN_K);
 
-    for j in 0..(BATCH_SIZE / SOFT_SPOKEN_K) {
-        let mut t_x_i = [[[0u8; DIGEST_SIZE]; 2]; SOFT_SPOKEN_K - 1];
+    for j in 0..(LAMBDA_C / SOFT_SPOKEN_K) {
+        let mut t_x_i = [[[0u8; LAMBDA_C_BYTES]; 2]; SOFT_SPOKEN_K - 1];
 
-        let mut s_i = [[0u8; DIGEST_SIZE]; SOFT_SPOKEN_Q];
+        let mut s_i = [[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
 
         s_i[0] =
             sender_ot_seed.one_time_pad_enc_keys[j * SOFT_SPOKEN_K].rho_0;
@@ -55,7 +53,7 @@ pub fn build_pprf(
             sender_ot_seed.one_time_pad_enc_keys[j * SOFT_SPOKEN_K].rho_1;
 
         for i in 1..SOFT_SPOKEN_K {
-            let mut s_i_plus_1 = [[0u8; DIGEST_SIZE]; SOFT_SPOKEN_Q];
+            let mut s_i_plus_1 = [[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
 
             for y in 0..(1 << (i as u32)) {
                 let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
@@ -72,7 +70,7 @@ pub fn build_pprf(
             t_x_i[i - 1][0] = big_f_i.rho_0;
             t_x_i[i - 1][1] = big_f_i.rho_1;
 
-            for b_i in 0..DIGEST_SIZE {
+            for b_i in 0..LAMBDA_C_BYTES {
                 for y in 0..(1 << (i as u32)) {
                     t_x_i[i - 1][0][b_i] ^= s_i_plus_1[2 * y][b_i];
                     t_x_i[i - 1][1][b_i] ^= s_i_plus_1[2 * y + 1][b_i];
@@ -83,12 +81,12 @@ pub fn build_pprf(
         }
 
         // Prove
-        let mut t_tilda = [0u8; DIGEST_SIZE * 2];
+        let mut t_tilda = [0u8; LAMBDA_C_BYTES * 2];
         let mut s_tilda_hash = Transcript::new(&ALL_BUT_ONE_LABEL);
         s_tilda_hash.append_message(b"session-id", session_id);
 
         for y in &s_i {
-            let mut s_tilda_y = [0u8; DIGEST_SIZE * 2];
+            let mut s_tilda_y = [0u8; LAMBDA_C_BYTES * 2];
 
             let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
             t.append_message(b"session-id", session_id);
@@ -105,7 +103,7 @@ pub fn build_pprf(
 
         all_but_one_sender_seed.one_time_pad_enc_keys.push(s_i);
 
-        let mut s_tilda = [0u8; DIGEST_SIZE * 2];
+        let mut s_tilda = [0u8; LAMBDA_C_BYTES * 2];
         s_tilda_hash
             .challenge_bytes(&ALL_BUT_ONE_PPRF_HASH_LABEL, &mut s_tilda);
 
@@ -125,7 +123,7 @@ pub fn eval_pprf(
     output: &[PPRFOutput],
 ) -> Result<ReceiverOTSeed, &'static str> {
     let mut all_but_one_receiver_seed = ReceiverOTSeed {
-        random_choices: [0; KAPPA_DIV_SOFT_SPOKEN_K],
+        random_choices: [0; LAMBDA_C_DIV_SOFT_SPOKEN_K],
         one_time_pad_dec_keys: vec![],
     };
 
@@ -136,7 +134,7 @@ pub fn eval_pprf(
             .extract_bit(j * SOFT_SPOKEN_K)
             as u8;
 
-        let mut s_star_i = [[[0u8; DIGEST_SIZE]; SOFT_SPOKEN_Q]; 2];
+        let mut s_star_i = [[[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]; 2];
 
         let selected = u8::conditional_select(&1, &0, Choice::from(x_star_0));
 
@@ -147,7 +145,7 @@ pub fn eval_pprf(
 
         for i in 1..SOFT_SPOKEN_K {
             let mut s_star_i_plus_1 =
-                [[[0u8; DIGEST_SIZE]; SOFT_SPOKEN_Q]; 2];
+                [[[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]; 2];
             for y in 0..2usize.pow(i as u32) {
                 let choice_index = u8::conditional_select(
                     &0,
@@ -185,7 +183,7 @@ pub fn eval_pprf(
 
             // TODO: fix clippy
             #[allow(clippy::needless_range_loop)]
-            for b_i in 0..DIGEST_SIZE {
+            for b_i in 0..LAMBDA_C_BYTES {
                 s_star_i_plus_1[0][2 * y_star as usize + ct_x][b_i] =
                     t_x_i[i - 1][ct_x][b_i] ^ big_f_i_star[b_i];
 
@@ -209,7 +207,7 @@ pub fn eval_pprf(
 
         // Verify
         let mut s_tilda_star =
-            vec![vec![[0u8; DIGEST_SIZE * 2]; SOFT_SPOKEN_Q]; 2];
+            vec![vec![[0u8; LAMBDA_C_BYTES * 2]; SOFT_SPOKEN_Q]; 2];
         let s_tilda_expected = &out.s_tilda;
 
         let mut s_tilda_hash = Transcript::new(&ALL_BUT_ONE_LABEL);
@@ -233,7 +231,7 @@ pub fn eval_pprf(
 
             tt.challenge_bytes(b"", &mut s_tilda_star[choice_index][y]);
 
-            (0..DIGEST_SIZE * 2).for_each(|b_i| {
+            (0..LAMBDA_C_BYTES * 2).for_each(|b_i| {
                 s_tilda_star_y_star[choice_index][b_i] ^=
                     s_tilda_star[choice_index][y][b_i];
             })
@@ -245,7 +243,7 @@ pub fn eval_pprf(
             s_tilda_hash.append_message(b"", &s_tilda_star[0][y]);
         });
 
-        let mut s_tilda_digest = [0u8; DIGEST_SIZE * 2];
+        let mut s_tilda_digest = [0u8; LAMBDA_C_BYTES * 2];
         s_tilda_hash.challenge_bytes(
             &ALL_BUT_ONE_PPRF_HASH_LABEL,
             &mut s_tilda_digest,
@@ -271,7 +269,7 @@ mod test {
 
     use rand::{thread_rng, Rng};
 
-    use crate::endemic_ot::{OneTimePadEncryptionKeys, BATCH_SIZE_BYTES};
+    use crate::endemic_ot::{OneTimePadEncryptionKeys, LAMBDA_C_BYTES};
 
     fn generate_seed_ot_for_test() -> (SenderOutput, ReceiverOutput) {
         let mut rng = thread_rng();
@@ -283,13 +281,13 @@ mod test {
 
                 OneTimePadEncryptionKeys { rho_0, rho_1 }
             })
-            .take(BATCH_SIZE)
+            .take(LAMBDA_C)
             .collect::<Vec<_>>(),
         };
 
-        let random_choices: [u8; BATCH_SIZE_BYTES] = rng.gen();
+        let random_choices: [u8; LAMBDA_C_BYTES] = rng.gen();
 
-        let one_time_pad_enc_keys = (0..BATCH_SIZE)
+        let one_time_pad_enc_keys = (0..LAMBDA_C)
             .map(|i| {
                 let choice = random_choices.extract_bit(i);
 

@@ -1,7 +1,7 @@
 ///
 ///  SoftSpokenOT protocol https://eprint.iacr.org/2022/192.pdf
 ///  Instantiation of SoftSpokenOT based on Fig.10 https://eprint.iacr.org/2015/546.pdf
-///  Extends KAPPA all-but-one-ot to L 1 out of 2 base OTs with OT_WIDTH=3
+///  Extends LAMBDA_C all-but-one-ot (each LAMBDA_C-bit) to L 1 out of 2 base OTs (each KAPPA-bit) with OT_WIDTH=3
 ///  Satisfies Functionality 5.1 https://eprint.iacr.org/2023/765.pdf ,
 ///     where X = Z^{OT_WIDTH}_{q} and l_OT = L
 ///  Fiat-Shamir transform applied according to Section 5.1 of https://eprint.iacr.org/2023/765.pdf
@@ -31,11 +31,9 @@ use crate::constants::{
     SOFT_SPOKEN_EXPAND_LABEL, SOFT_SPOKEN_LABEL,
     SOFT_SPOKEN_MATRIX_HASH_LABEL, SOFT_SPOKEN_RANDOMIZE_LABEL,
 };
+use crate::endemic_ot::{LAMBDA_C, LAMBDA_C_BYTES};
 use crate::soft_spoken::types::SoftSpokenOTError;
-use crate::{
-    soft_spoken::DIGEST_SIZE,
-    utils::{bit_to_bit_mask, ExtractBit},
-};
+use crate::utils::{bit_to_bit_mask, ExtractBit};
 
 use super::mul_poly::binary_field_multiply_gf_2_128;
 
@@ -45,7 +43,8 @@ pub const KAPPA_BYTES: usize = KAPPA >> 3;
 pub const S: usize = 128; // 16 bytes == 128 bits
 pub const S_BYTES: usize = S >> 3;
 
-pub const L: usize = KAPPA + 2 * S; // L is divisible by S
+pub const LAMBDA_S: usize = 128;
+pub const L: usize = KAPPA + 2 * LAMBDA_S; // L is divisible by S
 pub const L_BYTES: usize = L >> 3;
 
 pub const L_PRIME: usize = L + S;
@@ -58,7 +57,7 @@ pub const OT_WIDTH: usize = 3; // === L_BATCH + RHO
 pub const SOFT_SPOKEN_K: usize = 4;
 pub const SOFT_SPOKEN_Q: usize = 1 << SOFT_SPOKEN_K; // 2usize.pow(SOFT_SPOKEN_K as u32);
 
-pub const KAPPA_DIV_SOFT_SPOKEN_K: usize = KAPPA / SOFT_SPOKEN_K;
+pub const LAMBDA_C_DIV_SOFT_SPOKEN_K: usize = LAMBDA_C / SOFT_SPOKEN_K;
 pub const RAND_EXTENSION_SIZE: usize = L_PRIME_BYTES - L_BYTES;
 
 #[derive(
@@ -71,22 +70,22 @@ pub const RAND_EXTENSION_SIZE: usize = L_PRIME_BYTES - L_BYTES;
     ZeroizeOnDrop,
 )]
 pub struct SenderOTSeed {
-    pub one_time_pad_enc_keys: Vec<[[u8; DIGEST_SIZE]; SOFT_SPOKEN_Q]>, // [256 / SOFT_SPOKEN_K]
+    pub one_time_pad_enc_keys: Vec<[[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]>, // [LAMBDA_C / SOFT_SPOKEN_K]
 }
 
 #[derive(
     Debug, Clone, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
 )]
 pub struct ReceiverOTSeed {
-    pub random_choices: [u8; KAPPA_DIV_SOFT_SPOKEN_K], // FIXME: define range of random_choices[i]
-    pub one_time_pad_dec_keys: Vec<[[u8; DIGEST_SIZE]; SOFT_SPOKEN_Q]>, // [256 / SOFT_SPOKEN_K]
+    pub random_choices: [u8; LAMBDA_C_DIV_SOFT_SPOKEN_K], // FIXME: define range of random_choices[i]
+    pub one_time_pad_dec_keys: Vec<[[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]>, // [LAMBDA_C / SOFT_SPOKEN_K]
 }
 
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct Round1Output {
-    pub u: [[u8; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
+    pub u: [[u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K],
     pub x: [u8; S_BYTES],
-    pub t: [[u8; S_BYTES]; KAPPA], // U128
+    pub t: [[u8; S_BYTES]; LAMBDA_C], // U128
 }
 
 //
@@ -109,9 +108,9 @@ impl Encode for Round1Output {
 impl Decode for Round1Output {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
         let mut r = Round1Output {
-            u: [[0; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
+            u: [[0; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K],
             x: [0; S_BYTES],
-            t: [[0; S_BYTES]; KAPPA],
+            t: [[0; S_BYTES]; LAMBDA_C],
         };
 
         for u in &mut r.u {
@@ -184,13 +183,13 @@ impl SoftSpokenOTReceiver {
                 .try_into()
                 .expect("Invalid length of extended_packed_choices");
 
-        let mut r_x =
-            [[[0u8; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K]; SOFT_SPOKEN_Q];
+        let mut r_x = [[[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
+            SOFT_SPOKEN_Q];
 
         let mut output = Round1Output {
             x: [0u8; S_BYTES],
-            t: [[0u8; S_BYTES]; KAPPA],
-            u: [[0u8; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K],
+            t: [[0u8; S_BYTES]; LAMBDA_C],
+            u: [[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K],
         };
 
         let x = &mut output.x;
@@ -205,7 +204,7 @@ impl SoftSpokenOTReceiver {
             .chain_update(&SOFT_SPOKEN_LABEL)
             .chain_update(self.session_id);
 
-        for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
+        for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
             for (j, r_x_j) in r_x.iter_mut().enumerate() {
                 let mut shake = Shake256::default();
                 shake.update(&SOFT_SPOKEN_LABEL);
@@ -227,12 +226,12 @@ impl SoftSpokenOTReceiver {
             matrix_hasher = matrix_hasher.chain_update(u[i].as_ref());
         }
 
-        // matrix V [KAPPA][COT_EXTENDED_BLOCK_SIZE_BYTES] byte
+        // matrix V [LAMBDA_C][COT_EXTENDED_BLOCK_SIZE_BYTES] byte
         // set of vectors v, where each v = v_0 + 2*v_1 + .. + 2^{k-1}*v_{k-1}
         // v_i = sum_x x_i*r_x
-        let mut v = [[0u8; L_PRIME_BYTES]; KAPPA];
+        let mut v = [[0u8; L_PRIME_BYTES]; LAMBDA_C];
 
-        for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
+        for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
             for bit_index in 0..SOFT_SPOKEN_K {
                 // This seems more readable in this situation
                 #[allow(clippy::needless_range_loop)]
@@ -275,7 +274,7 @@ impl SoftSpokenOTReceiver {
                 x[k] ^= x_hat_j_times_chi_j[k];
             }
 
-            for i in 0..KAPPA {
+            for i in 0..LAMBDA_C {
                 let t_hat_j = &v[i][j * S_BYTES..(j + 1) * S_BYTES]
                     .try_into()
                     .expect("t_hat_j invalid length, must be 16 bytes");
@@ -297,7 +296,7 @@ impl SoftSpokenOTReceiver {
             x[k] ^= x_hat_m_plus_1[k];
         }
 
-        for i in 0..KAPPA {
+        for i in 0..LAMBDA_C {
             let t_i = &mut t[i];
 
             let t_hat_m_plus_1 = &v[i][from_index..to_index];
@@ -336,10 +335,10 @@ impl SoftSpokenOTReceiver {
 }
 
 fn transpose_bool_matrix(
-    input: &[[u8; L_PRIME_BYTES]; KAPPA],
-) -> [[u8; KAPPA_BYTES]; L_PRIME] {
-    let mut output = [[0u8; KAPPA_BYTES]; L_PRIME];
-    for row_byte in 0..KAPPA_BYTES {
+    input: &[[u8; L_PRIME_BYTES]; LAMBDA_C],
+) -> [[u8; LAMBDA_C_BYTES]; L_PRIME] {
+    let mut output = [[0u8; LAMBDA_C_BYTES]; L_PRIME];
+    for row_byte in 0..LAMBDA_C_BYTES {
         for row_bit_byte in 0..8 {
             for column_byte in 0..L_PRIME_BYTES {
                 for column_bit_byte in 0..8 {
@@ -385,10 +384,10 @@ impl SoftSpokenOTSender {
         self,
         message: &Round1Output,
     ) -> Result<Box<SenderExtendedOutput>, SoftSpokenOTError> {
-        let mut r_x =
-            [[[0u8; L_PRIME_BYTES]; KAPPA_DIV_SOFT_SPOKEN_K]; SOFT_SPOKEN_Q];
+        let mut r_x = [[[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
+            SOFT_SPOKEN_Q];
 
-        for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
+        for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
             for (j, rx_j) in r_x.iter_mut().enumerate() {
                 if j == self.seed_ot_results.random_choices[i] as usize {
                     rx_j[i].fill(0); // = [0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
@@ -408,13 +407,13 @@ impl SoftSpokenOTSender {
             }
         }
 
-        let mut w_matrix = [[0u8; L_PRIME_BYTES]; KAPPA];
+        let mut w_matrix = [[0u8; L_PRIME_BYTES]; LAMBDA_C];
 
         let mut hash_matrix_u = Sha3_256::default()
             .chain_update(&SOFT_SPOKEN_LABEL)
             .chain_update(self.session_id);
 
-        for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
+        for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
             let delta = self.seed_ot_results.random_choices[i];
             for bit_index in 0..SOFT_SPOKEN_K {
                 for (j, rx_j) in r_x.iter().enumerate() {
@@ -438,9 +437,9 @@ impl SoftSpokenOTSender {
             hash_matrix_u = hash_matrix_u.chain_update(message.u[i]);
         }
 
-        let mut packed_nabla = [0u8; KAPPA_BYTES];
+        let mut packed_nabla = [0u8; LAMBDA_C_BYTES];
 
-        for i in 0..KAPPA_DIV_SOFT_SPOKEN_K {
+        for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
             let delta = self.seed_ot_results.random_choices[i];
             for bit_index in 0..SOFT_SPOKEN_K {
                 let delta_i = (delta >> bit_index) & 0x01;
@@ -556,8 +555,8 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
     let mut one_time_pad_enc_keys = Vec::new();
     let mut one_time_pad_dec_keys = Vec::new();
 
-    for _ in 0..(crate::soft_spoken::KAPPA_DIV_SOFT_SPOKEN_K) {
-        let ot_sender_messages: [[u8; DIGEST_SIZE]; SOFT_SPOKEN_Q] =
+    for _ in 0..(crate::soft_spoken::LAMBDA_C_DIV_SOFT_SPOKEN_K) {
+        let ot_sender_messages: [[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q] =
             std::array::from_fn(|_| random_bytes(rng));
 
         one_time_pad_enc_keys.push(ot_sender_messages);
@@ -567,9 +566,9 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
     let random_choices =
         std::array::from_fn(|_| rng.gen_range(0..=SOFT_SPOKEN_Q - 1) as u8);
 
-    for i in 0..(KAPPA_DIV_SOFT_SPOKEN_K) {
+    for i in 0..(LAMBDA_C_DIV_SOFT_SPOKEN_K) {
         let choice = random_choices[i];
-        one_time_pad_dec_keys[i][choice as usize] = [0u8; DIGEST_SIZE];
+        one_time_pad_dec_keys[i][choice as usize] = [0u8; LAMBDA_C_BYTES];
     }
 
     let sender_ot_seed = SenderOTSeed {
