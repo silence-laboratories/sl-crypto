@@ -9,12 +9,8 @@
 use std::array;
 
 use elliptic_curve::rand_core::CryptoRngCore;
+use merlin::Transcript;
 use rand::Rng;
-use sha3::{
-    digest::{ExtendableOutput, Update, XofReader},
-    Digest, Sha3_256, Shake256,
-};
-
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use sl_mpc_mate::{
@@ -24,16 +20,18 @@ use sl_mpc_mate::{
         error::{DecodeError, EncodeError},
         Decode, Encode,
     },
-    random_bytes, SessionId,
+    SessionId,
 };
 
-use crate::constants::{
-    SOFT_SPOKEN_EXPAND_LABEL, SOFT_SPOKEN_LABEL,
-    SOFT_SPOKEN_MATRIX_HASH_LABEL, SOFT_SPOKEN_RANDOMIZE_LABEL,
+use crate::{
+    constants::{
+        SOFT_SPOKEN_EXPAND_LABEL, SOFT_SPOKEN_LABEL,
+        SOFT_SPOKEN_MATRIX_HASH_LABEL, SOFT_SPOKEN_RANDOMIZE_LABEL,
+    },
+    endemic_ot::{LAMBDA_C, LAMBDA_C_BYTES},
+    soft_spoken::types::SoftSpokenOTError,
+    utils::{bit_to_bit_mask, ExtractBit},
 };
-use crate::endemic_ot::{LAMBDA_C, LAMBDA_C_BYTES};
-use crate::soft_spoken::types::SoftSpokenOTError;
-use crate::utils::{bit_to_bit_mask, ExtractBit};
 
 use super::mul_poly::binary_field_multiply_gf_2_128;
 
@@ -161,8 +159,7 @@ impl SoftSpokenOTReceiver {
         seed_ot_results: &SenderOTSeed,
         rng: &mut R,
     ) -> Self {
-        let number_random_bytes: [u8; RAND_EXTENSION_SIZE] =
-            random_bytes(rng);
+        let number_random_bytes: [u8; RAND_EXTENSION_SIZE] = rng.gen();
 
         Self {
             session_id,
@@ -196,24 +193,18 @@ impl SoftSpokenOTReceiver {
         let t = &mut output.t;
         let u = &mut output.u;
 
-        // we have both Update and Digest traits on the scope.
-        // both traits define method update() and Sha3_256 implements both.
-        //
-
-        let mut matrix_hasher = Sha3_256::default()
-            .chain_update(&SOFT_SPOKEN_LABEL)
-            .chain_update(self.session_id);
+        let mut matrix_hasher = Transcript::new(&SOFT_SPOKEN_LABEL);
+        matrix_hasher.append_message(b"session-id", &self.session_id);
 
         for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
             for (j, r_x_j) in r_x.iter_mut().enumerate() {
-                let mut shake = Shake256::default();
-                shake.update(&SOFT_SPOKEN_LABEL);
-                shake.update(&self.session_id);
-                shake.update(
+                let mut ts = Transcript::new(&SOFT_SPOKEN_LABEL);
+                ts.append_message(b"", &self.session_id);
+                ts.append_message(
+                    b"",
                     &self.seed_ot_results.one_time_pad_enc_keys[i][j],
                 );
-                shake.update(&SOFT_SPOKEN_EXPAND_LABEL);
-                shake.finalize_xof().read(&mut r_x_j[i]);
+                ts.challenge_bytes(&SOFT_SPOKEN_EXPAND_LABEL, &mut r_x_j[i]);
             }
 
             for (j, choice) in extended_packed_choices.iter().enumerate() {
@@ -223,7 +214,7 @@ impl SoftSpokenOTReceiver {
                 u[i][j] ^= choice;
             }
 
-            matrix_hasher = matrix_hasher.chain_update(u[i].as_ref());
+            matrix_hasher.append_message(b"", &u[i]);
         }
 
         // matrix V [LAMBDA_C][COT_EXTENDED_BLOCK_SIZE_BYTES] byte
@@ -246,21 +237,20 @@ impl SoftSpokenOTReceiver {
             }
         }
 
-        // matrix_hasher.update(&SOFT_SPOKEN_MATRIX_HASH_LABEL);
-        let digest_matrix_u: [u8; 32] = matrix_hasher
-            .chain_update(&SOFT_SPOKEN_MATRIX_HASH_LABEL)
-            .finalize()
-            .into();
+        let mut digest_matrix_u = [0u8; 32];
+        matrix_hasher.challenge_bytes(
+            &SOFT_SPOKEN_MATRIX_HASH_LABEL,
+            &mut digest_matrix_u,
+        );
 
         for j in 0..SOFT_SPOKEN_M {
-            let mut shake = Shake256::default();
-
-            shake.update(&(j as u16).to_be_bytes());
-            shake.update(digest_matrix_u.as_ref());
+            let mut ts = Transcript::new(b"");
+            ts.append_u64(b"index", j as u64);
+            ts.append_message(b"", &digest_matrix_u);
 
             let mut chi_j = [0u8; S_BYTES];
 
-            shake.finalize_xof().read(&mut chi_j);
+            ts.challenge_bytes(b"", &mut chi_j);
 
             let x_hat_j = &extended_packed_choices
                 [j * S_BYTES..(j + 1) * S_BYTES]
@@ -314,19 +304,13 @@ impl SoftSpokenOTReceiver {
         let psi = transpose_bool_matrix(&v);
 
         for j in 0..L {
-            let mut shake = Shake256::default();
-            shake.update(&SOFT_SPOKEN_LABEL);
-            shake.update(self.session_id.as_ref());
-            shake.update(&(j as u16).to_be_bytes());
-            shake.update(psi[j].as_ref());
-            shake.update(&SOFT_SPOKEN_RANDOMIZE_LABEL);
-            let mut column = [0u8; KAPPA_BYTES * OT_WIDTH];
-            shake.finalize_xof().read(&mut column);
+            let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
+            t.append_message(b"session-id", &self.session_id);
+            t.append_u64(b"index", j as u64);
+            t.append_message(&SOFT_SPOKEN_RANDOMIZE_LABEL, &psi[j]);
 
-            for k in 0..OT_WIDTH {
-                v_x[j][k] = column[k * KAPPA_BYTES..(k + 1) * KAPPA_BYTES]
-                    .try_into()
-                    .unwrap();
+            for k in &mut v_x[j] {
+                t.challenge_bytes(b"", k);
             }
         }
 
@@ -392,26 +376,24 @@ impl SoftSpokenOTSender {
                 if j == self.seed_ot_results.random_choices[i] as usize {
                     rx_j[i].fill(0); // = [0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
                 } else {
-                    let mut shake = Shake256::default();
-                    shake.update(&SOFT_SPOKEN_LABEL);
-                    shake.update(self.session_id.as_ref());
-                    shake.update(
-                        self.seed_ot_results.one_time_pad_dec_keys[i][j]
-                            .as_ref(),
+                    let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
+                    t.append_message(b"", &self.session_id);
+                    t.append_message(
+                        b"",
+                        &self.seed_ot_results.one_time_pad_dec_keys[i][j],
                     );
-                    shake.update(&SOFT_SPOKEN_EXPAND_LABEL);
-                    //let mut r_x_ij = [0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
-                    shake.finalize_xof().read(&mut rx_j[i]);
-                    // rx_j[i] = r_x_ij;
+                    t.challenge_bytes(
+                        &SOFT_SPOKEN_EXPAND_LABEL,
+                        &mut rx_j[i],
+                    );
                 }
             }
         }
 
         let mut w_matrix = [[0u8; L_PRIME_BYTES]; LAMBDA_C];
 
-        let mut hash_matrix_u = Sha3_256::default()
-            .chain_update(&SOFT_SPOKEN_LABEL)
-            .chain_update(self.session_id);
+        let mut hash_matrix_u = Transcript::new(&SOFT_SPOKEN_LABEL);
+        hash_matrix_u.append_message(b"session-id", &self.session_id);
 
         for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
             let delta = self.seed_ot_results.random_choices[i];
@@ -434,7 +416,7 @@ impl SoftSpokenOTSender {
                 }
             }
 
-            hash_matrix_u = hash_matrix_u.chain_update(message.u[i]);
+            hash_matrix_u.append_message(b"", &message.u[i]);
         }
 
         let mut packed_nabla = [0u8; LAMBDA_C_BYTES];
@@ -449,19 +431,23 @@ impl SoftSpokenOTSender {
             }
         }
 
-        let digest_matrix_u: [u8; 32] = hash_matrix_u
-            .chain_update(&SOFT_SPOKEN_MATRIX_HASH_LABEL)
-            .finalize()
-            .into();
+        let mut digest_matrix_u = [0u8; 32];
+        hash_matrix_u.challenge_bytes(
+            &SOFT_SPOKEN_MATRIX_HASH_LABEL,
+            &mut digest_matrix_u,
+        );
 
-        let mut chi_matrix = [[0u8; S_BYTES]; SOFT_SPOKEN_M];
+        let chi_matrix: [[u8; S_BYTES]; SOFT_SPOKEN_M] =
+            array::from_fn(|j| {
+                let mut ts = Transcript::new(b"");
+                ts.append_u64(b"index", j as u64);
+                ts.append_message(b"", &digest_matrix_u);
 
-        chi_matrix.iter_mut().enumerate().for_each(|(j, chi_j)| {
-            let mut shake = Shake256::default();
-            shake.update((j as u16).to_be_bytes().as_ref());
-            shake.update(&digest_matrix_u);
-            shake.finalize_xof().read(chi_j);
-        });
+                let mut chi_j = [0u8; S_BYTES];
+                ts.challenge_bytes(b"", &mut chi_j);
+
+                chi_j
+            });
 
         let from_index = SOFT_SPOKEN_M * S_BYTES;
         let to_index = (SOFT_SPOKEN_M + 1) * S_BYTES;
@@ -509,19 +495,13 @@ impl SoftSpokenOTSender {
         let v_1 = &mut extended_output.v_1;
 
         for j in 0..L {
-            let mut shake = Shake256::default();
-            shake.update(&SOFT_SPOKEN_LABEL);
-            shake.update(self.session_id.as_ref());
-            shake.update(&(j as u16).to_be_bytes());
-            shake.update(&zeta[j]);
-            shake.update(&SOFT_SPOKEN_RANDOMIZE_LABEL);
-            let mut column = [0u8; KAPPA_BYTES * OT_WIDTH];
-            shake.finalize_xof().read(&mut column);
+            let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
+            t.append_message(b"session-id", &self.session_id);
+            t.append_u64(b"index", j as u64);
+            t.append_message(&SOFT_SPOKEN_RANDOMIZE_LABEL, &zeta[j]);
 
-            for k in 0..OT_WIDTH {
-                v_0[j][k] = column[k * KAPPA_BYTES..(k + 1) * KAPPA_BYTES]
-                    .try_into()
-                    .unwrap();
+            for k in &mut v_0[j] {
+                t.challenge_bytes(b"", k);
             }
 
             packed_nabla
@@ -529,19 +509,13 @@ impl SoftSpokenOTSender {
                 .enumerate()
                 .for_each(|(i, b)| zeta[j][i] ^= b);
 
-            let mut shake = Shake256::default();
-            shake.update(&SOFT_SPOKEN_LABEL);
-            shake.update(&self.session_id);
-            shake.update(&(j as u16).to_be_bytes());
-            shake.update(&zeta[j]);
-            shake.update(&SOFT_SPOKEN_RANDOMIZE_LABEL);
-            let mut column = [0u8; KAPPA_BYTES * OT_WIDTH];
-            shake.finalize_xof().read(&mut column);
+            let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
+            t.append_message(b"session-id", &self.session_id);
+            t.append_u64(b"index", j as u64);
+            t.append_message(&SOFT_SPOKEN_RANDOMIZE_LABEL, &zeta[j]);
 
-            for k in 0..OT_WIDTH {
-                v_1[j][k] = column[k * KAPPA_BYTES..(k + 1) * KAPPA_BYTES]
-                    .try_into()
-                    .unwrap();
+            for k in &mut v_1[j] {
+                t.challenge_bytes(b"", k);
             }
         }
 
@@ -557,14 +531,14 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
 
     for _ in 0..(crate::soft_spoken::LAMBDA_C_DIV_SOFT_SPOKEN_K) {
         let ot_sender_messages: [[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q] =
-            std::array::from_fn(|_| random_bytes(rng));
+            array::from_fn(|_| rng.gen());
 
         one_time_pad_enc_keys.push(ot_sender_messages);
         one_time_pad_dec_keys.push(ot_sender_messages);
     }
 
     let random_choices =
-        std::array::from_fn(|_| rng.gen_range(0..=SOFT_SPOKEN_Q - 1) as u8);
+        array::from_fn(|_| rng.gen_range(0..=SOFT_SPOKEN_Q - 1) as u8);
 
     for i in 0..(LAMBDA_C_DIV_SOFT_SPOKEN_K) {
         let choice = random_choices[i];
@@ -585,7 +559,6 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
 
 #[cfg(test)]
 mod tests {
-
     use crate::soft_spoken::{
         generate_all_but_one_seed_ot, SoftSpokenOTReceiver,
         SoftSpokenOTSender, L, L_BYTES, OT_WIDTH,
