@@ -1,10 +1,7 @@
 use elliptic_curve::subtle::{
     Choice, ConditionallySelectable, ConstantTimeEq,
 };
-use sha3::{
-    digest::{ExtendableOutput, Update, XofReader},
-    Shake256,
-};
+use merlin::Transcript;
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -61,16 +58,12 @@ pub fn build_pprf(
             let mut s_i_plus_1 = [[0u8; DIGEST_SIZE]; SOFT_SPOKEN_Q];
 
             for y in 0..(1 << (i as u32)) {
-                let mut shake = Shake256::default();
-                shake.update(&ALL_BUT_ONE_LABEL);
-                shake.update(session_id);
-                shake.update(&s_i[y]);
-                shake.update(&ALL_BUT_ONE_PPRF_LABEL);
+                let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
+                t.append_message(b"session-id", session_id);
+                t.append_message(&ALL_BUT_ONE_PPRF_LABEL, &s_i[y]);
 
-                let mut reader = shake.finalize_xof();
-
-                reader.read(&mut s_i_plus_1[2 * y]);
-                reader.read(&mut s_i_plus_1[2 * y + 1]);
+                t.challenge_bytes(b"", &mut s_i_plus_1[2 * y]);
+                t.challenge_bytes(b"", &mut s_i_plus_1[2 * y + 1]);
             }
 
             let big_f_i =
@@ -91,32 +84,30 @@ pub fn build_pprf(
 
         // Prove
         let mut t_tilda = [0u8; DIGEST_SIZE * 2];
-        let mut s_tilda_hash = Shake256::default();
-        s_tilda_hash.update(&ALL_BUT_ONE_LABEL);
-        s_tilda_hash.update(session_id);
+        let mut s_tilda_hash = Transcript::new(&ALL_BUT_ONE_LABEL);
+        s_tilda_hash.append_message(b"session-id", session_id);
 
         for y in &s_i {
-            let mut shake = Shake256::default();
-            shake.update(&ALL_BUT_ONE_LABEL);
-            shake.update(session_id);
-            shake.update(y);
-            shake.update(&ALL_BUT_ONE_PPRF_PROOF_LABEL);
             let mut s_tilda_y = [0u8; DIGEST_SIZE * 2];
-            shake.finalize_xof().read(&mut s_tilda_y);
+
+            let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
+            t.append_message(b"session-id", session_id);
+            t.append_message(&ALL_BUT_ONE_PPRF_PROOF_LABEL, y);
+            t.challenge_bytes(b"", &mut s_tilda_y);
 
             t_tilda
                 .iter_mut()
                 .zip(&s_tilda_y)
                 .for_each(|(t, s)| *t ^= s);
 
-            s_tilda_hash.update(&s_tilda_y);
+            s_tilda_hash.append_message(b"", &s_tilda_y);
         }
 
         all_but_one_sender_seed.one_time_pad_enc_keys.push(s_i);
 
         let mut s_tilda = [0u8; DIGEST_SIZE * 2];
-        s_tilda_hash.update(&ALL_BUT_ONE_PPRF_HASH_LABEL);
-        s_tilda_hash.finalize_xof().read(&mut s_tilda);
+        s_tilda_hash
+            .challenge_bytes(&ALL_BUT_ONE_PPRF_HASH_LABEL, &mut s_tilda);
 
         output.push(PPRFOutput {
             t: t_x_i,
@@ -164,16 +155,21 @@ pub fn eval_pprf(
                     Choice::from((y == y_star as usize) as u8),
                 ) as usize;
 
-                let mut shake = Shake256::default();
-                shake.update(&ALL_BUT_ONE_LABEL);
-                shake.update(session_id);
-                shake.update(&s_star_i[choice_index][y]);
-                shake.update(&ALL_BUT_ONE_PPRF_LABEL);
+                let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
+                t.append_message(b"session-id", session_id);
+                t.append_message(
+                    &ALL_BUT_ONE_PPRF_LABEL,
+                    &s_star_i[choice_index][y],
+                );
 
-                let mut reader = shake.finalize_xof();
-
-                reader.read(&mut s_star_i_plus_1[choice_index][2 * y]);
-                reader.read(&mut s_star_i_plus_1[choice_index][2 * y + 1]);
+                t.challenge_bytes(
+                    b"",
+                    &mut s_star_i_plus_1[choice_index][2 * y],
+                );
+                t.challenge_bytes(
+                    b"",
+                    &mut s_star_i_plus_1[choice_index][2 * y + 1],
+                );
             }
 
             let x_star_i: u8 = 1 ^ receiver_ot_seed
@@ -216,9 +212,8 @@ pub fn eval_pprf(
             vec![vec![[0u8; DIGEST_SIZE * 2]; SOFT_SPOKEN_Q]; 2];
         let s_tilda_expected = &out.s_tilda;
 
-        let mut s_tilda_hasher = Shake256::default();
-        s_tilda_hasher.update(&ALL_BUT_ONE_LABEL);
-        s_tilda_hasher.update(session_id);
+        let mut s_tilda_hash = Transcript::new(&ALL_BUT_ONE_LABEL);
+        s_tilda_hash.append_message(b"session-id", session_id);
 
         let mut s_tilda_star_y_star = [out.t_tilda, [0u8; 64]];
 
@@ -229,15 +224,14 @@ pub fn eval_pprf(
                 Choice::from((y == y_star as usize) as u8),
             ) as usize;
 
-            let mut shake = Shake256::default();
-            shake.update(&ALL_BUT_ONE_LABEL);
-            shake.update(session_id);
-            shake.update(&s_star_i[choice_index][y]);
-            shake.update(&ALL_BUT_ONE_PPRF_PROOF_LABEL);
+            let mut tt = Transcript::new(&ALL_BUT_ONE_LABEL);
+            tt.append_message(b"session-id", session_id);
+            tt.append_message(
+                &ALL_BUT_ONE_PPRF_PROOF_LABEL,
+                &s_star_i[choice_index][y],
+            );
 
-            shake
-                .finalize_xof()
-                .read(&mut s_tilda_star[choice_index][y]);
+            tt.challenge_bytes(b"", &mut s_tilda_star[choice_index][y]);
 
             (0..DIGEST_SIZE * 2).for_each(|b_i| {
                 s_tilda_star_y_star[choice_index][b_i] ^=
@@ -248,16 +242,16 @@ pub fn eval_pprf(
         s_tilda_star[0][y_star as usize] = s_tilda_star_y_star[0];
 
         (0..SOFT_SPOKEN_Q).for_each(|y| {
-            s_tilda_hasher.update(&s_tilda_star[0][y]);
+            s_tilda_hash.append_message(b"", &s_tilda_star[0][y]);
         });
 
         let mut s_tilda_digest = [0u8; DIGEST_SIZE * 2];
-        s_tilda_hasher.update(&ALL_BUT_ONE_PPRF_HASH_LABEL);
-        s_tilda_hasher.finalize_xof().read(&mut s_tilda_digest);
+        s_tilda_hash.challenge_bytes(
+            &ALL_BUT_ONE_PPRF_HASH_LABEL,
+            &mut s_tilda_digest,
+        );
 
-        let valid: bool = s_tilda_digest.ct_eq(s_tilda_expected).into();
-
-        if !valid {
+        if s_tilda_digest.ct_ne(s_tilda_expected).into() {
             return Err("Invalid proof");
         }
 
@@ -278,7 +272,6 @@ mod test {
     use rand::{thread_rng, Rng};
 
     use crate::endemic_ot::{OneTimePadEncryptionKeys, BATCH_SIZE_BYTES};
-    use sl_mpc_mate::{HashBytes, SessionId};
 
     fn generate_seed_ot_for_test() -> (SenderOutput, ReceiverOutput) {
         let mut rng = thread_rng();
@@ -300,22 +293,11 @@ mod test {
             .map(|i| {
                 let choice = random_choices.extract_bit(i);
 
-                // if !choice {
-                //     sender_ot_seed.one_time_pad_enc_keys[i].rho_0
-                // } else {
-                //     sender_ot_seed.one_time_pad_enc_keys[i].rho_1
-                // }
-
-                HashBytes::conditional_select(
-                    &HashBytes::new(
-                        sender_ot_seed.one_time_pad_enc_keys[i].rho_0,
-                    ),
-                    &HashBytes::new(
-                        sender_ot_seed.one_time_pad_enc_keys[i].rho_1,
-                    ),
-                    Choice::from(choice as u8),
-                )
-                .0
+                if !choice {
+                    sender_ot_seed.one_time_pad_enc_keys[i].rho_0
+                } else {
+                    sender_ot_seed.one_time_pad_enc_keys[i].rho_1
+                }
             })
             .collect::<Vec<_>>();
 
@@ -331,7 +313,7 @@ mod test {
 
         let (sender_ot_seed, receiver_ot_seed) = generate_seed_ot_for_test();
 
-        let session_id = SessionId::random(&mut rng);
+        let session_id: [u8; 32] = rng.gen();
 
         let (_all_but_one_sender_seed2, output_2) =
             build_pprf(&session_id, &sender_ot_seed);
