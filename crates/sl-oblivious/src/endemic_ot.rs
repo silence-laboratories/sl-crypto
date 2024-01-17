@@ -1,8 +1,8 @@
 use std::array;
 
+use merlin::Transcript;
 use rand::prelude::*;
 use rayon::prelude::*;
-use sha3::{Digest, Sha3_256};
 use x25519_dalek::{PublicKey, ReusableSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -48,7 +48,7 @@ pub struct OneTimePadEncryptionKeys {
 /// The output of the OT sender.
 #[derive(Clone, bincode::Encode, bincode::Decode)]
 pub struct SenderOutput {
-    pub one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == LAMBDA_C
+    pub(crate) one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == LAMBDA_C
 }
 
 /// The output of the OT receiver.
@@ -59,19 +59,17 @@ pub struct ReceiverOutput {
 }
 
 // RO for EndemicOT
-fn h_function(
-    index: usize,
-    session_id: &SessionId,
-    pk: &[u8; 32],
-) -> [u8; 32] {
-    let mut hasher = Sha3_256::new();
+fn h_function(index: usize, session_id: &[u8], pk: &[u8; 32]) -> [u8; 32] {
+    let mut t = Transcript::new(&ENDEMIC_OT_LABEL);
 
-    hasher.update(&ENDEMIC_OT_LABEL);
-    hasher.update(session_id);
-    hasher.update((index as u16).to_be_bytes());
-    hasher.update(pk);
+    t.append_message(b"session-id", session_id);
+    t.append_message(b"index", &(index as u16).to_be_bytes());
+    t.append_message(b"pk", pk);
 
-    hasher.finalize().into()
+    let mut output = [0u8; 32];
+    t.challenge_bytes(b"", &mut output);
+
+    output
 }
 
 /// Sender of the Endemic OT protocol.
