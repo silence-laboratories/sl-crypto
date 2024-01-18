@@ -147,29 +147,29 @@ pub struct ReceiverExtendedOutput {
     pub v_x: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
 }
 
-pub struct SoftSpokenOTReceiver {
+pub struct SoftSpokenOTReceiver<'a> {
     session_id: SessionId,
-    seed_ot_results: SenderOTSeed,
+    seed_ot_results: &'a SenderOTSeed,
     number_random_bytes: [u8; RAND_EXTENSION_SIZE],
 }
 
-impl SoftSpokenOTReceiver {
+impl<'a> SoftSpokenOTReceiver<'a> {
     pub fn new<R: CryptoRngCore>(
         session_id: SessionId,
-        seed_ot_results: &SenderOTSeed,
+        seed_ot_results: &'a SenderOTSeed,
         rng: &mut R,
     ) -> Self {
         let number_random_bytes: [u8; RAND_EXTENSION_SIZE] = rng.gen();
 
         Self {
             session_id,
-            seed_ot_results: seed_ot_results.clone(),
+            seed_ot_results,
             number_random_bytes,
         }
     }
 }
 
-impl SoftSpokenOTReceiver {
+impl<'a> SoftSpokenOTReceiver<'a> {
     pub fn process(
         self,
         choices: &[u8; L_BYTES],
@@ -346,15 +346,15 @@ fn transpose_bool_matrix(
     output
 }
 
-pub struct SoftSpokenOTSender {
+pub struct SoftSpokenOTSender<'a> {
     session_id: SessionId,
-    seed_ot_results: ReceiverOTSeed,
+    seed_ot_results: &'a ReceiverOTSeed,
 }
 
-impl SoftSpokenOTSender {
+impl<'a> SoftSpokenOTSender<'a> {
     pub fn new(
         session_id: SessionId,
-        seed_ot_results: ReceiverOTSeed,
+        seed_ot_results: &'a ReceiverOTSeed,
     ) -> Self {
         Self {
             seed_ot_results,
@@ -363,7 +363,7 @@ impl SoftSpokenOTSender {
     }
 }
 
-impl SoftSpokenOTSender {
+impl<'a> SoftSpokenOTSender<'a> {
     pub fn process(
         self,
         message: &Round1Output,
@@ -579,7 +579,8 @@ mod tests {
         let mut choices = [0u8; L_BYTES];
         rng.fill_bytes(&mut choices);
 
-        let sender = SoftSpokenOTSender::new(session_id, receiver_ot_results);
+        let sender =
+            SoftSpokenOTSender::new(session_id, &receiver_ot_results);
         let receiver = SoftSpokenOTReceiver::new(
             session_id,
             &sender_ot_results,

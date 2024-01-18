@@ -121,53 +121,28 @@ impl<'de> BorrowDecode<'de> for RVOLEOutput {
 }
 
 ///
-pub struct RVOLEReceiver<T> {
+pub struct RVOLEReceiver {
     session_id: SessionId,
     beta: [u8; L_BYTES],
-    state: T,
-}
-
-/// Initial state of the RVOLEReceiver
-pub struct RVOLEReceiverR0 {
-    cot_receiver: SoftSpokenOTReceiver,
-}
-
-/// State of RVOLEReceiver after processing Round 1 output
-pub struct RVOLEReceiverR1 {
     receiver_extended_output: Box<ReceiverExtendedOutput>,
 }
 
 ///
-impl RVOLEReceiver<RVOLEReceiverR0> {
+impl RVOLEReceiver {
     /// Create a new RVOLE receiver
     pub fn new<R: CryptoRngCore>(
         session_id: SessionId,
         seed_ot_results: &SenderOTSeed,
         rng: &mut R,
-    ) -> Self {
-        let cot_receiver =
-            SoftSpokenOTReceiver::new(session_id, seed_ot_results, rng);
+    ) -> (RVOLEReceiver, Scalar, Round1Output) {
         let mut beta = [0u8; L_BYTES];
         rng.fill_bytes(&mut beta);
 
-        Self {
-            session_id,
-            beta,
-            state: RVOLEReceiverR0 { cot_receiver },
-        }
-    }
-}
-
-impl RVOLEReceiver<RVOLEReceiverR0> {
-    ///
-    pub fn process(
-        self,
-    ) -> (RVOLEReceiver<RVOLEReceiverR1>, Scalar, Round1Output) {
         // b = <g, /beta>
         let mut b = Scalar::ZERO;
 
-        for (i, gv) in generate_gadget_vec(&self.session_id).enumerate() {
-            let i_bit = self.beta.extract_bit(i);
+        for (i, gv) in generate_gadget_vec(&session_id).enumerate() {
+            let i_bit = beta.extract_bit(i);
             let option_0 = &b;
             let option_1 = option_0 + gv;
             let chosen = Scalar::conditional_select(
@@ -179,21 +154,20 @@ impl RVOLEReceiver<RVOLEReceiverR0> {
         }
 
         let (round1_output, receiver_extended_output) =
-            self.state.cot_receiver.process(&self.beta);
+            SoftSpokenOTReceiver::new(session_id, seed_ot_results, rng)
+                .process(&beta);
 
         let next = RVOLEReceiver {
-            session_id: self.session_id,
-            beta: self.beta,
-            state: RVOLEReceiverR1 {
-                receiver_extended_output,
-            },
+            session_id,
+            beta,
+            receiver_extended_output,
         };
 
         (next, b, round1_output)
     }
 }
 
-impl RVOLEReceiver<RVOLEReceiverR1> {
+impl RVOLEReceiver {
     ///
     pub fn process(
         self,
@@ -229,7 +203,7 @@ impl RVOLEReceiver<RVOLEReceiverR1> {
             for i in 0..L_BATCH {
                 let j_bit = self.beta.extract_bit(j);
                 let option_0 = Scalar::reduce(U256::from_be_bytes(
-                    self.state.receiver_extended_output.v_x[j][i],
+                    self.receiver_extended_output.v_x[j][i],
                 ));
                 let option_1 = option_0 + rvole_output.a_tilde[j][i];
                 let chosen = Scalar::conditional_select(
@@ -242,7 +216,7 @@ impl RVOLEReceiver<RVOLEReceiverR1> {
             for k in 0..RHO {
                 let j_bit = self.beta.extract_bit(j);
                 let option_0 = Scalar::reduce(U256::from_be_bytes(
-                    self.state.receiver_extended_output.v_x[j][L_BATCH + k],
+                    self.receiver_extended_output.v_x[j][L_BATCH + k],
                 ));
                 let option_1 =
                     option_0 + rvole_output.a_tilde[j][L_BATCH + k];
@@ -298,23 +272,18 @@ impl RVOLEReceiver<RVOLEReceiverR1> {
 }
 
 ///
-pub struct RVOLESender {
-    session_id: SessionId,
-    a_hat: [Scalar; RHO],
-    cot_sender: SoftSpokenOTSender,
-}
+pub struct RVOLESender;
 
-///
 impl RVOLESender {
-    /// Create a new RVOLE sender
-    pub fn new<R: CryptoRngCore>(
+    ///
+    pub fn process<R: CryptoRngCore>(
         session_id: SessionId,
         seed_ot_results: &ReceiverOTSeed,
+        a: &[Scalar; L_BATCH],
+        round1_output: &Round1Output,
         rng: &mut R,
-    ) -> Self {
-        let cot_sender =
-            SoftSpokenOTSender::new(session_id, seed_ot_results.clone());
-
+    ) -> Result<([Scalar; L_BATCH], Box<RVOLEOutput>), SoftSpokenOTError>
+    {
         let mut a_hat = [Scalar::ZERO; RHO];
 
         #[allow(clippy::needless_range_loop)]
@@ -322,24 +291,9 @@ impl RVOLESender {
             a_hat[i] = Scalar::generate_biased(rng);
         }
 
-        Self {
-            session_id,
-            a_hat,
-            cot_sender,
-        }
-    }
-}
-
-impl RVOLESender {
-    ///
-    pub fn process(
-        self,
-        a: [Scalar; L_BATCH],
-        round1_output: &Round1Output,
-    ) -> Result<([Scalar; L_BATCH], Box<RVOLEOutput>), SoftSpokenOTError>
-    {
         let sender_extended_output =
-            self.cot_sender.process(round1_output)?;
+            SoftSpokenOTSender::new(session_id, seed_ot_results)
+                .process(round1_output)?;
 
         let mut alpha_0 = [[Scalar::ZERO; L_BATCH_PLUS_RHO]; XI];
         let mut alpha_1 = [[Scalar::ZERO; L_BATCH_PLUS_RHO]; XI];
@@ -353,13 +307,11 @@ impl RVOLESender {
                 ));
             }
         }
-        let alpha_0 = alpha_0;
-        let alpha_1 = alpha_1;
 
         let mut c = [Scalar::ZERO; L_BATCH];
         #[allow(clippy::needless_range_loop)]
         for i in 0..L_BATCH {
-            for (j, gv) in generate_gadget_vec(&self.session_id).enumerate() {
+            for (j, gv) in generate_gadget_vec(&session_id).enumerate() {
                 c[i] += gv * alpha_0[j][i];
             }
             c[i] = c[i].negate();
@@ -367,12 +319,12 @@ impl RVOLESender {
 
         let mut output = Box::new(RVOLEOutput {
             a_tilde: [[Scalar::ZERO; L_BATCH_PLUS_RHO]; XI],
-            eta: self.a_hat,
+            eta: a_hat,
             mu_hash: [0u8; 64],
         });
 
         let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
-        t.append_message(b"session-id", &self.session_id);
+        t.append_message(b"session-id", &session_id);
 
         let a_tilde = &mut output.a_tilde;
         #[allow(clippy::needless_range_loop)]
@@ -386,7 +338,7 @@ impl RVOLESender {
             }
             for k in 0..RHO {
                 let v = alpha_0[j][L_BATCH + k] - alpha_1[j][L_BATCH + k]
-                    + self.a_hat[k];
+                    + a_hat[k];
 
                 t.append_message(b"", &v.to_bytes());
                 a_tilde[j][L_BATCH + k] = v;
@@ -415,7 +367,7 @@ impl RVOLESender {
         }
 
         let mut t = Transcript::new(&RANDOM_VOLE_MU_LABEL);
-        t.append_message(b"session-id", &self.session_id);
+        t.append_message(b"session-id", &session_id);
 
         #[allow(clippy::needless_range_loop)]
         for j in 0..XI {
@@ -452,10 +404,7 @@ mod tests {
 
         let session_id = SessionId::random(&mut rng);
 
-        let sender =
-            RVOLESender::new(session_id, &receiver_ot_seed, &mut rng);
-
-        let receiver =
+        let (receiver, beta, round1_output) =
             RVOLEReceiver::new(session_id, &sender_ot_seed, &mut rng);
 
         let (alpha1, alpha2) = (
@@ -463,10 +412,14 @@ mod tests {
             Scalar::generate_biased(&mut rng),
         );
 
-        let (receiver, beta, round1_output) = receiver.process();
-
-        let (sender_shares, round2_output) =
-            sender.process([alpha1, alpha2], &round1_output).unwrap();
+        let (sender_shares, round2_output) = RVOLESender::process(
+            session_id,
+            &receiver_ot_seed,
+            &[alpha1, alpha2],
+            &round1_output,
+            &mut rng,
+        )
+        .unwrap();
 
         let receiver_shares = receiver.process(&round2_output).unwrap();
 
