@@ -7,6 +7,8 @@
 //! lambda_c = 256
 //! l = 2, rho = 1, OT_WIDTH = l + rho = 3
 
+use std::array;
+
 use bincode::de::read::Reader;
 use bincode::de::{BorrowDecoder, Decoder};
 use bincode::enc::write::Writer;
@@ -139,19 +141,19 @@ impl RVOLEReceiver {
         rng.fill_bytes(&mut beta);
 
         // b = <g, /beta>
-        let mut b = Scalar::ZERO;
+        let b = generate_gadget_vec(&session_id).enumerate().fold(
+            Scalar::ZERO,
+            |option_0, (i, gv)| {
+                let i_bit = beta.extract_bit(i);
+                let option_1 = option_0 + gv;
 
-        for (i, gv) in generate_gadget_vec(&session_id).enumerate() {
-            let i_bit = beta.extract_bit(i);
-            let option_0 = &b;
-            let option_1 = option_0 + gv;
-            let chosen = Scalar::conditional_select(
-                option_0,
-                &option_1,
-                Choice::from(i_bit as u8),
-            );
-            b = chosen;
-        }
+                Scalar::conditional_select(
+                    &option_0,
+                    &option_1,
+                    Choice::from(i_bit as u8),
+                )
+            },
+        );
 
         let (round1_output, receiver_extended_output) =
             SoftSpokenOTReceiver::new(session_id, seed_ot_results, rng)
@@ -284,38 +286,32 @@ impl RVOLESender {
         rng: &mut R,
     ) -> Result<([Scalar; L_BATCH], Box<RVOLEOutput>), SoftSpokenOTError>
     {
-        let mut a_hat = [Scalar::ZERO; RHO];
-
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..RHO {
-            a_hat[i] = Scalar::generate_biased(rng);
-        }
+        let a_hat: [Scalar; RHO] =
+            array::from_fn(|_| Scalar::generate_biased(rng));
 
         let sender_extended_output =
             SoftSpokenOTSender::new(session_id, seed_ot_results)
                 .process(round1_output)?;
 
-        let mut alpha_0 = [[Scalar::ZERO; L_BATCH_PLUS_RHO]; XI];
-        let mut alpha_1 = [[Scalar::ZERO; L_BATCH_PLUS_RHO]; XI];
-        for j in 0..XI {
-            for i in 0..L_BATCH_PLUS_RHO {
-                alpha_0[j][i] = Scalar::reduce(U256::from_be_bytes(
-                    sender_extended_output.v_0[j][i],
-                ));
-                alpha_1[j][i] = Scalar::reduce(U256::from_be_bytes(
-                    sender_extended_output.v_1[j][i],
-                ));
-            }
-        }
+        let alpha_0 = |j: usize, i: usize| {
+            Scalar::reduce(U256::from_be_bytes(
+                sender_extended_output.v_0[j][i],
+            ))
+        };
 
-        let mut c = [Scalar::ZERO; L_BATCH];
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..L_BATCH {
-            for (j, gv) in generate_gadget_vec(&session_id).enumerate() {
-                c[i] += gv * alpha_0[j][i];
-            }
-            c[i] = c[i].negate();
-        }
+        let alpha_1 = |j: usize, i: usize| {
+            Scalar::reduce(U256::from_be_bytes(
+                sender_extended_output.v_1[j][i],
+            ))
+        };
+
+        let c: [Scalar; L_BATCH] = array::from_fn(|i| {
+            generate_gadget_vec(&session_id)
+                .enumerate()
+                .map(|(j, gv)| gv * alpha_0(j, i))
+                .sum::<Scalar>()
+                .negate()
+        });
 
         let mut output = Box::new(RVOLEOutput {
             a_tilde: [[Scalar::ZERO; L_BATCH_PLUS_RHO]; XI],
@@ -331,13 +327,13 @@ impl RVOLESender {
         for j in 0..XI {
             t.append_u64(b"row of a tilde", j as u64);
             for i in 0..L_BATCH {
-                let v = alpha_0[j][i] - alpha_1[j][i] + a[i];
+                let v = alpha_0(j, i) - alpha_1(j, i) + a[i];
 
                 t.append_message(b"", &v.to_bytes());
                 a_tilde[j][i] = v;
             }
             for k in 0..RHO {
-                let v = alpha_0[j][L_BATCH + k] - alpha_1[j][L_BATCH + k]
+                let v = alpha_0(j, L_BATCH + k) - alpha_1(j, L_BATCH + k)
                     + a_hat[k];
 
                 t.append_message(b"", &v.to_bytes());
@@ -372,9 +368,9 @@ impl RVOLESender {
         #[allow(clippy::needless_range_loop)]
         for j in 0..XI {
             for k in 0..RHO {
-                let mut v = alpha_0[j][L_BATCH + k];
+                let mut v = alpha_0(j, L_BATCH + k);
                 for i in 0..L_BATCH {
-                    v += theta[k][i] * alpha_0[j][i]
+                    v += theta[k][i] * alpha_0(j, i)
                 }
                 t.append_message(b"chosen", &v.to_bytes());
             }
