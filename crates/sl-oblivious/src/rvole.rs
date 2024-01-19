@@ -156,8 +156,8 @@ impl RVOLEReceiver {
         );
 
         let (round1_output, receiver_extended_output) =
-            SoftSpokenOTReceiver::new(session_id, seed_ot_results, rng)
-                .process(&beta);
+            SoftSpokenOTReceiver::new(&session_id, seed_ot_results)
+                .process(&beta, rng);
 
         let next = RVOLEReceiver {
             session_id,
@@ -290,7 +290,7 @@ impl RVOLESender {
             array::from_fn(|_| Scalar::generate_biased(rng));
 
         let sender_extended_output =
-            SoftSpokenOTSender::new(session_id, seed_ot_results)
+            SoftSpokenOTSender::new(&session_id, seed_ot_results)
                 .process(round1_output)?;
 
         let alpha_0 = |j: usize, i: usize| {
