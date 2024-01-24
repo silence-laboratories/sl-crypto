@@ -29,23 +29,23 @@ use k256::{
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::constants::{
-    RANDOM_VOLE_GADGET_VECTOR_LABEL, RANDOM_VOLE_MU_LABEL,
-    RANDOM_VOLE_THETA_LABEL,
+use crate::{
+    constants::{
+        RANDOM_VOLE_GADGET_VECTOR_LABEL, RANDOM_VOLE_MU_LABEL,
+        RANDOM_VOLE_THETA_LABEL,
+    },
+    params::consts::*,
 };
 use sl_mpc_mate::{message::*, SessionId};
 
 use crate::soft_spoken::{
     ReceiverExtendedOutput, ReceiverOTSeed, Round1Output, SenderOTSeed,
-    SoftSpokenOTError, SoftSpokenOTReceiver, SoftSpokenOTSender, L, L_BYTES,
+    SoftSpokenOTError, SoftSpokenOTReceiver, SoftSpokenOTSender,
 };
 
 use crate::utils::ExtractBit;
 
 pub const XI: usize = L; // by definition
-pub const L_BATCH: usize = 2;
-pub const RHO: usize = 1; // ===
-pub const L_BATCH_PLUS_RHO: usize = L_BATCH + RHO; // should be equal to OT_WIDTH
 
 fn generate_gadget_vec(
     session_id: &SessionId,
@@ -68,8 +68,8 @@ fn generate_gadget_vec(
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct RVOLEOutput {
     a_tilde: [[Scalar; L_BATCH_PLUS_RHO]; XI],
-    eta: [Scalar; RHO],
     mu_hash: [u8; 64],
+    eta: [Scalar; RHO],
 }
 
 impl Encode for RVOLEOutput {
@@ -192,7 +192,7 @@ impl RVOLEReceiver {
                 t.append_u64(b"theta k", k as u64);
                 t.append_u64(b"theta i", i as u64);
 
-                let mut digest = [0u8; 32];
+                let mut digest = [0u8; KAPPA_BYTES];
                 t.challenge_bytes(b"theta", digest.as_mut());
                 theta[k][i] = Scalar::reduce(U256::from_be_bytes(digest));
             }

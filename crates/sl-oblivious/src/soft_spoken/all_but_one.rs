@@ -1,13 +1,11 @@
-use elliptic_curve::subtle::{
-    Choice, ConditionallySelectable, ConstantTimeEq,
-};
+use elliptic_curve::subtle::ConstantTimeEq;
 use merlin::Transcript;
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
     endemic_ot::{LAMBDA_C, LAMBDA_C_BYTES},
-    soft_spoken::{SOFT_SPOKEN_K, SOFT_SPOKEN_Q},
+    params::consts::*,
 };
 
 use crate::constants::{
@@ -20,17 +18,17 @@ use crate::{
     utils::ExtractBit,
 };
 
-use super::{ReceiverOTSeed, LAMBDA_C_DIV_SOFT_SPOKEN_K};
+use super::ReceiverOTSeed;
 
 #[derive(
     Clone, Debug, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
 )]
 pub struct PPRFOutput {
-    pub t: [[[u8; LAMBDA_C_BYTES]; 2]; SOFT_SPOKEN_K - 1],
+    t: [[[u8; LAMBDA_C_BYTES]; 2]; SOFT_SPOKEN_K - 1],
 
-    pub s_tilda: [u8; LAMBDA_C_BYTES * 2],
+    s_tilda: [u8; LAMBDA_C_BYTES * 2],
 
-    pub t_tilda: [u8; LAMBDA_C_BYTES * 2],
+    t_tilda: [u8; LAMBDA_C_BYTES * 2],
 }
 
 /// Implements BuildPPRF and ProvePPRF functionality of
@@ -129,29 +127,23 @@ pub fn eval_pprf(
 
     for (j, out) in output.iter().enumerate() {
         let t_x_i = out.t.as_slice();
-        let x_star_0: u8 = 1 ^ receiver_ot_seed
+        let x_star_0: u8 = receiver_ot_seed
             .packed_random_choice_bits
-            .extract_bit(j * SOFT_SPOKEN_K)
-            as u8;
+            .extract_bit(j * SOFT_SPOKEN_K) as u8;
 
         let mut s_star_i = [[[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]; 2];
 
-        let selected = u8::conditional_select(&1, &0, Choice::from(x_star_0));
-
-        s_star_i[0][selected as usize] =
+        s_star_i[0][x_star_0 as usize] =
             receiver_ot_seed.one_time_pad_decryption_keys[j * SOFT_SPOKEN_K];
 
-        let mut y_star = x_star_0;
+        let mut y_star = x_star_0 as usize ^ 1;
 
         for i in 1..SOFT_SPOKEN_K {
             let mut s_star_i_plus_1 =
                 [[[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]; 2];
-            for y in 0..2usize.pow(i as u32) {
-                let choice_index = u8::conditional_select(
-                    &0,
-                    &1,
-                    Choice::from((y == y_star as usize) as u8),
-                ) as usize;
+
+            for y in 0..(1 << i) {
+                let choice_index = (y == y_star) as usize;
 
                 let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
                 t.append_message(b"session-id", session_id);
@@ -178,49 +170,41 @@ pub fn eval_pprf(
             let big_f_i_star = &receiver_ot_seed.one_time_pad_decryption_keys
                 [j * SOFT_SPOKEN_K + i];
 
-            let ct_x = u8::conditional_select(&1, &0, Choice::from(x_star_i))
-                as usize;
+            let ct_x = x_star_i as usize ^ 1;
 
             // TODO: fix clippy
             #[allow(clippy::needless_range_loop)]
             for b_i in 0..LAMBDA_C_BYTES {
-                s_star_i_plus_1[0][2 * y_star as usize + ct_x][b_i] =
+                s_star_i_plus_1[0][2 * y_star + ct_x][b_i] =
                     t_x_i[i - 1][ct_x][b_i] ^ big_f_i_star[b_i];
 
                 for y in 0..2usize.pow(i as u32) {
-                    let choice_index = u8::conditional_select(
-                        &0,
-                        &1,
-                        Choice::from((y == y_star as usize) as u8),
-                    ) as usize;
+                    // assume conversion of bool to usize is constant time
+                    let choice = (y == y_star) as usize;
 
-                    s_star_i_plus_1[choice_index]
-                        [2 * (y_star as usize) + ct_x][b_i] ^=
-                        s_star_i_plus_1[choice_index][2 * y + ct_x][b_i];
+                    s_star_i_plus_1[choice][2 * (y_star) + ct_x][b_i] ^=
+                        s_star_i_plus_1[choice][2 * y + ct_x][b_i];
                 }
             }
 
             s_star_i = s_star_i_plus_1;
 
-            y_star = y_star * 2 + x_star_i;
+            y_star = y_star * 2 + x_star_i as usize;
         }
 
         // Verify
         let mut s_tilda_star =
-            vec![vec![[0u8; LAMBDA_C_BYTES * 2]; SOFT_SPOKEN_Q]; 2];
+            [[[0u8; LAMBDA_C_BYTES * 2]; SOFT_SPOKEN_Q]; 2];
         let s_tilda_expected = &out.s_tilda;
 
         let mut s_tilda_hash = Transcript::new(&ALL_BUT_ONE_LABEL);
         s_tilda_hash.append_message(b"session-id", session_id);
 
-        let mut s_tilda_star_y_star = [out.t_tilda, [0u8; 64]];
+        let mut s_tilda_star_y_star =
+            [out.t_tilda, [0u8; LAMBDA_C_BYTES * 2]];
 
         for y in 0..SOFT_SPOKEN_Q {
-            let choice_index = u8::conditional_select(
-                &0,
-                &1,
-                Choice::from((y == y_star as usize) as u8),
-            ) as usize;
+            let choice_index = (y == y_star) as usize;
 
             let mut tt = Transcript::new(&ALL_BUT_ONE_LABEL);
             tt.append_message(b"session-id", session_id);
@@ -237,7 +221,7 @@ pub fn eval_pprf(
             })
         }
 
-        s_tilda_star[0][y_star as usize] = s_tilda_star_y_star[0];
+        s_tilda_star[0][y_star] = s_tilda_star_y_star[0];
 
         (0..SOFT_SPOKEN_Q).for_each(|y| {
             s_tilda_hash.append_message(b"", &s_tilda_star[0][y]);
@@ -253,7 +237,7 @@ pub fn eval_pprf(
             return Err("Invalid proof");
         }
 
-        all_but_one_receiver_seed.random_choices[j] = y_star;
+        all_but_one_receiver_seed.random_choices[j] = y_star as u8;
         all_but_one_receiver_seed
             .one_time_pad_dec_keys
             .push(s_star_i[0]);

@@ -2,7 +2,6 @@ use std::array;
 
 use merlin::Transcript;
 use rand::prelude::*;
-use rayon::prelude::*;
 use x25519_dalek::{PublicKey, ReusableSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -74,55 +73,34 @@ fn h_function(index: usize, session_id: &[u8], pk: &[u8; 32]) -> [u8; 32] {
 
 /// Sender of the Endemic OT protocol.
 /// 1 out of 2 Endemic OT Fig.8 https://eprint.iacr.org/2019/706.pdf
-pub struct EndemicOTSender {
-    session_id: SessionId,
-    t_b_0_list: [ReusableSecret; LAMBDA_C],
-    t_b_1_list: [ReusableSecret; LAMBDA_C],
-}
+pub struct EndemicOTSender;
 
 impl EndemicOTSender {
-    /// Create a new instance of the EndemicOT sender.
-    pub fn new<R: RngCore + CryptoRng>(
-        session_id: SessionId,
-        rng: &mut R,
-    ) -> Self {
-        EndemicOTSender {
-            session_id,
-            t_b_0_list: array::from_fn(|_| {
-                ReusableSecret::random_from_rng(&mut *rng)
-            }),
-            t_b_1_list: array::from_fn(|_| {
-                ReusableSecret::random_from_rng(&mut *rng)
-            }),
-        }
-    }
-
     /// Process EndemicOTMsg1 from OTReceiver
-    pub fn process(
-        self,
-        msg1: EndemicOTMsg1,
+    pub fn process<R: RngCore + CryptoRng>(
+        session_id: &[u8],
+        msg1: &EndemicOTMsg1,
+        rng: &mut R,
     ) -> (SenderOutput, EndemicOTMsg2) {
-        let mut m_b_list = vec![];
-        let mut pad_enc_keys = vec![];
-
-        msg1.r_list
-            .par_iter()
+        let (m_b_list, pad_enc_keys) = msg1
+            .r_list
+            .iter()
             .enumerate()
             .map(|(idx, r_values)| {
                 let r_0 = &r_values[0];
                 let r_1 = &r_values[1];
 
-                let h_r_0 = h_function(idx, &self.session_id, r_0);
-                let h_r_1 = h_function(idx, &self.session_id, r_1);
+                let h_r_0 = h_function(idx, session_id, r_0);
+                let h_r_1 = h_function(idx, session_id, r_1);
 
                 let m_a_0 = PublicKey::from(xor_byte_arrays(r_0, &h_r_1));
                 let m_a_1 = PublicKey::from(xor_byte_arrays(r_1, &h_r_0));
 
-                let t_b_0 = &self.t_b_0_list[idx];
-                let t_b_1 = &self.t_b_1_list[idx];
+                let t_b_0 = ReusableSecret::random_from_rng(&mut *rng);
+                let t_b_1 = ReusableSecret::random_from_rng(&mut *rng);
 
-                let m_b_0 = PublicKey::from(t_b_0).to_bytes();
-                let m_b_1 = PublicKey::from(t_b_1).to_bytes();
+                let m_b_0 = PublicKey::from(&t_b_0).to_bytes();
+                let m_b_1 = PublicKey::from(&t_b_1).to_bytes();
 
                 // check key generation
                 let rho_0 = t_b_0.diffie_hellman(&m_a_0).to_bytes();
@@ -130,7 +108,7 @@ impl EndemicOTSender {
 
                 ([m_b_0, m_b_1], OneTimePadEncryptionKeys { rho_0, rho_1 })
             })
-            .unzip_into_vecs(&mut m_b_list, &mut pad_enc_keys);
+            .unzip();
 
         let msg2 = EndemicOTMsg2 { m_b_list };
 
@@ -151,53 +129,45 @@ impl EndemicOTReceiver {
         session_id: SessionId,
         rng: &mut R,
     ) -> (Self, EndemicOTMsg1) {
-        let packed_choice_bits: [u8; LAMBDA_C_BYTES] = rng.gen();
+        let next_state = Self {
+            packed_choice_bits: rng.gen(),
+            t_a_list: array::from_fn(|_| {
+                ReusableSecret::random_from_rng(&mut *rng)
+            }),
+        };
 
-        let t_a_list: [ReusableSecret; LAMBDA_C] =
-            array::from_fn(|_| ReusableSecret::random_from_rng(&mut *rng));
-
-        let r_other_list: [[u8; 32]; LAMBDA_C] =
-            array::from_fn(|_| rng.gen());
-
-        let mut r_list = vec![];
-
-        t_a_list
-            .par_iter()
-            .zip(&r_other_list)
+        let r_list = next_state
+            .t_a_list
+            .iter()
             .enumerate()
-            .map(|(idx, (t_a, r_other))| {
+            .map(|(idx, t_a)| {
+                let r_other = rng.gen();
                 let r_choice = xor_byte_arrays(
                     &PublicKey::from(t_a).to_bytes(),
-                    &h_function(idx, &session_id, r_other),
+                    &h_function(idx, &session_id, &r_other),
                 );
 
                 let random_choice_bit =
-                    packed_choice_bits.extract_bit(idx) as usize;
+                    next_state.packed_choice_bits.extract_bit(idx) as usize;
 
-                let mut r_values: [[u8; 32]; 2] = [[0; 32]; 2];
+                let mut r_values = [[0u8; 32]; 2]; // TODO use appropriate constant
 
                 r_values[random_choice_bit] = r_choice;
-                r_values[random_choice_bit ^ 1] = *r_other;
+                r_values[random_choice_bit ^ 1] = r_other;
 
                 r_values
             })
-            .collect_into_vec(&mut r_list);
+            .collect();
 
         let msg1 = EndemicOTMsg1 { r_list };
-
-        let next_state = Self {
-            packed_choice_bits,
-            t_a_list,
-        };
 
         (next_state, msg1)
     }
 
     pub fn process(self, msg2: &EndemicOTMsg2) -> ReceiverOutput {
-        let mut rho_w_vec = vec![];
-
-        msg2.m_b_list
-            .par_iter()
+        let rho_w_vec = msg2
+            .m_b_list
+            .iter()
             .enumerate()
             .map(|(idx, m_b_values)| {
                 let random_choice_bit =
@@ -209,7 +179,7 @@ impl EndemicOTReceiver {
                     .diffie_hellman(&PublicKey::from(m_b_value))
                     .to_bytes()
             })
-            .collect_into_vec(&mut rho_w_vec);
+            .collect();
 
         ReceiverOutput::new(self.packed_choice_bits, rho_w_vec)
     }
@@ -253,11 +223,10 @@ mod test {
         let mut rng = rand::thread_rng();
         let session_id = SessionId::random(&mut rng);
 
-        let sender = EndemicOTSender::new(session_id, &mut rng);
-
         let (receiver, msg1) = EndemicOTReceiver::new(session_id, &mut rng);
 
-        let (sender_output, msg2) = sender.process(msg1);
+        let (sender_output, msg2) =
+            EndemicOTSender::process(&session_id, &msg1, &mut rng);
 
         let receiver_output = receiver.process(&msg2);
 
@@ -268,6 +237,7 @@ mod test {
 
             let bit =
                 receiver_output.packed_random_choice_bits.extract_bit(i);
+
             if bit {
                 assert_eq!(&sender_pad.rho_1, rec_pad);
             } else {

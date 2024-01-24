@@ -53,13 +53,6 @@ pub mod utils {
             action: &[u8],
             label: &'static [u8],
         ) -> Transcript;
-
-        ///
-        fn challenge_bytes(
-            &mut self,
-            label: &'static [u8],
-            buffer: &mut [u8],
-        );
     }
 
     impl TranscriptProtocol for Transcript {
@@ -105,14 +98,6 @@ pub mod utils {
             self.challenge_bytes(label, &mut buf);
             Scalar::<Secp256k1>::reduce(U256::from_be_bytes(buf))
         }
-
-        fn challenge_bytes(
-            &mut self,
-            label: &'static [u8],
-            buffer: &mut [u8],
-        ) {
-            self.challenge_bytes(label, buffer)
-        }
     }
 
     /// Simple trait to extract a bit from a byte array.
@@ -136,3 +121,5 @@ pub mod utils {
         -(bit as i8) as u8
     }
 }
+
+pub mod params;
