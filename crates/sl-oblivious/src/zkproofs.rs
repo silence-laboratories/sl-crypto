@@ -77,7 +77,7 @@ mod tests {
     use super::DLogProof;
 
     #[test]
-    pub fn test_dlog_proof() {
+    pub fn dlog_proof() {
         use k256::{ProjectivePoint, Scalar};
         use merlin::Transcript;
         use rand::thread_rng;
@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_wrong_dlog_proof() {
+    pub fn wrong_dlog_proof() {
         let mut rng = thread_rng();
         let mut transcript = Transcript::new(b"test-dlog-proof");
 
@@ -120,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_dlog_proof_fiat_shamir() {
+    pub fn dlog_proof_fiat_shamir() {
         use k256::{ProjectivePoint, Scalar};
         use merlin::Transcript;
 

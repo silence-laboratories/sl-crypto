@@ -47,14 +47,14 @@ pub struct OneTimePadEncryptionKeys {
 /// The output of the OT sender.
 #[derive(Clone, bincode::Encode, bincode::Decode)]
 pub struct SenderOutput {
-    pub(crate) one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == LAMBDA_C
+    pub(crate) otp_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == LAMBDA_C
 }
 
 /// The output of the OT receiver.
 #[derive(Clone, Debug)]
 pub struct ReceiverOutput {
-    pub(crate) packed_random_choice_bits: [u8; LAMBDA_C_BYTES], // LAMBDA_C bits
-    pub(crate) one_time_pad_decryption_keys: Vec<[u8; 32]>, // size == LAMBDA_C
+    pub(crate) choice_bits: [u8; LAMBDA_C_BYTES], // LAMBDA_C bits
+    pub(crate) otp_dec_keys: Vec<[u8; 32]>,       // size == LAMBDA_C
 }
 
 // RO for EndemicOT
@@ -188,23 +188,21 @@ impl EndemicOTReceiver {
 impl SenderOutput {
     /// Create a new `SenderOutput`.
     pub fn new(
-        one_time_pad_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == LAMBDA_C
+        otp_enc_keys: Vec<OneTimePadEncryptionKeys>, // size == LAMBDA_C
     ) -> Self {
-        Self {
-            one_time_pad_enc_keys,
-        }
+        Self { otp_enc_keys }
     }
 }
 
 impl ReceiverOutput {
     /// Create a new `ReceiverOutput`.
     pub fn new(
-        packed_random_choice_bits: [u8; LAMBDA_C_BYTES],
-        one_time_pad_decryption_keys: Vec<[u8; 32]>, // size == LAMBDA_CLAMBDA_C
+        choice_bits: [u8; LAMBDA_C_BYTES],
+        otp_dec_keys: Vec<[u8; 32]>, // size == LAMBDA_CLAMBDA_C
     ) -> Self {
         Self {
-            packed_random_choice_bits,
-            one_time_pad_decryption_keys,
+            choice_bits,
+            otp_dec_keys,
         }
     }
 }
@@ -231,12 +229,11 @@ mod test {
         let receiver_output = receiver.process(&msg2);
 
         for i in 0..LAMBDA_C {
-            let sender_pad = &sender_output.one_time_pad_enc_keys[i];
+            let sender_pad = &sender_output.otp_enc_keys[i];
 
-            let rec_pad = &receiver_output.one_time_pad_decryption_keys[i];
+            let rec_pad = &receiver_output.otp_dec_keys[i];
 
-            let bit =
-                receiver_output.packed_random_choice_bits.extract_bit(i);
+            let bit = receiver_output.choice_bits.extract_bit(i);
 
             if bit {
                 assert_eq!(&sender_pad.rho_1, rec_pad);

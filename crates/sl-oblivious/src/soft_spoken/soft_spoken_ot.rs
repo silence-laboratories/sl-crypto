@@ -11,16 +11,12 @@ use std::array;
 use elliptic_curve::{rand_core::CryptoRngCore, subtle::ConstantTimeEq};
 use merlin::Transcript;
 use rand::Rng;
-use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use sl_mpc_mate::{
-    bincode::{
-        de::{read::Reader, BorrowDecode, BorrowDecoder, Decoder},
-        enc::{write::Writer, Encoder},
-        error::{DecodeError, EncodeError},
-        Decode, Encode,
-    },
-    SessionId,
+use sl_mpc_mate::bincode::{
+    de::{read::Reader, BorrowDecode, BorrowDecoder, Decoder},
+    enc::{write::Writer, Encoder},
+    error::{DecodeError, EncodeError},
+    Decode, Encode,
 };
 
 use crate::{
@@ -35,28 +31,40 @@ use crate::{
 
 use super::mul_poly::binary_field_multiply_gf_2_128;
 
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    bincode::Encode,
-    bincode::Decode,
-    Zeroize,
-    ZeroizeOnDrop,
-)]
+#[derive(Clone, Copy, bincode::Encode, bincode::Decode)]
 pub struct SenderOTSeed {
-    pub one_time_pad_enc_keys: Vec<[[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]>, // [LAMBDA_C / SOFT_SPOKEN_K]
+    pub otp_enc_keys:
+        [[[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]; LAMBDA_C / SOFT_SPOKEN_K],
 }
 
-#[derive(
-    Debug, Clone, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
-)]
+impl Default for SenderOTSeed {
+    fn default() -> Self {
+        Self {
+            otp_enc_keys: [[[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
+                LAMBDA_C / SOFT_SPOKEN_K],
+        }
+    }
+}
+
+#[derive(Clone, Copy, bincode::Encode, bincode::Decode)]
 pub struct ReceiverOTSeed {
     pub random_choices: [u8; LAMBDA_C_DIV_SOFT_SPOKEN_K], // FIXME: define range of random_choices[i]
-    pub one_time_pad_dec_keys: Vec<[[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]>, // [LAMBDA_C / SOFT_SPOKEN_K]
+    pub otp_dec_keys:
+        [[[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]; LAMBDA_C / SOFT_SPOKEN_K],
 }
 
-#[derive(Debug, Zeroize, ZeroizeOnDrop)]
+impl Default for ReceiverOTSeed {
+    fn default() -> Self {
+        Self {
+            random_choices: [0u8; LAMBDA_C_DIV_SOFT_SPOKEN_K],
+            otp_dec_keys: [[[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
+                LAMBDA_C / SOFT_SPOKEN_K],
+        }
+    }
+}
+
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[repr(C)]
 pub struct Round1Output {
     u: [[u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K],
     x: [u8; S_BYTES],
@@ -76,35 +84,15 @@ impl Default for Round1Output {
 //
 impl Encode for Round1Output {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        let w = encoder.writer();
-
-        for u in &self.u {
-            w.write(u)?;
-        }
-
-        w.write(&self.x)?;
-
-        for v in &self.t {
-            w.write(v)?;
-        }
-
-        Ok(())
+        encoder.writer().write(bytemuck::bytes_of(self))
     }
 }
 
 impl Decode for Round1Output {
     fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let mut r = Round1Output::default();
+        let mut r = Self::default();
 
-        for u in &mut r.u {
-            decoder.reader().read(u)?;
-        }
-
-        decoder.reader().read(&mut r.x)?;
-
-        for v in &mut r.t {
-            decoder.reader().read(v)?;
-        }
+        decoder.reader().read(bytemuck::bytes_of_mut(&mut r))?;
 
         Ok(r)
     }
@@ -119,6 +107,8 @@ impl<'de> BorrowDecode<'de> for Round1Output {
 }
 
 /// The extended output of the OT sender.
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[repr(C)]
 pub struct SenderExtendedOutput {
     pub v_0: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
     pub v_1: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
@@ -126,21 +116,19 @@ pub struct SenderExtendedOutput {
 
 impl SenderExtendedOutput {
     pub fn new() -> Box<Self> {
-        Box::new(SenderExtendedOutput {
-            v_0: [[[0u8; KAPPA_BYTES]; OT_WIDTH]; L],
-            v_1: [[[0u8; KAPPA_BYTES]; OT_WIDTH]; L],
-        })
+        bytemuck::allocation::zeroed_box::<Self>()
     }
 }
 
 /// The extended output of the OT receiver.
+#[derive(Clone, Copy, bytemuck::AnyBitPattern)]
 pub struct ReceiverExtendedOutput {
     pub choices: [u8; L_BYTES], // L bits
     pub v_x: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
 }
 
 impl ReceiverExtendedOutput {
-    pub fn new(choices: [u8; L_BYTES]) -> Box<Self> {
+    pub(crate) fn new(choices: [u8; L_BYTES]) -> Box<Self> {
         Box::new(ReceiverExtendedOutput {
             choices,
             v_x: [[[0u8; KAPPA_BYTES]; OT_WIDTH]; L],
@@ -149,32 +137,19 @@ impl ReceiverExtendedOutput {
 }
 
 ///
-pub struct SoftSpokenOTReceiver<'a> {
-    session_id: &'a SessionId,
-    seed_ot_results: &'a SenderOTSeed,
-}
+pub struct SoftSpokenOTReceiver;
 
-impl<'a> SoftSpokenOTReceiver<'a> {
-    pub fn new(
-        session_id: &'a SessionId,
-        seed_ot_results: &'a SenderOTSeed,
-    ) -> Self {
-        Self {
-            session_id,
-            seed_ot_results,
-        }
-    }
-}
-
-impl<'a> SoftSpokenOTReceiver<'a> {
+impl SoftSpokenOTReceiver {
     pub fn process<R: CryptoRngCore>(
-        self,
-        choices: &[u8; L_BYTES],
+        session_id: &[u8],
+        seed_ot_results: &SenderOTSeed,
+        output: &mut Round1Output,
+        extended_output: &mut ReceiverExtendedOutput,
         rng: &mut R,
-    ) -> (Round1Output, Box<ReceiverExtendedOutput>) {
+    ) {
         let extended_packed_choices = {
             let mut buf = [0u8; L_PRIME_BYTES];
-            buf[..L_BYTES].copy_from_slice(choices);
+            buf[..L_BYTES].copy_from_slice(&extended_output.choices);
             rng.fill_bytes(&mut buf[L_BYTES..]);
             buf
         };
@@ -182,23 +157,18 @@ impl<'a> SoftSpokenOTReceiver<'a> {
         let mut r_x = [[[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
             SOFT_SPOKEN_Q];
 
-        let mut output = Round1Output::default();
-
-        let x = &mut output.x;
+        // let x = &mut output.x;
         let t = &mut output.t;
         let u = &mut output.u;
 
         let mut matrix_hasher = Transcript::new(&SOFT_SPOKEN_LABEL);
-        matrix_hasher.append_message(b"session-id", self.session_id);
+        matrix_hasher.append_message(b"session-id", session_id);
 
         for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
             for (j, r_x_j) in r_x.iter_mut().enumerate() {
                 let mut ts = Transcript::new(&SOFT_SPOKEN_LABEL);
-                ts.append_message(b"", self.session_id);
-                ts.append_message(
-                    b"",
-                    &self.seed_ot_results.one_time_pad_enc_keys[i][j],
-                );
+                ts.append_message(b"", session_id);
+                ts.append_message(b"", &seed_ot_results.otp_enc_keys[i][j]);
                 ts.challenge_bytes(&SOFT_SPOKEN_EXPAND_LABEL, &mut r_x_j[i]);
             }
 
@@ -244,69 +214,63 @@ impl<'a> SoftSpokenOTReceiver<'a> {
             ts.append_message(b"", &digest_matrix_u);
 
             let mut chi_j = [0u8; S_BYTES];
-
             ts.challenge_bytes(b"", &mut chi_j);
 
-            let x_hat_j = &extended_packed_choices
-                [j * S_BYTES..(j + 1) * S_BYTES]
+            let x_hat_j = &extended_packed_choices[j * S_BYTES..][..S_BYTES]
                 .try_into()
                 .expect("x_hat_j invalid length, must be 16 bytes");
 
             let x_hat_j_times_chi_j =
                 binary_field_multiply_gf_2_128(x_hat_j, &chi_j);
 
-            for k in 0..S_BYTES {
-                x[k] ^= x_hat_j_times_chi_j[k];
+            for (x_k, x_hat_k) in
+                output.x.iter_mut().zip(&x_hat_j_times_chi_j)
+            {
+                *x_k ^= x_hat_k;
             }
 
-            for i in 0..LAMBDA_C {
-                let t_hat_j = &v[i][j * S_BYTES..(j + 1) * S_BYTES]
+            for (t_i, v_i) in t.iter_mut().zip(&v) {
+                let t_hat_j = &v_i[j * S_BYTES..][..S_BYTES]
                     .try_into()
                     .expect("t_hat_j invalid length, must be 16 bytes");
+
                 let t_hat_j_times_chi_j =
                     binary_field_multiply_gf_2_128(t_hat_j, &chi_j);
 
-                (0..S_BYTES).for_each(|k| {
-                    t[i][k] ^= t_hat_j_times_chi_j[k];
-                })
+                for k in 0..S_BYTES {
+                    t_i[k] ^= t_hat_j_times_chi_j[k];
+                }
             }
         }
 
-        let from_index = SOFT_SPOKEN_M * S_BYTES;
-        let to_index = (SOFT_SPOKEN_M + 1) * S_BYTES;
+        const FROM_INDEX: usize = SOFT_SPOKEN_M * S_BYTES;
 
-        let x_hat_m_plus_1 = &extended_packed_choices[from_index..to_index];
-
-        for k in 0..S_BYTES {
-            x[k] ^= x_hat_m_plus_1[k];
+        for (x_i, c) in &mut output
+            .x
+            .iter_mut()
+            .zip(&extended_packed_choices[FROM_INDEX..][..S_BYTES])
+        {
+            *x_i ^= c;
         }
 
-        for i in 0..LAMBDA_C {
-            let t_i = &mut t[i];
-
-            let t_hat_m_plus_1 = &v[i][from_index..to_index];
-            (0..S_BYTES).for_each(|k| {
-                t_i[k] ^= t_hat_m_plus_1[k];
-            })
+        for (t_i, v_i) in t.iter_mut().zip(&v) {
+            for (t, b) in t_i.iter_mut().zip(&v_i[FROM_INDEX..][..S_BYTES]) {
+                *t ^= b;
+            }
         }
-
-        let mut extended_output = ReceiverExtendedOutput::new(*choices);
-        let v_x = &mut extended_output.v_x;
 
         let psi = transpose_bool_matrix(&v);
 
-        for j in 0..L {
+        for (j, v_x_j) in extended_output.v_x.iter_mut().enumerate() {
             let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
-            t.append_message(b"session-id", self.session_id);
+            t.append_message(b"session-id", session_id);
             t.append_u64(b"index", j as u64);
             t.append_message(&SOFT_SPOKEN_RANDOMIZE_LABEL, &psi[j]);
 
-            for k in &mut v_x[j] {
+            for k in v_x_j.iter_mut() {
                 t.challenge_bytes(b"", k);
             }
         }
-
-        (output, extended_output)
     }
 }
 
@@ -338,26 +302,12 @@ fn transpose_bool_matrix(
     output
 }
 
-pub struct SoftSpokenOTSender<'a> {
-    session_id: &'a SessionId,
-    seed_ot_results: &'a ReceiverOTSeed,
-}
+pub struct SoftSpokenOTSender;
 
-impl<'a> SoftSpokenOTSender<'a> {
-    pub fn new(
-        session_id: &'a SessionId,
-        seed_ot_results: &'a ReceiverOTSeed,
-    ) -> Self {
-        Self {
-            seed_ot_results,
-            session_id,
-        }
-    }
-}
-
-impl<'a> SoftSpokenOTSender<'a> {
+impl SoftSpokenOTSender {
     pub fn process(
-        self,
+        session_id: &[u8],
+        seed_ot_results: &ReceiverOTSeed,
         message: &Round1Output,
     ) -> Result<Box<SenderExtendedOutput>, SoftSpokenOTError> {
         let mut r_x = [[[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
@@ -365,14 +315,14 @@ impl<'a> SoftSpokenOTSender<'a> {
 
         for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
             for (j, rx_j) in r_x.iter_mut().enumerate() {
-                if j == self.seed_ot_results.random_choices[i] as usize {
+                if j == seed_ot_results.random_choices[i] as usize {
                     rx_j[i].fill(0); // = [0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
                 } else {
                     let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
-                    t.append_message(b"", self.session_id);
+                    t.append_message(b"", session_id);
                     t.append_message(
                         b"",
-                        &self.seed_ot_results.one_time_pad_dec_keys[i][j],
+                        &seed_ot_results.otp_dec_keys[i][j],
                     );
                     t.challenge_bytes(
                         &SOFT_SPOKEN_EXPAND_LABEL,
@@ -385,10 +335,10 @@ impl<'a> SoftSpokenOTSender<'a> {
         let mut w_matrix = [[0u8; L_PRIME_BYTES]; LAMBDA_C];
 
         let mut hash_matrix_u = Transcript::new(&SOFT_SPOKEN_LABEL);
-        hash_matrix_u.append_message(b"session-id", self.session_id);
+        hash_matrix_u.append_message(b"session-id", session_id);
 
         for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
-            let delta = self.seed_ot_results.random_choices[i];
+            let delta = seed_ot_results.random_choices[i];
             for bit_index in 0..SOFT_SPOKEN_K {
                 for (j, rx_j) in r_x.iter().enumerate() {
                     let delta_minus_x = delta ^ (j as u8);
@@ -414,7 +364,7 @@ impl<'a> SoftSpokenOTSender<'a> {
         let mut packed_nabla = [0u8; LAMBDA_C_BYTES];
 
         for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
-            let delta = self.seed_ot_results.random_choices[i];
+            let delta = seed_ot_results.random_choices[i];
             for bit_index in 0..SOFT_SPOKEN_K {
                 let delta_i = (delta >> bit_index) & 0x01;
                 let byte_index = (i * SOFT_SPOKEN_K + bit_index) / 8;
@@ -481,12 +431,14 @@ impl<'a> SoftSpokenOTSender<'a> {
         }
 
         let mut zeta = transpose_bool_matrix(&w_matrix);
-        let mut v_0 = [[[0u8; KAPPA_BYTES]; OT_WIDTH]; L];
-        let mut v_1 = [[[0u8; KAPPA_BYTES]; OT_WIDTH]; L];
+        let mut output = SenderExtendedOutput::new();
+
+        let v_0 = &mut output.v_0; // [[[0u8; KAPPA_BYTES]; OT_WIDTH]; L];
+        let v_1 = &mut output.v_1; // [[[0u8; KAPPA_BYTES]; OT_WIDTH]; L];
 
         for j in 0..L {
             let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
-            t.append_message(b"session-id", self.session_id);
+            t.append_message(b"session-id", session_id);
             t.append_u64(b"index", j as u64);
             t.append_message(&SOFT_SPOKEN_RANDOMIZE_LABEL, &zeta[j]);
 
@@ -500,7 +452,7 @@ impl<'a> SoftSpokenOTSender<'a> {
                 .for_each(|(b, z)| *z ^= b);
 
             let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
-            t.append_message(b"session-id", self.session_id);
+            t.append_message(b"session-id", session_id);
             t.append_u64(b"index", j as u64);
             t.append_message(&SOFT_SPOKEN_RANDOMIZE_LABEL, &zeta[j]);
 
@@ -509,40 +461,41 @@ impl<'a> SoftSpokenOTSender<'a> {
             }
         }
 
-        Ok(Box::new(SenderExtendedOutput { v_0, v_1 }))
+        // Ok(Box::new(SenderExtendedOutput { v_0, v_1 }))
+        Ok(output)
     }
 }
 
 pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
     rng: &mut R,
 ) -> (SenderOTSeed, ReceiverOTSeed) {
-    let mut one_time_pad_enc_keys = Vec::new();
-    let mut one_time_pad_dec_keys = Vec::new();
+    let mut sender_ot_seed = SenderOTSeed::default();
+    let mut receiver_ot_seed = ReceiverOTSeed::default();
 
-    for _ in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
+    // let mut otp_enc_keys = Vec::new();
+    // let mut otp_dec_keys = Vec::new();
+
+    for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
         let ot_sender_messages: [[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q] =
             array::from_fn(|_| rng.gen());
 
-        one_time_pad_enc_keys.push(ot_sender_messages);
-        one_time_pad_dec_keys.push(ot_sender_messages);
+        sender_ot_seed.otp_enc_keys[i] = ot_sender_messages;
+        receiver_ot_seed.otp_dec_keys[i] = ot_sender_messages;
     }
 
-    let random_choices =
+    receiver_ot_seed.random_choices =
         array::from_fn(|_| rng.gen_range(0..=SOFT_SPOKEN_Q - 1) as u8);
 
     for i in 0..(LAMBDA_C_DIV_SOFT_SPOKEN_K) {
-        let choice = random_choices[i];
-        one_time_pad_dec_keys[i][choice as usize] = [0u8; LAMBDA_C_BYTES];
+        let choice = receiver_ot_seed.random_choices[i];
+        receiver_ot_seed.otp_dec_keys[i][choice as usize] =
+            [0u8; LAMBDA_C_BYTES];
     }
 
-    let sender_ot_seed = SenderOTSeed {
-        one_time_pad_enc_keys,
-    };
-
-    let receiver_ot_seed = ReceiverOTSeed {
-        random_choices,
-        one_time_pad_dec_keys,
-    };
+    // let receiver_ot_seed = ReceiverOTSeed {
+    //     random_choices,
+    //     otp_dec_keys,
+    // };
 
     (sender_ot_seed, receiver_ot_seed)
 }
@@ -553,6 +506,8 @@ mod tests {
         params::consts::*,
         soft_spoken::{
             generate_all_but_one_seed_ot,
+            ReceiverExtendedOutput,
+            Round1Output,
             SoftSpokenOTReceiver,
             SoftSpokenOTSender, // L, L_BYTES, OT_WIDTH,
         },
@@ -563,7 +518,7 @@ mod tests {
     use crate::utils::ExtractBit;
 
     #[test]
-    fn test_soft_spoken() {
+    fn soft_spoken() {
         let mut rng = rand::thread_rng();
 
         let (sender_ot_results, receiver_ot_results) =
@@ -573,18 +528,27 @@ mod tests {
         let mut choices = [0u8; L_BYTES];
         rng.fill_bytes(&mut choices);
 
-        let sender =
-            SoftSpokenOTSender::new(&session_id, &receiver_ot_results);
-        let receiver =
-            SoftSpokenOTReceiver::new(&session_id, &sender_ot_results);
+        let mut round1 = Round1Output::default();
+        let mut receiver_extended_output =
+            ReceiverExtendedOutput::new(choices);
 
         // let start = std::time::Instant::now();
-        let (round1, receiver_extended_output) =
-            receiver.process(&choices, &mut rng);
+        SoftSpokenOTReceiver::process(
+            &session_id,
+            &sender_ot_results,
+            &mut round1,
+            &mut receiver_extended_output,
+            &mut rng,
+        );
         // println!("Round1: {:?}", start.elapsed());
 
         // let start = std::time::Instant::now();
-        let sender_extended_output = sender.process(&round1).unwrap();
+        let sender_extended_output = SoftSpokenOTSender::process(
+            &session_id,
+            &receiver_ot_results,
+            &round1,
+        )
+        .unwrap();
         // println!("Round2: {:?}", start.elapsed());
 
         for i in 0..L {

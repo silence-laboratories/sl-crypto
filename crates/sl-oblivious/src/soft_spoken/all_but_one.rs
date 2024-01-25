@@ -31,29 +31,37 @@ pub struct PPRFOutput {
     t_tilda: [u8; LAMBDA_C_BYTES * 2],
 }
 
+impl Default for PPRFOutput {
+    fn default() -> Self {
+        Self {
+            t: Default::default(),
+            s_tilda: [0u8; LAMBDA_C_BYTES * 2],
+            t_tilda: [0u8; LAMBDA_C_BYTES * 2],
+        }
+    }
+}
+
 /// Implements BuildPPRF and ProvePPRF functionality of
 /// Fig.13 and Fig.14 https://eprint.iacr.org/2022/192.pdf
 pub fn build_pprf(
     session_id: &[u8],
     sender_ot_seed: &SenderOutput,
-) -> (SenderOTSeed, Vec<PPRFOutput>) {
-    let mut all_but_one_sender_seed = SenderOTSeed::default();
-    let mut output = Vec::with_capacity(LAMBDA_C / SOFT_SPOKEN_K);
+    all_but_one_sender_seed: &mut SenderOTSeed,
+) -> Vec<PPRFOutput> {
+    let mut output = vec![PPRFOutput::default(); LAMBDA_C / SOFT_SPOKEN_K];
 
-    for j in 0..(LAMBDA_C / SOFT_SPOKEN_K) {
-        let mut t_x_i = [[[0u8; LAMBDA_C_BYTES]; 2]; SOFT_SPOKEN_K - 1];
-
-        let mut s_i = [[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
-
-        s_i[0] =
-            sender_ot_seed.one_time_pad_enc_keys[j * SOFT_SPOKEN_K].rho_0;
-        s_i[1] =
-            sender_ot_seed.one_time_pad_enc_keys[j * SOFT_SPOKEN_K].rho_1;
+    for (j, (out, s_i)) in output
+        .iter_mut()
+        .zip(&mut all_but_one_sender_seed.otp_enc_keys)
+        .enumerate()
+    {
+        s_i[0] = sender_ot_seed.otp_enc_keys[j * SOFT_SPOKEN_K].rho_0;
+        s_i[1] = sender_ot_seed.otp_enc_keys[j * SOFT_SPOKEN_K].rho_1;
 
         for i in 1..SOFT_SPOKEN_K {
             let mut s_i_plus_1 = [[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
 
-            for y in 0..(1 << (i as u32)) {
+            for y in 0..(1 << i) {
                 let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
                 t.append_message(b"session-id", session_id);
                 t.append_message(&ALL_BUT_ONE_PPRF_LABEL, &s_i[y]);
@@ -62,28 +70,28 @@ pub fn build_pprf(
                 t.challenge_bytes(b"", &mut s_i_plus_1[2 * y + 1]);
             }
 
-            let big_f_i =
-                &sender_ot_seed.one_time_pad_enc_keys[j * SOFT_SPOKEN_K + i];
+            let t_x_i = &mut out.t;
+
+            let big_f_i = &sender_ot_seed.otp_enc_keys[j * SOFT_SPOKEN_K + i];
 
             t_x_i[i - 1][0] = big_f_i.rho_0;
             t_x_i[i - 1][1] = big_f_i.rho_1;
 
             for b_i in 0..LAMBDA_C_BYTES {
-                for y in 0..(1 << (i as u32)) {
+                for y in 0..(1 << i) {
                     t_x_i[i - 1][0][b_i] ^= s_i_plus_1[2 * y][b_i];
                     t_x_i[i - 1][1][b_i] ^= s_i_plus_1[2 * y + 1][b_i];
                 }
             }
 
-            s_i = s_i_plus_1;
+            *s_i = s_i_plus_1;
         }
 
         // Prove
-        let mut t_tilda = [0u8; LAMBDA_C_BYTES * 2];
         let mut s_tilda_hash = Transcript::new(&ALL_BUT_ONE_LABEL);
         s_tilda_hash.append_message(b"session-id", session_id);
 
-        for y in &s_i {
+        for y in s_i.iter() {
             let mut s_tilda_y = [0u8; LAMBDA_C_BYTES * 2];
 
             let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
@@ -91,7 +99,7 @@ pub fn build_pprf(
             t.append_message(&ALL_BUT_ONE_PPRF_PROOF_LABEL, y);
             t.challenge_bytes(b"", &mut s_tilda_y);
 
-            t_tilda
+            out.t_tilda
                 .iter_mut()
                 .zip(&s_tilda_y)
                 .for_each(|(t, s)| *t ^= s);
@@ -99,42 +107,29 @@ pub fn build_pprf(
             s_tilda_hash.append_message(b"", &s_tilda_y);
         }
 
-        all_but_one_sender_seed.one_time_pad_enc_keys.push(s_i);
-
-        let mut s_tilda = [0u8; LAMBDA_C_BYTES * 2];
         s_tilda_hash
-            .challenge_bytes(&ALL_BUT_ONE_PPRF_HASH_LABEL, &mut s_tilda);
-
-        output.push(PPRFOutput {
-            t: t_x_i,
-            s_tilda,
-            t_tilda,
-        });
+            .challenge_bytes(&ALL_BUT_ONE_PPRF_HASH_LABEL, &mut out.s_tilda);
     }
 
-    (all_but_one_sender_seed, output)
+    output
 }
 
 pub fn eval_pprf(
     session_id: &[u8],
     receiver_ot_seed: &ReceiverOutput,
     output: &[PPRFOutput],
-) -> Result<ReceiverOTSeed, &'static str> {
-    let mut all_but_one_receiver_seed = ReceiverOTSeed {
-        random_choices: [0; LAMBDA_C_DIV_SOFT_SPOKEN_K],
-        one_time_pad_dec_keys: vec![],
-    };
+    all_but_one_receiver_seed: &mut ReceiverOTSeed,
+) -> Result<(), &'static str> {
+    // let mut all_but_one_receiver_seed = ReceiverOTSeed::default();
 
     for (j, out) in output.iter().enumerate() {
-        let t_x_i = out.t.as_slice();
-        let x_star_0: u8 = receiver_ot_seed
-            .packed_random_choice_bits
-            .extract_bit(j * SOFT_SPOKEN_K) as u8;
+        let x_star_0: u8 =
+            receiver_ot_seed.choice_bits.extract_bit(j * SOFT_SPOKEN_K) as u8;
 
         let mut s_star_i = [[[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]; 2];
 
         s_star_i[0][x_star_0 as usize] =
-            receiver_ot_seed.one_time_pad_decryption_keys[j * SOFT_SPOKEN_K];
+            receiver_ot_seed.otp_dec_keys[j * SOFT_SPOKEN_K];
 
         let mut y_star = x_star_0 as usize ^ 1;
 
@@ -163,12 +158,12 @@ pub fn eval_pprf(
             }
 
             let x_star_i: u8 = 1 ^ receiver_ot_seed
-                .packed_random_choice_bits
+                .choice_bits
                 .extract_bit(j * SOFT_SPOKEN_K + i)
                 as u8;
 
-            let big_f_i_star = &receiver_ot_seed.one_time_pad_decryption_keys
-                [j * SOFT_SPOKEN_K + i];
+            let big_f_i_star =
+                &receiver_ot_seed.otp_dec_keys[j * SOFT_SPOKEN_K + i];
 
             let ct_x = x_star_i as usize ^ 1;
 
@@ -176,7 +171,7 @@ pub fn eval_pprf(
             #[allow(clippy::needless_range_loop)]
             for b_i in 0..LAMBDA_C_BYTES {
                 s_star_i_plus_1[0][2 * y_star + ct_x][b_i] =
-                    t_x_i[i - 1][ct_x][b_i] ^ big_f_i_star[b_i];
+                    out.t[i - 1][ct_x][b_i] ^ big_f_i_star[b_i];
 
                 for y in 0..2usize.pow(i as u32) {
                     // assume conversion of bool to usize is constant time
@@ -238,12 +233,10 @@ pub fn eval_pprf(
         }
 
         all_but_one_receiver_seed.random_choices[j] = y_star as u8;
-        all_but_one_receiver_seed
-            .one_time_pad_dec_keys
-            .push(s_star_i[0]);
+        all_but_one_receiver_seed.otp_dec_keys[j] = s_star_i[0];
     }
 
-    Ok(all_but_one_receiver_seed)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -259,7 +252,7 @@ mod test {
         let mut rng = thread_rng();
 
         let sender_ot_seed = SenderOutput {
-            one_time_pad_enc_keys: repeat_with(|| {
+            otp_enc_keys: repeat_with(|| {
                 let rho_0 = rng.gen();
                 let rho_1 = rng.gen();
 
@@ -276,9 +269,9 @@ mod test {
                 let choice = random_choices.extract_bit(i);
 
                 if !choice {
-                    sender_ot_seed.one_time_pad_enc_keys[i].rho_0
+                    sender_ot_seed.otp_enc_keys[i].rho_0
                 } else {
-                    sender_ot_seed.one_time_pad_enc_keys[i].rho_1
+                    sender_ot_seed.otp_enc_keys[i].rho_1
                 }
             })
             .collect::<Vec<_>>();
@@ -290,17 +283,29 @@ mod test {
     }
 
     #[test]
-    fn test_pprf() {
+    fn pprf() {
         let mut rng = rand::thread_rng();
 
         let (sender_ot_seed, receiver_ot_seed) = generate_seed_ot_for_test();
 
         let session_id: [u8; 32] = rng.gen();
 
-        let (_all_but_one_sender_seed2, output_2) =
-            build_pprf(&session_id, &sender_ot_seed);
+        let mut _all_but_one_sender_seed2 = SenderOTSeed::default();
 
-        let _all_but_one_receiver_seed2 =
-            eval_pprf(&session_id, &receiver_ot_seed, &output_2).unwrap();
+        let output_2 = build_pprf(
+            &session_id,
+            &sender_ot_seed,
+            &mut _all_but_one_sender_seed2,
+        );
+
+        let mut _all_but_one_receiver_seed2 = ReceiverOTSeed::default();
+
+        eval_pprf(
+            &session_id,
+            &receiver_ot_seed,
+            &output_2,
+            &mut _all_but_one_receiver_seed2,
+        )
+        .unwrap();
     }
 }
