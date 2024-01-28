@@ -157,7 +157,6 @@ impl SoftSpokenOTReceiver {
         let mut r_x = [[[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
             SOFT_SPOKEN_Q];
 
-        // let x = &mut output.x;
         let t = &mut output.t;
         let u = &mut output.u;
 

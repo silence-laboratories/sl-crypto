@@ -1,37 +1,30 @@
 use elliptic_curve::subtle::ConstantTimeEq;
 use merlin::Transcript;
 
-use zeroize::{Zeroize, ZeroizeOnDrop};
-
 use crate::{
-    endemic_ot::{LAMBDA_C, LAMBDA_C_BYTES},
-    params::consts::*,
-};
-
-use crate::constants::{
-    ALL_BUT_ONE_LABEL, ALL_BUT_ONE_PPRF_HASH_LABEL, ALL_BUT_ONE_PPRF_LABEL,
-    ALL_BUT_ONE_PPRF_PROOF_LABEL,
-};
-use crate::{
+    constants::*,
     endemic_ot::{ReceiverOutput, SenderOutput},
-    soft_spoken::SenderOTSeed,
+    params::consts::*,
+    soft_spoken::{ReceiverOTSeed, SenderOTSeed},
     utils::ExtractBit,
 };
 
-use super::ReceiverOTSeed;
-
 #[derive(
-    Clone, Debug, bincode::Encode, bincode::Decode, Zeroize, ZeroizeOnDrop,
+    Clone,
+    Copy,
+    bincode::Encode,
+    bincode::Decode,
+    bytemuck::Zeroable,
+    bytemuck::Pod,
 )]
-pub struct PPRFOutput {
+#[repr(C)]
+pub struct PPRF {
     t: [[[u8; LAMBDA_C_BYTES]; 2]; SOFT_SPOKEN_K - 1],
-
     s_tilda: [u8; LAMBDA_C_BYTES * 2],
-
     t_tilda: [u8; LAMBDA_C_BYTES * 2],
 }
 
-impl Default for PPRFOutput {
+impl Default for PPRF {
     fn default() -> Self {
         Self {
             t: Default::default(),
@@ -41,15 +34,31 @@ impl Default for PPRFOutput {
     }
 }
 
+#[derive(
+    Clone,
+    Copy,
+    bincode::Encode,
+    bincode::Decode,
+    bytemuck::AnyBitPattern,
+    bytemuck::NoUninit,
+)]
+#[repr(C)]
+pub struct PPRFOutput([PPRF; LAMBDA_C / SOFT_SPOKEN_K]);
+
+impl Default for PPRFOutput {
+    fn default() -> Self {
+        Self([PPRF::default(); LAMBDA_C / SOFT_SPOKEN_K])
+    }
+}
+
 /// Implements BuildPPRF and ProvePPRF functionality of
 /// Fig.13 and Fig.14 https://eprint.iacr.org/2022/192.pdf
 pub fn build_pprf(
     session_id: &[u8],
     sender_ot_seed: &SenderOutput,
     all_but_one_sender_seed: &mut SenderOTSeed,
-) -> Vec<PPRFOutput> {
-    let mut output = vec![PPRFOutput::default(); LAMBDA_C / SOFT_SPOKEN_K];
-
+    PPRFOutput(output): &mut PPRFOutput,
+) {
     for (j, (out, s_i)) in output
         .iter_mut()
         .zip(&mut all_but_one_sender_seed.otp_enc_keys)
@@ -110,18 +119,14 @@ pub fn build_pprf(
         s_tilda_hash
             .challenge_bytes(&ALL_BUT_ONE_PPRF_HASH_LABEL, &mut out.s_tilda);
     }
-
-    output
 }
 
 pub fn eval_pprf(
     session_id: &[u8],
     receiver_ot_seed: &ReceiverOutput,
-    output: &[PPRFOutput],
+    PPRFOutput(output): &PPRFOutput,
     all_but_one_receiver_seed: &mut ReceiverOTSeed,
 ) -> Result<(), &'static str> {
-    // let mut all_but_one_receiver_seed = ReceiverOTSeed::default();
-
     for (j, out) in output.iter().enumerate() {
         let x_star_0: u8 =
             receiver_ot_seed.choice_bits.extract_bit(j * SOFT_SPOKEN_K) as u8;
@@ -242,7 +247,6 @@ pub fn eval_pprf(
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::iter::repeat_with;
 
     use rand::{thread_rng, Rng};
 
@@ -252,29 +256,25 @@ mod test {
         let mut rng = thread_rng();
 
         let sender_ot_seed = SenderOutput {
-            otp_enc_keys: repeat_with(|| {
+            otp_enc_keys: std::array::from_fn(|_| {
                 let rho_0 = rng.gen();
                 let rho_1 = rng.gen();
 
                 OneTimePadEncryptionKeys { rho_0, rho_1 }
-            })
-            .take(LAMBDA_C)
-            .collect::<Vec<_>>(),
+            }),
         };
 
         let random_choices: [u8; LAMBDA_C_BYTES] = rng.gen();
 
-        let one_time_pad_enc_keys = (0..LAMBDA_C)
-            .map(|i| {
-                let choice = random_choices.extract_bit(i);
+        let one_time_pad_enc_keys = std::array::from_fn(|i| {
+            let choice = random_choices.extract_bit(i);
 
-                if !choice {
-                    sender_ot_seed.otp_enc_keys[i].rho_0
-                } else {
-                    sender_ot_seed.otp_enc_keys[i].rho_1
-                }
-            })
-            .collect::<Vec<_>>();
+            if !choice {
+                sender_ot_seed.otp_enc_keys[i].rho_0
+            } else {
+                sender_ot_seed.otp_enc_keys[i].rho_1
+            }
+        });
 
         let receiver_ot_seed =
             ReceiverOutput::new(random_choices, one_time_pad_enc_keys);
@@ -291,11 +291,12 @@ mod test {
         let session_id: [u8; 32] = rng.gen();
 
         let mut _all_but_one_sender_seed2 = SenderOTSeed::default();
-
-        let output_2 = build_pprf(
+        let mut output_2 = PPRFOutput::default();
+        build_pprf(
             &session_id,
             &sender_ot_seed,
             &mut _all_but_one_sender_seed2,
+            &mut output_2,
         );
 
         let mut _all_but_one_receiver_seed2 = ReceiverOTSeed::default();

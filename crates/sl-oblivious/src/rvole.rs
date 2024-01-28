@@ -283,9 +283,9 @@ impl RVOLESender {
         seed_ot_results: &ReceiverOTSeed,
         a: &[Scalar; L_BATCH],
         round1_output: &Round1Output,
+        output: &mut RVOLEOutput,
         rng: &mut R,
-    ) -> Result<([Scalar; L_BATCH], Box<RVOLEOutput>), SoftSpokenOTError>
-    {
+    ) -> Result<[Scalar; L_BATCH], SoftSpokenOTError> {
         let sender_extended_output = SoftSpokenOTSender::process(
             &session_id,
             seed_ot_results,
@@ -312,12 +312,8 @@ impl RVOLESender {
                 .negate()
         });
 
-        let mut output = Box::new(RVOLEOutput {
-            a_tilde: [[[0u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
-            eta: array::from_fn(|_| {
-                Scalar::generate_biased(rng).to_bytes().into()
-            }),
-            mu_hash: [0u8; 64],
+        output.eta.iter_mut().for_each(|eta| {
+            *eta = Scalar::generate_biased(rng).to_bytes().into();
         });
 
         let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
@@ -381,7 +377,7 @@ impl RVOLESender {
 
         t.challenge_bytes(b"mu-hash", &mut output.mu_hash);
 
-        Ok((c, output))
+        Ok(c)
     }
 }
 
@@ -416,11 +412,14 @@ mod tests {
             Scalar::generate_biased(&mut rng),
         );
 
-        let (sender_shares, round2_output) = RVOLESender::process(
+        let mut round2_output = Default::default();
+
+        let sender_shares = RVOLESender::process(
             session_id,
             &receiver_ot_seed,
             &[alpha1, alpha2],
             &round1_output,
+            &mut round2_output,
             &mut rng,
         )
         .unwrap();

@@ -89,3 +89,9 @@ impl<const N: usize> From<&[u8; N]> for ByteArray<N> {
         ByteArray(*b)
     }
 }
+
+impl<const N: usize> From<ByteArray<N>> for [u8; N] {
+    fn from(value: ByteArray<N>) -> Self {
+        value.0
+    }
+}
