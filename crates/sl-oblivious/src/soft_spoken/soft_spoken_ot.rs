@@ -128,11 +128,10 @@ pub struct ReceiverExtendedOutput {
 }
 
 impl ReceiverExtendedOutput {
-    pub(crate) fn new(choices: [u8; L_BYTES]) -> Box<Self> {
-        Box::new(ReceiverExtendedOutput {
-            choices,
-            v_x: [[[0u8; KAPPA_BYTES]; OT_WIDTH]; L],
-        })
+    pub(crate) fn new(choices: &[u8; L_BYTES]) -> Box<Self> {
+        let mut this = bytemuck::allocation::zeroed_box::<Self>();
+        this.choices = *choices;
+        this
     }
 }
 
@@ -309,13 +308,18 @@ impl SoftSpokenOTSender {
         seed_ot_results: &ReceiverOTSeed,
         message: &Round1Output,
     ) -> Result<Box<SenderExtendedOutput>, SoftSpokenOTError> {
-        let mut r_x = [[[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
-            SOFT_SPOKEN_Q];
+        // let mut r_x = [[[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
+        //     SOFT_SPOKEN_Q];
+
+        let mut r_x = bytemuck::allocation::zeroed_box::<
+            [[[u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
+                SOFT_SPOKEN_Q],
+        >();
 
         for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
             for (j, rx_j) in r_x.iter_mut().enumerate() {
                 if j == seed_ot_results.random_choices[i] as usize {
-                    rx_j[i].fill(0); // = [0u8; COT_EXTENDED_BLOCK_SIZE_BYTES];
+                    rx_j[i].fill(0);
                 } else {
                     let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
                     t.append_message(b"", session_id);
@@ -432,8 +436,8 @@ impl SoftSpokenOTSender {
         let mut zeta = transpose_bool_matrix(&w_matrix);
         let mut output = SenderExtendedOutput::new();
 
-        let v_0 = &mut output.v_0; // [[[0u8; KAPPA_BYTES]; OT_WIDTH]; L];
-        let v_1 = &mut output.v_1; // [[[0u8; KAPPA_BYTES]; OT_WIDTH]; L];
+        let v_0 = &mut output.v_0;
+        let v_1 = &mut output.v_1;
 
         for j in 0..L {
             let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
@@ -460,7 +464,6 @@ impl SoftSpokenOTSender {
             }
         }
 
-        // Ok(Box::new(SenderExtendedOutput { v_0, v_1 }))
         Ok(output)
     }
 }
@@ -470,9 +473,6 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
 ) -> (SenderOTSeed, ReceiverOTSeed) {
     let mut sender_ot_seed = SenderOTSeed::default();
     let mut receiver_ot_seed = ReceiverOTSeed::default();
-
-    // let mut otp_enc_keys = Vec::new();
-    // let mut otp_dec_keys = Vec::new();
 
     for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
         let ot_sender_messages: [[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q] =
@@ -490,11 +490,6 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
         receiver_ot_seed.otp_dec_keys[i][choice as usize] =
             [0u8; LAMBDA_C_BYTES];
     }
-
-    // let receiver_ot_seed = ReceiverOTSeed {
-    //     random_choices,
-    //     otp_dec_keys,
-    // };
 
     (sender_ot_seed, receiver_ot_seed)
 }
@@ -529,7 +524,7 @@ mod tests {
 
         let mut round1 = Round1Output::default();
         let mut receiver_extended_output =
-            ReceiverExtendedOutput::new(choices);
+            ReceiverExtendedOutput::new(&choices);
 
         // let start = std::time::Instant::now();
         SoftSpokenOTReceiver::process(

@@ -145,7 +145,7 @@ impl RVOLEReceiver {
             },
         );
 
-        let mut receiver_extended_output = ReceiverExtendedOutput::new(beta);
+        let mut receiver_extended_output = ReceiverExtendedOutput::new(&beta);
 
         SoftSpokenOTReceiver::process(
             &session_id,
