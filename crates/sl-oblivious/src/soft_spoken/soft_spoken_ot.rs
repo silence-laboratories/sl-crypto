@@ -31,7 +31,15 @@ use crate::{
 
 use super::mul_poly::binary_field_multiply_gf_2_128;
 
-#[derive(Clone, Copy, bincode::Encode, bincode::Decode)]
+#[derive(
+    bincode::Encode,
+    bincode::Decode,
+    Clone,
+    Copy,
+    bytemuck::AnyBitPattern,
+    bytemuck::NoUninit,
+)]
+#[repr(C)]
 pub struct SenderOTSeed {
     pub otp_enc_keys:
         [[[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]; LAMBDA_C / SOFT_SPOKEN_K],
@@ -46,7 +54,15 @@ impl Default for SenderOTSeed {
     }
 }
 
-#[derive(Clone, Copy, bincode::Encode, bincode::Decode)]
+#[derive(
+    bincode::Encode,
+    bincode::Decode,
+    Clone,
+    Copy,
+    bytemuck::AnyBitPattern,
+    bytemuck::NoUninit,
+)]
+#[repr(C)]
 pub struct ReceiverOTSeed {
     pub random_choices: [u8; LAMBDA_C_DIV_SOFT_SPOKEN_K], // FIXME: define range of random_choices[i]
     pub otp_dec_keys:
@@ -335,6 +351,7 @@ impl SoftSpokenOTSender {
             }
         }
 
+        // 20k
         let mut w_matrix = [[0u8; L_PRIME_BYTES]; LAMBDA_C];
 
         let mut hash_matrix_u = Transcript::new(&SOFT_SPOKEN_LABEL);
@@ -433,6 +450,7 @@ impl SoftSpokenOTSender {
             }
         }
 
+        // 20k
         let mut zeta = transpose_bool_matrix(&w_matrix);
         let mut output = SenderExtendedOutput::new();
 
