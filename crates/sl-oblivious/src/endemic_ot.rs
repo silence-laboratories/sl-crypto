@@ -19,14 +19,7 @@ pub const LAMBDA_C_BYTES: usize = LAMBDA_C / 8;
 pub const BATCH_SIZE: usize = LAMBDA_C;
 
 /// EndemicOT Message 1
-#[derive(
-    Clone,
-    bincode::Encode,
-    bincode::Decode,
-    Copy,
-    bytemuck::AnyBitPattern,
-    bytemuck::NoUninit,
-)]
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 #[repr(C)]
 pub struct EndemicOTMsg1 {
     // values r_0 and r_1 from OTReceiver to OTSender
@@ -42,14 +35,7 @@ impl Default for EndemicOTMsg1 {
 }
 
 /// EndemicOT Message 2
-#[derive(
-    Clone,
-    bincode::Encode,
-    bincode::Decode,
-    Copy,
-    bytemuck::AnyBitPattern,
-    bytemuck::NoUninit,
-)]
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 #[repr(C)]
 pub struct EndemicOTMsg2 {
     // values m_b_0 and m_b_1 from OTSender to OTReceiver

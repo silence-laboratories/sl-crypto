@@ -9,12 +9,6 @@
 
 use std::array;
 
-use bincode::de::read::Reader;
-use bincode::de::{BorrowDecoder, Decoder};
-use bincode::enc::write::Writer;
-use bincode::enc::Encoder;
-use bincode::error::{DecodeError, EncodeError};
-use bincode::{BorrowDecode, Decode, Encode};
 use merlin::Transcript;
 
 use k256::{
@@ -27,18 +21,18 @@ use k256::{
     Scalar, U256,
 };
 
+use sl_mpc_mate::SessionId;
+
 use crate::{
     constants::{
         RANDOM_VOLE_GADGET_VECTOR_LABEL, RANDOM_VOLE_MU_LABEL,
         RANDOM_VOLE_THETA_LABEL,
     },
     params::consts::*,
-};
-use sl_mpc_mate::SessionId;
-
-use crate::soft_spoken::{
-    ReceiverExtendedOutput, ReceiverOTSeed, Round1Output, SenderOTSeed,
-    SoftSpokenOTError, SoftSpokenOTReceiver, SoftSpokenOTSender,
+    soft_spoken::{
+        ReceiverExtendedOutput, ReceiverOTSeed, Round1Output, SenderOTSeed,
+        SoftSpokenOTError, SoftSpokenOTReceiver, SoftSpokenOTSender,
+    },
 };
 
 use crate::utils::ExtractBit;
@@ -81,33 +75,6 @@ impl Default for RVOLEOutput {
             eta: [[0u8; KAPPA_BYTES]; RHO],
             mu_hash: [0u8; 64],
         }
-    }
-}
-
-impl Encode for RVOLEOutput {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        encoder.writer().write(bytemuck::bytes_of(self))
-    }
-}
-
-impl Decode for RVOLEOutput {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let mut r = Ok(Self::default());
-
-        match &mut r {
-            Ok(r) => decoder.reader().read(bytemuck::bytes_of_mut(r))?,
-            _ => unreachable!(),
-        }
-
-        r
-    }
-}
-
-impl<'de> BorrowDecode<'de> for RVOLEOutput {
-    fn borrow_decode<D: BorrowDecoder<'de>>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
-        Self::decode(decoder)
     }
 }
 

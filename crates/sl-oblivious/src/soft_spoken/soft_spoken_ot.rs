@@ -12,13 +12,6 @@ use elliptic_curve::{rand_core::CryptoRngCore, subtle::ConstantTimeEq};
 use merlin::Transcript;
 use rand::Rng;
 
-use sl_mpc_mate::bincode::{
-    de::{read::Reader, BorrowDecode, BorrowDecoder, Decoder},
-    enc::{write::Writer, Encoder},
-    error::{DecodeError, EncodeError},
-    Decode, Encode,
-};
-
 use crate::{
     constants::{
         SOFT_SPOKEN_EXPAND_LABEL, SOFT_SPOKEN_LABEL,
@@ -31,14 +24,7 @@ use crate::{
 
 use super::mul_poly::binary_field_multiply_gf_2_128;
 
-#[derive(
-    bincode::Encode,
-    bincode::Decode,
-    Clone,
-    Copy,
-    bytemuck::AnyBitPattern,
-    bytemuck::NoUninit,
-)]
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 #[repr(C)]
 pub struct SenderOTSeed {
     pub otp_enc_keys:
@@ -54,14 +40,7 @@ impl Default for SenderOTSeed {
     }
 }
 
-#[derive(
-    bincode::Encode,
-    bincode::Decode,
-    Clone,
-    Copy,
-    bytemuck::AnyBitPattern,
-    bytemuck::NoUninit,
-)]
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 #[repr(C)]
 pub struct ReceiverOTSeed {
     pub random_choices: [u8; LAMBDA_C_DIV_SOFT_SPOKEN_K], // FIXME: define range of random_choices[i]
@@ -94,31 +73,6 @@ impl Default for Round1Output {
             x: [0; S_BYTES],
             t: [[0; S_BYTES]; LAMBDA_C],
         }
-    }
-}
-
-//
-impl Encode for Round1Output {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        encoder.writer().write(bytemuck::bytes_of(self))
-    }
-}
-
-impl Decode for Round1Output {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let mut r = Self::default();
-
-        decoder.reader().read(bytemuck::bytes_of_mut(&mut r))?;
-
-        Ok(r)
-    }
-}
-
-impl<'de> BorrowDecode<'de> for Round1Output {
-    fn borrow_decode<D: BorrowDecoder<'de>>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
-        Self::decode(decoder)
     }
 }
 
@@ -514,6 +468,9 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
 
 #[cfg(test)]
 mod tests {
+    use rand::RngCore;
+    use sl_mpc_mate::SessionId;
+
     use crate::{
         params::consts::*,
         soft_spoken::{
@@ -523,11 +480,8 @@ mod tests {
             SoftSpokenOTReceiver,
             SoftSpokenOTSender, // L, L_BYTES, OT_WIDTH,
         },
+        utils::ExtractBit,
     };
-    use rand::RngCore;
-    use sl_mpc_mate::SessionId;
-
-    use crate::utils::ExtractBit;
 
     #[test]
     fn soft_spoken() {

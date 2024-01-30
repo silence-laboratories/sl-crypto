@@ -1,21 +1,21 @@
-use elliptic_curve::{subtle::ConstantTimeEq, Field};
+use elliptic_curve::{
+    subtle::{Choice, ConstantTimeEq},
+    Field,
+};
 use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
 use rand::prelude::*;
-
-use sl_mpc_mate::message::*;
 
 use crate::constants::DLOG_CHALLENGE_LABEL;
 use crate::utils::TranscriptProtocol;
 
 /// Non-interactive Proof of knowledge of discrete logarithm with Fiat-Shamir transform.
-#[derive(Clone, Debug, PartialEq, Eq, bincode::Encode, bincode::Decode)]
 pub struct DLogProof {
     /// Public point `t`.
-    pub t: Opaque<ProjectivePoint, GR>,
+    pub t: ProjectivePoint,
 
     /// Challenge response
-    pub s: Opaque<Scalar, PF>,
+    pub s: Scalar,
 }
 
 impl DLogProof {
@@ -34,10 +34,7 @@ impl DLogProof {
 
         let s = r + c * x;
 
-        Self {
-            t: t.into(),
-            s: s.into(),
-        }
+        Self { t, s }
     }
 
     /// Verify knowledge of discrete logarithm.
@@ -46,12 +43,12 @@ impl DLogProof {
         y: &ProjectivePoint,
         base_point: &ProjectivePoint,
         transcript: &mut Transcript,
-    ) -> bool {
+    ) -> Choice {
         let c = Self::fiat_shamir(y, &self.t, base_point, transcript);
-        let lhs = base_point * &self.s.0;
+        let lhs = base_point * &self.s;
         let rhs = self.t + y * &c;
 
-        lhs.ct_eq(&rhs).into()
+        lhs.ct_eq(&rhs)
     }
 
     /// Get fiat-shamir challenge for Discrete log proof.
@@ -94,7 +91,12 @@ mod tests {
 
         let mut verify_transcript = Transcript::new(b"test-dlog-proof");
 
-        assert!(proof.verify(&y, &base_point, &mut verify_transcript));
+        assert_ne!(
+            proof
+                .verify(&y, &base_point, &mut verify_transcript)
+                .unwrap_u8(),
+            0
+        );
     }
 
     #[test]
@@ -116,7 +118,12 @@ mod tests {
 
         let mut verify_transcript = Transcript::new(b"test-dlog-proof");
 
-        assert!(!proof.verify(&y, &base_point, &mut verify_transcript));
+        assert_ne!(
+            !proof
+                .verify(&y, &base_point, &mut verify_transcript)
+                .unwrap_u8(),
+            0
+        );
     }
 
     #[test]
@@ -136,8 +143,11 @@ mod tests {
 
         let mut verify_transcript = Transcript::new(b"test-dlog-proof-wrong");
 
-        assert!(
-            !proof.verify(&y, &base_point, &mut verify_transcript),
+        assert_ne!(
+            !proof
+                .verify(&y, &base_point, &mut verify_transcript)
+                .unwrap_u8(),
+            0,
             "Proof should fail with wrong transcript"
         );
     }

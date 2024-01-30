@@ -9,14 +9,7 @@ use crate::{
     utils::ExtractBit,
 };
 
-#[derive(
-    Clone,
-    Copy,
-    bincode::Encode,
-    bincode::Decode,
-    bytemuck::Zeroable,
-    bytemuck::Pod,
-)]
+#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
 #[repr(C)]
 pub struct PPRF {
     t: [[[u8; LAMBDA_C_BYTES]; 2]; SOFT_SPOKEN_K - 1],
@@ -34,14 +27,7 @@ impl Default for PPRF {
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    bincode::Encode,
-    bincode::Decode,
-    bytemuck::AnyBitPattern,
-    bytemuck::NoUninit,
-)]
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 #[repr(C)]
 pub struct PPRFOutput([PPRF; LAMBDA_C / SOFT_SPOKEN_K]);
 
