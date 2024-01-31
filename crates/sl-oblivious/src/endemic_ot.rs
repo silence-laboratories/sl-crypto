@@ -2,21 +2,11 @@ use std::array;
 
 use merlin::Transcript;
 use rand::prelude::*;
-use x25519_dalek::{PublicKey, ReusableSecret};
+use x25519_dalek::{PublicKey, StaticSecret};
 
-use sl_mpc_mate::SessionId;
-
-use crate::{constants::ENDEMIC_OT_LABEL, utils::ExtractBit};
-
-// Computational security parameter, fixed to /lambda_c = 256
-// 256 OT seeds each 256-bit
-pub const LAMBDA_C: usize = 256;
-
-// size of u8 array to hold LAMBDA_C bits.
-pub const LAMBDA_C_BYTES: usize = LAMBDA_C / 8;
-
-//
-pub const BATCH_SIZE: usize = LAMBDA_C;
+use crate::{
+    constants::ENDEMIC_OT_LABEL, params::consts::*, utils::ExtractBit,
+};
 
 /// EndemicOT Message 1
 #[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
@@ -103,8 +93,8 @@ impl EndemicOTSender {
                 let m_a_0 = PublicKey::from(xor_byte_arrays(r_0, &h_r_1));
                 let m_a_1 = PublicKey::from(xor_byte_arrays(r_1, &h_r_0));
 
-                let t_b_0 = ReusableSecret::random_from_rng(&mut *rng);
-                let t_b_1 = ReusableSecret::random_from_rng(&mut *rng);
+                let t_b_0 = StaticSecret::random_from_rng(&mut *rng);
+                let t_b_1 = StaticSecret::random_from_rng(&mut *rng);
 
                 let m_b_0 = PublicKey::from(&t_b_0).to_bytes();
                 let m_b_1 = PublicKey::from(&t_b_1).to_bytes();
@@ -123,22 +113,24 @@ impl EndemicOTSender {
 
 /// EndemicOTReceiver
 /// 1 out of 2 Endemic OT Fig.8 https://eprint.iacr.org/2019/706.pdf
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EndemicOTReceiver {
     packed_choice_bits: [u8; LAMBDA_C_BYTES],
-    t_a_list: [ReusableSecret; LAMBDA_C],
+    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
+    t_a_list: [StaticSecret; LAMBDA_C],
 }
 
 impl EndemicOTReceiver {
     /// Create a new instance of the EndemicOT receiver.
     pub fn new<R: RngCore + CryptoRng>(
-        session_id: SessionId,
+        session_id: &[u8],
         msg1: &mut EndemicOTMsg1,
         rng: &mut R,
     ) -> Self {
         let next_state = Self {
             packed_choice_bits: rng.gen(),
             t_a_list: array::from_fn(|_| {
-                ReusableSecret::random_from_rng(&mut *rng)
+                StaticSecret::random_from_rng(&mut *rng)
             }),
         };
 
@@ -151,7 +143,7 @@ impl EndemicOTReceiver {
                 let r_other = rng.gen();
                 let r_choice = xor_byte_arrays(
                     &PublicKey::from(t_a).to_bytes(),
-                    &h_function(idx, &session_id, &r_other),
+                    &h_function(idx, session_id, &r_other),
                 );
 
                 let random_choice_bit =
@@ -209,12 +201,12 @@ mod test {
     #[test]
     fn test_endemic_ot() {
         let mut rng = rand::thread_rng();
-        let session_id = SessionId::random(&mut rng);
+        let session_id: [u8; 32] = rng.gen();
 
         let mut msg1 = EndemicOTMsg1::default();
 
         let receiver =
-            EndemicOTReceiver::new(session_id, &mut msg1, &mut rng);
+            EndemicOTReceiver::new(&session_id, &mut msg1, &mut rng);
 
         let mut msg2 = EndemicOTMsg2::default();
         let sender_output =

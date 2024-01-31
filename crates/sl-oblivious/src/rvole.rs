@@ -21,8 +21,6 @@ use k256::{
     Scalar, U256,
 };
 
-use sl_mpc_mate::SessionId;
-
 use crate::{
     constants::{
         RANDOM_VOLE_GADGET_VECTOR_LABEL, RANDOM_VOLE_MU_LABEL,
@@ -33,9 +31,8 @@ use crate::{
         ReceiverExtendedOutput, ReceiverOTSeed, Round1Output, SenderOTSeed,
         SoftSpokenOTError, SoftSpokenOTReceiver, SoftSpokenOTSender,
     },
+    utils::ExtractBit,
 };
-
-use crate::utils::ExtractBit;
 
 const XI: usize = L; // by definition
 
@@ -79,21 +76,23 @@ impl Default for RVOLEOutput {
 }
 
 ///
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[repr(C)]
 pub struct RVOLEReceiver {
-    session_id: SessionId,
+    session_id: [u8; 32],
     beta: [u8; L_BYTES],
-    receiver_extended_output: Box<ReceiverExtendedOutput>,
+    receiver_extended_output: ReceiverExtendedOutput,
 }
 
 ///
 impl RVOLEReceiver {
     /// Create a new RVOLE receiver
     pub fn new<R: CryptoRngCore>(
-        session_id: SessionId,
+        session_id: [u8; 32],
         seed_ot_results: &SenderOTSeed,
         round1_output: &mut Round1Output,
         rng: &mut R,
-    ) -> (RVOLEReceiver, Scalar) {
+    ) -> (Box<RVOLEReceiver>, Scalar) {
         let mut beta = [0u8; L_BYTES];
         rng.fill_bytes(&mut beta);
 
@@ -112,21 +111,19 @@ impl RVOLEReceiver {
             },
         );
 
-        let mut receiver_extended_output = ReceiverExtendedOutput::new(&beta);
+        let mut next = bytemuck::allocation::zeroed_box::<RVOLEReceiver>();
+
+        next.session_id = session_id;
+        next.beta = beta;
+        next.receiver_extended_output.choices = beta;
 
         SoftSpokenOTReceiver::process(
             &session_id,
             seed_ot_results,
             round1_output,
-            &mut receiver_extended_output,
+            &mut next.receiver_extended_output,
             rng,
         );
-
-        let next = RVOLEReceiver {
-            session_id,
-            beta,
-            receiver_extended_output,
-        };
 
         (next, b)
     }
@@ -135,7 +132,7 @@ impl RVOLEReceiver {
 impl RVOLEReceiver {
     ///
     pub fn process(
-        self,
+        &self,
         rvole_output: &RVOLEOutput,
     ) -> Result<[Scalar; L_BATCH], &'static str> {
         let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
@@ -246,7 +243,7 @@ pub struct RVOLESender;
 impl RVOLESender {
     ///
     pub fn process<R: CryptoRngCore>(
-        session_id: SessionId,
+        session_id: &[u8],
         seed_ot_results: &ReceiverOTSeed,
         a: &[Scalar; L_BATCH],
         round1_output: &Round1Output,
@@ -254,7 +251,7 @@ impl RVOLESender {
         rng: &mut R,
     ) -> Result<[Scalar; L_BATCH], SoftSpokenOTError> {
         let sender_extended_output = SoftSpokenOTSender::process(
-            &session_id,
+            session_id,
             seed_ot_results,
             round1_output,
         )?;
@@ -272,7 +269,7 @@ impl RVOLESender {
         };
 
         let c: [Scalar; L_BATCH] = array::from_fn(|i| {
-            generate_gadget_vec(&session_id)
+            generate_gadget_vec(session_id)
                 .enumerate()
                 .map(|(j, gv)| gv * alpha_0(j, i))
                 .sum::<Scalar>()
@@ -284,7 +281,7 @@ impl RVOLESender {
         });
 
         let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
-        t.append_message(b"session-id", &session_id);
+        t.append_message(b"session-id", session_id);
 
         for (j, a_tilde_j_ref) in output.a_tilde.iter_mut().enumerate() {
             t.append_u64(b"row of a tilde", j as u64);
@@ -329,7 +326,7 @@ impl RVOLESender {
         }
 
         let mut t = Transcript::new(&RANDOM_VOLE_MU_LABEL);
-        t.append_message(b"session-id", &session_id);
+        t.append_message(b"session-id", session_id);
 
         #[allow(clippy::needless_range_loop)]
         for j in 0..XI {
@@ -351,11 +348,9 @@ impl RVOLESender {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::prelude::*;
 
     use crate::soft_spoken::generate_all_but_one_seed_ot;
-    use sl_mpc_mate::SessionId;
-
-    use super::{RVOLEReceiver, RVOLESender};
 
     #[test]
     fn pairwise() {
@@ -364,7 +359,7 @@ mod tests {
         let (sender_ot_seed, receiver_ot_seed) =
             generate_all_but_one_seed_ot(&mut rng);
 
-        let session_id = SessionId::random(&mut rng);
+        let session_id: [u8; 32] = rng.gen();
 
         let mut round1_output = Round1Output::default();
         let (receiver, beta) = RVOLEReceiver::new(
@@ -382,7 +377,7 @@ mod tests {
         let mut round2_output = Default::default();
 
         let sender_shares = RVOLESender::process(
-            session_id,
+            &session_id,
             &receiver_ot_seed,
             &[alpha1, alpha2],
             &round1_output,

@@ -32,6 +32,10 @@ bs58 = "0.4.0"
 futures-util = { version = "0.3.0", features = [ "sink" ] }
 rayon = '1'
 zeroize = "1.6.1"
+serde = { version = "1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "sync", "macros" ] }
+
+[features]
+serde = [ "dep:serde", "elliptic-curve/arithmetic", "k256/serde" ]

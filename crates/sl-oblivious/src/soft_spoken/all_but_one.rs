@@ -236,7 +236,7 @@ mod test {
 
     use rand::{thread_rng, Rng};
 
-    use crate::endemic_ot::{OneTimePadEncryptionKeys, LAMBDA_C_BYTES};
+    use crate::endemic_ot::OneTimePadEncryptionKeys;
 
     fn generate_seed_ot_for_test() -> (SenderOutput, ReceiverOutput) {
         let mut rng = thread_rng();

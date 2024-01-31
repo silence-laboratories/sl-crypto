@@ -1,8 +1,9 @@
 use elliptic_curve::{
+    group::prime::PrimeCurveAffine,
     subtle::{Choice, ConstantTimeEq},
     Field,
 };
-use k256::{ProjectivePoint, Scalar};
+use k256::{AffinePoint, ProjectivePoint, Scalar};
 use merlin::Transcript;
 use rand::prelude::*;
 
@@ -10,9 +11,11 @@ use crate::constants::DLOG_CHALLENGE_LABEL;
 use crate::utils::TranscriptProtocol;
 
 /// Non-interactive Proof of knowledge of discrete logarithm with Fiat-Shamir transform.
+#[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DLogProof {
     /// Public point `t`.
-    pub t: ProjectivePoint,
+    pub t: AffinePoint,
 
     /// Challenge response
     pub s: Scalar,
@@ -34,7 +37,10 @@ impl DLogProof {
 
         let s = r + c * x;
 
-        Self { t, s }
+        Self {
+            t: t.to_affine(),
+            s,
+        }
     }
 
     /// Verify knowledge of discrete logarithm.
@@ -44,9 +50,10 @@ impl DLogProof {
         base_point: &ProjectivePoint,
         transcript: &mut Transcript,
     ) -> Choice {
-        let c = Self::fiat_shamir(y, &self.t, base_point, transcript);
+        let t = self.t.to_curve();
+        let c = Self::fiat_shamir(y, &t, base_point, transcript);
         let lhs = base_point * &self.s;
-        let rhs = self.t + y * &c;
+        let rhs = t + y * &c;
 
         lhs.ct_eq(&rhs)
     }

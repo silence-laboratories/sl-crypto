@@ -91,12 +91,14 @@ impl SenderExtendedOutput {
 }
 
 /// The extended output of the OT receiver.
-#[derive(Clone, Copy, bytemuck::AnyBitPattern)]
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[repr(C)]
 pub struct ReceiverExtendedOutput {
     pub choices: [u8; L_BYTES], // L bits
     pub v_x: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
 }
 
+#[cfg(test)]
 impl ReceiverExtendedOutput {
     pub(crate) fn new(choices: &[u8; L_BYTES]) -> Box<Self> {
         let mut this = bytemuck::allocation::zeroed_box::<Self>();
@@ -468,8 +470,7 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
 
 #[cfg(test)]
 mod tests {
-    use rand::RngCore;
-    use sl_mpc_mate::SessionId;
+    use rand::prelude::*;
 
     use crate::{
         params::consts::*,
@@ -490,7 +491,7 @@ mod tests {
         let (sender_ot_results, receiver_ot_results) =
             generate_all_but_one_seed_ot(&mut rng);
 
-        let session_id = SessionId::random(&mut rng);
+        let session_id: [u8; 32] = rng.gen();
         let mut choices = [0u8; L_BYTES];
         rng.fill_bytes(&mut choices);
 
