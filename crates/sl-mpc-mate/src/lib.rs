@@ -8,7 +8,6 @@ pub mod matrix;
 
 pub mod bip32;
 pub mod coord;
-pub mod label;
 pub mod message;
 
 /// Reexport bincode
@@ -18,11 +17,6 @@ pub use bincode;
 pub type SessionId = ByteArray<32>;
 
 pub type HashBytes = ByteArray<32>;
-
-/// XOR two byte arrays.
-pub fn xor_byte_arrays<const T: usize>(a: &[u8; T], b: &[u8; T]) -> [u8; T] {
-    std::array::from_fn(|i| a[i] ^ b[i])
-}
 
 /// Generate a random byte array
 pub fn random_bytes<const N: usize, R: CryptoRng + RngCore>(
@@ -92,5 +86,11 @@ impl<const N: usize> From<[u8; N]> for ByteArray<N> {
 impl<const N: usize> From<&[u8; N]> for ByteArray<N> {
     fn from(b: &[u8; N]) -> Self {
         ByteArray(*b)
+    }
+}
+
+impl<const N: usize> From<ByteArray<N>> for [u8; N] {
+    fn from(value: ByteArray<N>) -> Self {
+        value.0
     }
 }

@@ -29,7 +29,6 @@ use bincode::{
 
 use chacha20::hchacha;
 use chacha20poly1305::ChaCha20Poly1305;
-use digest::Digest;
 use ed25519_dalek::{Signature, Signer, Verifier};
 use elliptic_curve::{
     group::GroupEncoding, CurveArithmetic, FieldBytes, NonZeroScalar,
@@ -37,7 +36,7 @@ use elliptic_curve::{
 };
 use rand_core::CryptoRng;
 use rand_core::RngCore;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
 pub use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
@@ -160,7 +159,7 @@ impl MsgId {
         tag: MessageTag,
     ) -> Self {
         Self(
-            Sha256::new()
+            Sha256::default()
                 .chain_update(tag.to_bytes())
                 .chain_update(sender_pk)
                 .chain_update(receiver_pk.unwrap_or(&[0; PUBLIC_KEY_LENGTH]))
@@ -220,14 +219,7 @@ impl fmt::Debug for MsgHdr {
 impl MsgHdr {
     pub fn from(msg: &[u8]) -> Option<Self> {
         if msg.len() >= MESSAGE_HEADER_SIZE {
-            let (hdr, body) = msg.split_at(MESSAGE_HEADER_SIZE);
-
-            let body_len = body.len();
-            // FIXME: implicit assumption that Signature::BYTES
-            //    > TAG_SIZE + NONCE_SIZE
-            if body_len > 0 && body_len <= TAG_SIZE + NONCE_SIZE {
-                return None;
-            }
+            let hdr = &msg[..MESSAGE_HEADER_SIZE];
 
             let ttl = Duration::new(
                 u32::from_le_bytes(hdr[MESSAGE_ID_SIZE..].try_into().unwrap())
@@ -238,7 +230,11 @@ impl MsgHdr {
             Some(Self {
                 id: MsgId(hdr[..MESSAGE_ID_SIZE].try_into().unwrap()),
                 ttl,
-                kind: if body_len == 0 { Kind::Ask } else { Kind::Pub },
+                kind: if msg.len() == MESSAGE_HEADER_SIZE {
+                    Kind::Ask
+                } else {
+                    Kind::Pub
+                },
             })
         } else {
             None
@@ -299,7 +295,7 @@ impl NonceCounter {
     // This is private method and should be called
     // from encrypt() to avoid using generated nonce
     // more than once.
-    fn nonce(self) -> Nonce<Aead> {
+    pub fn nonce(self) -> Nonce<Aead> {
         let mut nonce = Nonce::<Aead>::default();
         nonce[..4].copy_from_slice(&self.0.to_le_bytes());
 
@@ -448,7 +444,7 @@ impl Builder<SealEncrypted> {
         let (data, plaintext) = msg.split_at_mut(start);
 
         let mut nonce = Nonce::<Aead>::default();
-        let digest: [u8; 32] = Sha256::new()
+        let digest: [u8; 32] = Sha256::default()
             .chain_update(eph_pk.to_bytes())
             .chain_update(public_key.to_bytes())
             .finalize()
@@ -753,7 +749,7 @@ impl<'a> Message<'a> {
         let public_key = PublicKey::from(secret);
 
         let mut nonce = Nonce::<Aead>::default();
-        let digest: [u8; 32] = Sha256::new()
+        let digest: [u8; 32] = Sha256::default()
             .chain_update(eph_pk.to_bytes())
             .chain_update(public_key.to_bytes())
             .finalize()

@@ -22,9 +22,6 @@ pub mod utils {
     };
     use k256::{ProjectivePoint, Secp256k1, U256};
     use merlin::Transcript;
-    use sl_mpc_mate::SessionId;
-
-    pub use blake3::Hasher;
 
     /// Custom extension trait for the merlin transcript.
     pub trait TranscriptProtocol {
@@ -50,7 +47,7 @@ pub mod utils {
 
         /// New transcript for DLOG proof
         fn new_dlog_proof(
-            session_id: &SessionId,
+            session_id: &[u8],
             party_id: usize,
             action: &[u8],
             label: &'static [u8],
@@ -78,7 +75,7 @@ pub mod utils {
         }
 
         fn new_dlog_proof(
-            session_id: &SessionId,
+            session_id: &[u8],
             party_id: usize,
             action: &[u8],
             label: &'static [u8],
@@ -123,3 +120,7 @@ pub mod utils {
         -(bit as i8) as u8
     }
 }
+
+pub mod params;
+
+pub mod label;

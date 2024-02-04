@@ -1,21 +1,24 @@
-use elliptic_curve::{subtle::ConstantTimeEq, Field};
-use k256::{ProjectivePoint, Scalar};
+use elliptic_curve::{
+    group::prime::PrimeCurveAffine,
+    subtle::{Choice, ConstantTimeEq},
+    Field,
+};
+use k256::{AffinePoint, ProjectivePoint, Scalar};
 use merlin::Transcript;
 use rand::prelude::*;
-
-use sl_mpc_mate::message::*;
 
 use crate::constants::DLOG_CHALLENGE_LABEL;
 use crate::utils::TranscriptProtocol;
 
 /// Non-interactive Proof of knowledge of discrete logarithm with Fiat-Shamir transform.
-#[derive(Clone, Debug, PartialEq, Eq, bincode::Encode, bincode::Decode)]
+#[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DLogProof {
     /// Public point `t`.
-    pub t: Opaque<ProjectivePoint, GR>,
+    pub t: AffinePoint,
 
     /// Challenge response
-    pub s: Opaque<Scalar, PF>,
+    pub s: Scalar,
 }
 
 impl DLogProof {
@@ -35,8 +38,8 @@ impl DLogProof {
         let s = r + c * x;
 
         Self {
-            t: t.into(),
-            s: s.into(),
+            t: t.to_affine(),
+            s,
         }
     }
 
@@ -46,12 +49,13 @@ impl DLogProof {
         y: &ProjectivePoint,
         base_point: &ProjectivePoint,
         transcript: &mut Transcript,
-    ) -> bool {
-        let c = Self::fiat_shamir(y, &self.t, base_point, transcript);
-        let lhs = base_point * &self.s.0;
-        let rhs = self.t + y * &c;
+    ) -> Choice {
+        let t = self.t.to_curve();
+        let c = Self::fiat_shamir(y, &t, base_point, transcript);
+        let lhs = base_point * &self.s;
+        let rhs = t + y * &c;
 
-        lhs.ct_eq(&rhs).into()
+        lhs.ct_eq(&rhs)
     }
 
     /// Get fiat-shamir challenge for Discrete log proof.
@@ -77,7 +81,7 @@ mod tests {
     use super::DLogProof;
 
     #[test]
-    pub fn test_dlog_proof() {
+    pub fn dlog_proof() {
         use k256::{ProjectivePoint, Scalar};
         use merlin::Transcript;
         use rand::thread_rng;
@@ -94,11 +98,16 @@ mod tests {
 
         let mut verify_transcript = Transcript::new(b"test-dlog-proof");
 
-        assert!(proof.verify(&y, &base_point, &mut verify_transcript));
+        assert_ne!(
+            proof
+                .verify(&y, &base_point, &mut verify_transcript)
+                .unwrap_u8(),
+            0
+        );
     }
 
     #[test]
-    pub fn test_wrong_dlog_proof() {
+    pub fn wrong_dlog_proof() {
         let mut rng = thread_rng();
         let mut transcript = Transcript::new(b"test-dlog-proof");
 
@@ -116,11 +125,16 @@ mod tests {
 
         let mut verify_transcript = Transcript::new(b"test-dlog-proof");
 
-        assert!(!proof.verify(&y, &base_point, &mut verify_transcript));
+        assert_ne!(
+            !proof
+                .verify(&y, &base_point, &mut verify_transcript)
+                .unwrap_u8(),
+            0
+        );
     }
 
     #[test]
-    pub fn test_dlog_proof_fiat_shamir() {
+    pub fn dlog_proof_fiat_shamir() {
         use k256::{ProjectivePoint, Scalar};
         use merlin::Transcript;
 
@@ -136,8 +150,11 @@ mod tests {
 
         let mut verify_transcript = Transcript::new(b"test-dlog-proof-wrong");
 
-        assert!(
-            !proof.verify(&y, &base_point, &mut verify_transcript),
+        assert_ne!(
+            !proof
+                .verify(&y, &base_point, &mut verify_transcript)
+                .unwrap_u8(),
+            0,
             "Proof should fail with wrong transcript"
         );
     }

@@ -7,17 +7,13 @@
 //! lambda_c = 256
 //! l = 2, rho = 1, OT_WIDTH = l + rho = 3
 
-use bincode::de::read::Reader;
-use bincode::de::{BorrowDecoder, Decoder};
-use bincode::enc::write::Writer;
-use bincode::enc::Encoder;
-use bincode::error::{DecodeError, EncodeError};
-use bincode::{BorrowDecode, Decode, Encode};
+use std::array;
+
+use merlin::Transcript;
 
 use k256::{
     elliptic_curve::{
         bigint::Encoding,
-        generic_array::GenericArray,
         ops::Reduce,
         rand_core::CryptoRngCore,
         subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
@@ -25,214 +21,153 @@ use k256::{
     Scalar, U256,
 };
 
-use zeroize::{Zeroize, ZeroizeOnDrop};
-
-use crate::constants::{
-    RANDOM_VOLE_GADGET_VECTOR_LABEL, RANDOM_VOLE_MU_LABEL,
-    RANDOM_VOLE_THETA_LABEL,
+use crate::{
+    constants::{
+        RANDOM_VOLE_GADGET_VECTOR_LABEL, RANDOM_VOLE_MU_LABEL,
+        RANDOM_VOLE_THETA_LABEL,
+    },
+    params::consts::*,
+    soft_spoken::{
+        ReceiverExtendedOutput, ReceiverOTSeed, Round1Output, SenderOTSeed,
+        SoftSpokenOTError, SoftSpokenOTReceiver, SoftSpokenOTSender,
+    },
+    utils::ExtractBit,
 };
-use sl_mpc_mate::{message::*, SessionId};
 
-use crate::soft_spoken::{
-    ReceiverExtendedOutput, ReceiverOTSeed, Round1Output, SenderOTSeed,
-    SoftSpokenOTError, SoftSpokenOTReceiver, SoftSpokenOTSender, L, L_BYTES,
-};
+const XI: usize = L; // by definition
 
-use crate::utils::{ExtractBit, Hasher};
+fn generate_gadget_vec(session_id: &[u8]) -> impl Iterator<Item = Scalar> {
+    let mut t = Transcript::new(&RANDOM_VOLE_GADGET_VECTOR_LABEL);
+    t.append_message(b"session-id", session_id);
 
-pub const XI: usize = L;
-pub const L_BATCH: usize = 2;
-pub const RHO: usize = 1;
-pub const L_BATCH_PLUS_RHO: usize = L_BATCH + RHO; // should be equal to OT_WIDTH
+    (0..XI).map(move |i| {
+        t.append_u64(b"index", i as u64);
 
-fn generate_gadget_vec(session_id: &SessionId) -> Box<[Scalar; XI]> {
-    let mut gadget_vec = [Scalar::ZERO; XI];
-    let mut h = Hasher::new();
-    h.update(&RANDOM_VOLE_GADGET_VECTOR_LABEL);
-    h.update(session_id);
+        let mut repr = [0u8; KAPPA_BYTES];
+        t.challenge_bytes(b"next value", &mut repr);
 
-    gadget_vec
-        .iter_mut()
-        .enumerate()
-        .take(L)
-        .for_each(|(i, g)| {
-            h.update((i as u16).to_be_bytes().as_ref());
-            let digest = h.finalize();
-            let digest = GenericArray::from_slice(digest.as_bytes());
-            *g = Reduce::<U256>::reduce_bytes(digest);
-        });
-
-    Box::new(gadget_vec)
+        Scalar::reduce(U256::from_be_bytes(repr))
+    })
 }
 
 /// Message output in RVOLE protocol
-#[derive(Debug, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[repr(C)]
 pub struct RVOLEOutput {
-    a_tilde: [[Scalar; L_BATCH_PLUS_RHO]; XI],
-    eta: [Scalar; RHO],
+    a_tilde: [[[u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
+    eta: [[u8; KAPPA_BYTES]; RHO],
     mu_hash: [u8; 64],
 }
 
-impl Encode for RVOLEOutput {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        for row in &self.a_tilde {
-            for s in row {
-                Opaque::<&Scalar, PFR>::from(s).encode(encoder)?;
-            }
-        }
-
-        for s in &self.eta {
-            Opaque::<&Scalar, PFR>::from(s).encode(encoder)?;
-        }
-
-        encoder.writer().write(&self.mu_hash)?;
-
-        Ok(())
+impl RVOLEOutput {
+    fn get_a_tilde(&self, j: usize, i: usize) -> Scalar {
+        Scalar::reduce(U256::from_be_bytes(self.a_tilde[j][i]))
     }
 }
 
-impl Decode for RVOLEOutput {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let mut r = RVOLEOutput {
-            a_tilde: [[Scalar::ZERO; L_BATCH_PLUS_RHO]; XI],
-            eta: [Scalar::ZERO; RHO],
+impl Default for RVOLEOutput {
+    fn default() -> Self {
+        RVOLEOutput {
+            a_tilde: [[[0u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
+            eta: [[0u8; KAPPA_BYTES]; RHO],
             mu_hash: [0u8; 64],
-        };
-
-        for row in &mut r.a_tilde {
-            for s in row {
-                *s = *Opaque::<Scalar, PF>::decode(decoder)?;
-            }
         }
-
-        for s in &mut r.eta {
-            *s = *Opaque::<Scalar, PF>::decode(decoder)?;
-        }
-
-        decoder.reader().read(&mut r.mu_hash)?;
-
-        Ok(r)
-    }
-}
-
-impl<'de> BorrowDecode<'de> for RVOLEOutput {
-    fn borrow_decode<D: BorrowDecoder<'de>>(
-        decoder: &mut D,
-    ) -> Result<Self, DecodeError> {
-        Self::decode(decoder)
     }
 }
 
 ///
-pub struct RVOLEReceiver<T> {
-    session_id: SessionId,
-    gadget_vector: Box<[Scalar; XI]>,
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[repr(C)]
+pub struct RVOLEReceiver {
+    session_id: [u8; 32],
     beta: [u8; L_BYTES],
-    state: T,
-}
-
-/// Initial state of the RVOLEReceiver
-pub struct RVOLEReceiverR0 {
-    cot_receiver: SoftSpokenOTReceiver,
-}
-
-/// State of RVOLEReceiver after processing Round 1 output
-pub struct RVOLEReceiverR1 {
-    receiver_extended_output: Box<ReceiverExtendedOutput>,
+    receiver_extended_output: ReceiverExtendedOutput,
 }
 
 ///
-impl RVOLEReceiver<RVOLEReceiverR0> {
+impl RVOLEReceiver {
     /// Create a new RVOLE receiver
     pub fn new<R: CryptoRngCore>(
-        session_id: SessionId,
+        session_id: [u8; 32],
         seed_ot_results: &SenderOTSeed,
+        round1_output: &mut Round1Output,
         rng: &mut R,
-    ) -> Self {
-        let cot_receiver =
-            SoftSpokenOTReceiver::new(session_id, seed_ot_results, rng);
-        let gadget_vector = generate_gadget_vec(&session_id);
+    ) -> (Box<RVOLEReceiver>, Scalar) {
         let mut beta = [0u8; L_BYTES];
         rng.fill_bytes(&mut beta);
 
-        Self {
-            session_id,
-            gadget_vector,
-            beta,
-            state: RVOLEReceiverR0 { cot_receiver },
-        }
-    }
-}
-
-impl RVOLEReceiver<RVOLEReceiverR0> {
-    ///
-    pub fn process(
-        self,
-    ) -> (RVOLEReceiver<RVOLEReceiverR1>, Scalar, Round1Output) {
         // b = <g, /beta>
-        let mut b = Scalar::ZERO;
-        for i in 0..XI {
-            let i_bit = self.beta.extract_bit(i);
-            let option_0 = &b;
-            let option_1 = option_0 + self.gadget_vector[i];
-            let chosen = Scalar::conditional_select(
-                option_0,
-                &option_1,
-                Choice::from(i_bit as u8),
-            );
-            b = chosen;
-        }
+        let b = generate_gadget_vec(&session_id).enumerate().fold(
+            Scalar::ZERO,
+            |option_0, (i, gv)| {
+                let i_bit = beta.extract_bit(i);
+                let option_1 = option_0 + gv;
 
-        let (round1_output, receiver_extended_output) =
-            self.state.cot_receiver.process(&self.beta);
-
-        let next = RVOLEReceiver {
-            session_id: self.session_id,
-            gadget_vector: self.gadget_vector,
-            beta: self.beta,
-            state: RVOLEReceiverR1 {
-                receiver_extended_output,
+                Scalar::conditional_select(
+                    &option_0,
+                    &option_1,
+                    Choice::from(i_bit as u8),
+                )
             },
-        };
+        );
 
-        (next, b, round1_output)
+        let mut next = bytemuck::allocation::zeroed_box::<RVOLEReceiver>();
+
+        next.session_id = session_id;
+        next.beta = beta;
+        next.receiver_extended_output.choices = beta;
+
+        SoftSpokenOTReceiver::process(
+            &session_id,
+            seed_ot_results,
+            round1_output,
+            &mut next.receiver_extended_output,
+            rng,
+        );
+
+        (next, b)
     }
 }
 
-impl RVOLEReceiver<RVOLEReceiverR1> {
+impl RVOLEReceiver {
     ///
     pub fn process(
-        self,
+        &self,
         rvole_output: &RVOLEOutput,
     ) -> Result<[Scalar; L_BATCH], &'static str> {
-        let mut hasher = Hasher::new();
-        hasher.update(&RANDOM_VOLE_THETA_LABEL);
-        hasher.update(self.session_id.as_ref());
+        let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
+        t.append_message(b"session-id", &self.session_id);
+
         for j in 0..XI {
-            hasher.update(format!("row_{}_of_a_tilde", j).as_bytes());
+            t.append_u64(b"row of a tilde", j as u64);
             for i in 0..L_BATCH_PLUS_RHO {
-                hasher.update(rvole_output.a_tilde[j][i].to_bytes().as_ref());
+                t.append_message(b"", &rvole_output.a_tilde[j][i]);
             }
         }
+
         let mut theta = [[Scalar::ZERO; L_BATCH]; RHO];
         #[allow(clippy::needless_range_loop)]
         for k in 0..RHO {
             for i in 0..L_BATCH {
-                hasher.update(format!("theta_{}_{}", k, i).as_bytes());
-                let digest: [u8; 32] = hasher.finalize().into();
+                t.append_u64(b"theta k", k as u64);
+                t.append_u64(b"theta i", i as u64);
+
+                let mut digest = [0u8; KAPPA_BYTES];
+                t.challenge_bytes(b"theta", digest.as_mut());
                 theta[k][i] = Scalar::reduce(U256::from_be_bytes(digest));
             }
         }
 
         let mut d_dot = [[Scalar::ZERO; L_BATCH]; XI];
         let mut d_hat = [[Scalar::ZERO; RHO]; XI];
+
         for j in 0..XI {
+            let j_bit = self.beta.extract_bit(j);
             for i in 0..L_BATCH {
-                let j_bit = self.beta.extract_bit(j);
                 let option_0 = Scalar::reduce(U256::from_be_bytes(
-                    self.state.receiver_extended_output.v_x[j][i],
+                    self.receiver_extended_output.v_x[j][i],
                 ));
-                let option_1 = option_0 + rvole_output.a_tilde[j][i];
+                let option_1 = option_0 + rvole_output.get_a_tilde(j, i);
                 let chosen = Scalar::conditional_select(
                     &option_0,
                     &option_1,
@@ -241,12 +176,11 @@ impl RVOLEReceiver<RVOLEReceiverR1> {
                 d_dot[j][i] = chosen
             }
             for k in 0..RHO {
-                let j_bit = self.beta.extract_bit(j);
                 let option_0 = Scalar::reduce(U256::from_be_bytes(
-                    self.state.receiver_extended_output.v_x[j][L_BATCH + k],
+                    self.receiver_extended_output.v_x[j][L_BATCH + k],
                 ));
                 let option_1 =
-                    option_0 + rvole_output.a_tilde[j][L_BATCH + k];
+                    option_0 + rvole_output.get_a_tilde(j, L_BATCH + k);
                 let chosen = Scalar::conditional_select(
                     &option_0,
                     &option_1,
@@ -255,40 +189,37 @@ impl RVOLEReceiver<RVOLEReceiverR1> {
                 d_hat[j][k] = chosen
             }
         }
-        let d_dot = d_dot;
-        let d_hat = d_hat;
 
         // mu_prime hash
-        let mut hasher = Hasher::new();
-        hasher.update(&RANDOM_VOLE_MU_LABEL);
-        hasher.update(self.session_id.as_ref());
+        let mut t = Transcript::new(&RANDOM_VOLE_MU_LABEL);
+        t.append_message(b"session-id", &self.session_id);
+
         #[allow(clippy::needless_range_loop)]
         for j in 0..XI {
+            let j_bit = self.beta.extract_bit(j);
+
             for k in 0..RHO {
                 let mut v = d_hat[j][k];
                 for i in 0..L_BATCH {
                     v += theta[k][i] * d_dot[j][i]
                 }
-                let j_bit = self.beta.extract_bit(j);
+
                 let option_0 = v;
-                let option_1 = option_0 - rvole_output.eta[k];
+                let option_1 = option_0
+                    - Scalar::reduce(U256::from_be_bytes(
+                        rvole_output.eta[k],
+                    ));
                 let chosen = Scalar::conditional_select(
                     &option_0,
                     &option_1,
                     Choice::from(j_bit as u8),
                 );
-                hasher.update(chosen.to_bytes().as_ref());
+                t.append_message(b"chosen", &chosen.to_bytes());
             }
         }
-        hasher.update(b"p1");
-        let mu_prime_hash_1: [u8; 32] = hasher.finalize().into();
-        hasher.update(b"p2");
-        let mu_prime_hash_2: [u8; 32] = hasher.finalize().into();
-        let mu_prime_hash: [u8; 64] =
-            [mu_prime_hash_1.as_slice(), mu_prime_hash_2.as_slice()]
-                .concat()
-                .try_into()
-                .expect("Invalid length of mu_prime_hash");
+
+        let mut mu_prime_hash = [0u8; 64];
+        t.challenge_bytes(b"mu-hash", &mut mu_prime_hash);
 
         if rvole_output.mu_hash.ct_ne(&mu_prime_hash).into() {
             return Err("Consistency check failed");
@@ -297,8 +228,8 @@ impl RVOLEReceiver<RVOLEReceiverR1> {
         let mut d = [Scalar::ZERO; L_BATCH];
         #[allow(clippy::needless_range_loop)]
         for i in 0..L_BATCH {
-            for j in 0..XI {
-                d[i] += self.gadget_vector[j] * d_dot[j][i];
+            for (j, gv) in generate_gadget_vec(&self.session_id).enumerate() {
+                d[i] += gv * d_dot[j][i];
             }
         }
 
@@ -307,98 +238,66 @@ impl RVOLEReceiver<RVOLEReceiverR1> {
 }
 
 ///
-pub struct RVOLESender {
-    session_id: SessionId,
-    gadget_vector: Box<[Scalar; XI]>,
-    a_hat: [Scalar; RHO],
-    cot_sender: SoftSpokenOTSender,
-}
-
-///
-impl RVOLESender {
-    /// Create a new RVOLE sender
-    pub fn new<R: CryptoRngCore>(
-        session_id: SessionId,
-        seed_ot_results: &ReceiverOTSeed,
-        rng: &mut R,
-    ) -> Self {
-        let cot_sender =
-            SoftSpokenOTSender::new(session_id, seed_ot_results.clone());
-        let gadget_vec = generate_gadget_vec(&session_id);
-        let mut a_hat = [Scalar::ZERO; RHO];
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..RHO {
-            a_hat[i] = Scalar::generate_biased(rng);
-        }
-
-        Self {
-            session_id,
-            gadget_vector: gadget_vec,
-            a_hat,
-            cot_sender,
-        }
-    }
-}
+pub struct RVOLESender;
 
 impl RVOLESender {
     ///
-    pub fn process(
-        self,
-        a: [Scalar; L_BATCH],
+    pub fn process<R: CryptoRngCore>(
+        session_id: &[u8],
+        seed_ot_results: &ReceiverOTSeed,
+        a: &[Scalar; L_BATCH],
         round1_output: &Round1Output,
-    ) -> Result<([Scalar; L_BATCH], Box<RVOLEOutput>), SoftSpokenOTError>
-    {
-        let sender_extended_output =
-            self.cot_sender.process(round1_output)?;
+        output: &mut RVOLEOutput,
+        rng: &mut R,
+    ) -> Result<[Scalar; L_BATCH], SoftSpokenOTError> {
+        let sender_extended_output = SoftSpokenOTSender::process(
+            session_id,
+            seed_ot_results,
+            round1_output,
+        )?;
 
-        let mut alpha_0 = [[Scalar::ZERO; L_BATCH_PLUS_RHO]; XI];
-        let mut alpha_1 = [[Scalar::ZERO; L_BATCH_PLUS_RHO]; XI];
-        for j in 0..XI {
-            for i in 0..L_BATCH_PLUS_RHO {
-                alpha_0[j][i] = Scalar::reduce(U256::from_be_bytes(
-                    sender_extended_output.v_0[j][i],
-                ));
-                alpha_1[j][i] = Scalar::reduce(U256::from_be_bytes(
-                    sender_extended_output.v_1[j][i],
-                ));
-            }
-        }
-        let alpha_0 = alpha_0;
-        let alpha_1 = alpha_1;
+        let alpha_0 = |j: usize, i: usize| {
+            Scalar::reduce(U256::from_be_bytes(
+                sender_extended_output.v_0[j][i],
+            ))
+        };
 
-        let mut c = [Scalar::ZERO; L_BATCH];
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..L_BATCH {
-            for j in 0..XI {
-                c[i] += self.gadget_vector[j] * alpha_0[j][i];
-            }
-            c[i] = c[i].negate();
-        }
+        let alpha_1 = |j: usize, i: usize| {
+            Scalar::reduce(U256::from_be_bytes(
+                sender_extended_output.v_1[j][i],
+            ))
+        };
 
-        let mut output = Box::new(RVOLEOutput {
-            a_tilde: [[Scalar::ZERO; L_BATCH_PLUS_RHO]; XI],
-            eta: self.a_hat,
-            mu_hash: [0u8; 64],
+        let c: [Scalar; L_BATCH] = array::from_fn(|i| {
+            generate_gadget_vec(session_id)
+                .enumerate()
+                .map(|(j, gv)| gv * alpha_0(j, i))
+                .sum::<Scalar>()
+                .negate()
         });
 
-        let mut hasher = Hasher::new();
-        hasher.update(&RANDOM_VOLE_THETA_LABEL);
-        hasher.update(self.session_id.as_ref());
+        output.eta.iter_mut().for_each(|eta| {
+            *eta = Scalar::generate_biased(rng).to_bytes().into();
+        });
 
-        let a_tilde = &mut output.a_tilde;
-        #[allow(clippy::needless_range_loop)]
-        for j in 0..XI {
-            hasher.update(format!("row_{}_of_a_tilde", j).as_bytes());
+        let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
+        t.append_message(b"session-id", session_id);
+
+        for (j, a_tilde_j_ref) in output.a_tilde.iter_mut().enumerate() {
+            t.append_u64(b"row of a tilde", j as u64);
             for i in 0..L_BATCH {
-                let v = alpha_0[j][i] - alpha_1[j][i] + a[i];
-                hasher.update(v.to_bytes().as_ref());
-                a_tilde[j][i] = v;
+                let v = alpha_0(j, i) - alpha_1(j, i) + a[i];
+                a_tilde_j_ref[i] = v.to_bytes().into();
+
+                t.append_message(b"", &a_tilde_j_ref[i]);
             }
-            for k in 0..RHO {
-                let v = alpha_0[j][L_BATCH + k] - alpha_1[j][L_BATCH + k]
-                    + self.a_hat[k];
-                hasher.update(v.to_bytes().as_ref());
-                a_tilde[j][L_BATCH + k] = v;
+
+            for (k, eta) in output.eta.iter().enumerate() {
+                let v = alpha_0(j, L_BATCH + k) - alpha_1(j, L_BATCH + k)
+                    + Scalar::reduce(U256::from_be_bytes(*eta));
+                a_tilde_j_ref[L_BATCH + k] = v.to_bytes().into();
+
+                t.append_message(b"", &a_tilde_j_ref[L_BATCH + k]);
             }
         }
 
@@ -406,79 +305,86 @@ impl RVOLESender {
         #[allow(clippy::needless_range_loop)]
         for k in 0..RHO {
             for i in 0..L_BATCH {
-                hasher.update(format!("theta_{}_{}", k, i).as_bytes());
-                let digest: [u8; 32] = hasher.finalize().into();
+                t.append_u64(b"theta k", k as u64);
+                t.append_u64(b"theta i", i as u64);
+
+                let mut digest = [0u8; 32];
+                t.challenge_bytes(b"theta", &mut digest);
+
                 theta[k][i] = Scalar::reduce(U256::from_be_bytes(digest));
             }
         }
 
-        let eta = &mut output.eta;
-        #[allow(clippy::needless_range_loop)]
-        for k in 0..RHO {
-            for i in 0..L_BATCH {
-                eta[k] += theta[k][i] * a[i];
-            }
+        for (k, eta) in output.eta.iter_mut().enumerate() {
+            let mut s = Scalar::reduce(U256::from_be_bytes(*eta));
+            s += theta[k]
+                .iter()
+                .zip(a)
+                .map(|(t_k_i, a_i)| t_k_i * a_i)
+                .sum::<Scalar>();
+            *eta = s.to_bytes().into();
         }
 
-        let mut hasher = Hasher::new();
-        hasher.update(&RANDOM_VOLE_MU_LABEL);
-        hasher.update(self.session_id.as_ref());
+        let mut t = Transcript::new(&RANDOM_VOLE_MU_LABEL);
+        t.append_message(b"session-id", session_id);
+
         #[allow(clippy::needless_range_loop)]
         for j in 0..XI {
             for k in 0..RHO {
-                let mut v = alpha_0[j][L_BATCH + k];
+                let mut v = alpha_0(j, L_BATCH + k);
                 for i in 0..L_BATCH {
-                    v += theta[k][i] * alpha_0[j][i]
+                    v += theta[k][i] * alpha_0(j, i)
                 }
-                hasher.update(v.to_bytes().as_ref());
+                t.append_message(b"chosen", &v.to_bytes());
             }
         }
-        hasher.update(b"p1");
-        let mu_hash_1: [u8; 32] = hasher.finalize().into();
-        hasher.update(b"p2");
-        let mu_hash_2: [u8; 32] = hasher.finalize().into();
-        output.mu_hash = [mu_hash_1.as_slice(), mu_hash_2.as_slice()]
-            .concat()
-            .try_into()
-            .expect("Invalid length of mu_hash");
 
-        Ok((c, output))
+        t.challenge_bytes(b"mu-hash", &mut output.mu_hash);
+
+        Ok(c)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::prelude::*;
 
     use crate::soft_spoken::generate_all_but_one_seed_ot;
-    use sl_mpc_mate::SessionId;
-
-    use super::{RVOLEReceiver, RVOLESender};
 
     #[test]
-    fn test_pairwise() {
+    fn pairwise() {
         let mut rng = rand::thread_rng();
 
         let (sender_ot_seed, receiver_ot_seed) =
             generate_all_but_one_seed_ot(&mut rng);
 
-        let session_id = SessionId::random(&mut rng);
+        let session_id: [u8; 32] = rng.gen();
 
-        let sender =
-            RVOLESender::new(session_id, &receiver_ot_seed, &mut rng);
-
-        let receiver =
-            RVOLEReceiver::new(session_id, &sender_ot_seed, &mut rng);
+        let mut round1_output = Round1Output::default();
+        let (receiver, beta) = RVOLEReceiver::new(
+            session_id,
+            &sender_ot_seed,
+            &mut round1_output,
+            &mut rng,
+        );
 
         let (alpha1, alpha2) = (
             Scalar::generate_biased(&mut rng),
             Scalar::generate_biased(&mut rng),
         );
 
-        let (receiver, beta, round1_output) = receiver.process();
+        let mut round2_output = Default::default();
 
-        let (sender_shares, round2_output) =
-            sender.process([alpha1, alpha2], &round1_output).unwrap();
+        let sender_shares = RVOLESender::process(
+            &session_id,
+            &receiver_ot_seed,
+            &[alpha1, alpha2],
+            &round1_output,
+            &mut round2_output,
+            &mut rng,
+        )
+        .unwrap();
 
         let receiver_shares = receiver.process(&round2_output).unwrap();
 

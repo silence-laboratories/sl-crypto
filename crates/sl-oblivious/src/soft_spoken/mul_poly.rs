@@ -5,16 +5,16 @@
 ///     multiplication part: Algorithm 2.34, "Right-to-left comb method for polynomial multiplication"
 ///     reduction part: variant of the idea of Figure 2.9
 pub fn binary_field_multiply_gf_2_128(
-    a_data: &[u8; 16],
+    a: &[u8; 16],
     b_data: &[u8; 16],
 ) -> [u8; 16] {
     const W: usize = 8;
     const T: usize = 16;
+
     let mut c = [0u8; T * 2];
-    let mut a = [0u8; T];
     let mut b = [0u8; T + 1];
-    a[..16].copy_from_slice(&a_data[..16]);
-    b[..16].copy_from_slice(&b_data[..16]);
+
+    b[..16].copy_from_slice(b_data);
 
     for k in 0..W {
         for j in 0..T {

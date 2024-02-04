@@ -1,4 +1,4 @@
-use sl_mpc_mate::label::Label;
+use crate::label::Label;
 
 /// Domain labels version
 pub const VERSION: u16 = 1;
