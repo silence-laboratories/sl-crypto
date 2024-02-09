@@ -157,15 +157,15 @@ impl MsgId {
     /// Create ID for a P2P message.
     pub fn new(
         instance: &InstanceId,
-        sender_pk: &[u8; PUBLIC_KEY_LENGTH],
-        receiver_pk: Option<&[u8; PUBLIC_KEY_LENGTH]>,
+        sender: &[u8],
+        receiver: Option<&[u8]>,
         tag: MessageTag,
     ) -> Self {
         Self(
             Sha256::default()
                 .chain_update(tag.to_bytes())
-                .chain_update(sender_pk)
-                .chain_update(receiver_pk.unwrap_or(&[0; PUBLIC_KEY_LENGTH]))
+                .chain_update(sender)
+                .chain_update(receiver.unwrap_or(&[]))
                 .chain_update(instance.0)
                 .finalize()
                 .into(),
