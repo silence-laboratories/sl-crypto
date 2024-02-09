@@ -104,7 +104,7 @@ impl EvilPlay {
         client: &mut R,
         _index: usize,
         msg: Vec<u8>,
-    ) -> Result<(), InvalidMessage> {
+    ) -> Result<(), R::Error> {
         if let Some(hdr) = MsgHdr::from(&msg) {
             self.seen_msg.insert(hdr.id);
         }
