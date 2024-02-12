@@ -1,3 +1,6 @@
+// Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
+// This software is licensed under the Silence Laboratories License Agreement.
+
 use base64::{engine::general_purpose, Engine as _};
 use bs58::Alphabet;
 use derivation_path::{ChildIndex, DerivationPath};

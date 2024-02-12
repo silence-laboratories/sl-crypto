@@ -1,3 +1,6 @@
+// Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
+// This software is licensed under the Silence Laboratories License Agreement.
+
 //! This module provides implementation of data structures to handle
 //! message passing between parties of a MPC protocol.
 //!

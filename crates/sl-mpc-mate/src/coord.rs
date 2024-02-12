@@ -1,3 +1,6 @@
+// Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
+// This software is licensed under the Silence Laboratories License Agreement.
+
 pub use futures_util::{Sink, SinkExt, Stream, StreamExt};
 
 use crate::message::*;

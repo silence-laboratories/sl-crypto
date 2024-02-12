@@ -1,3 +1,6 @@
+// Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
+// This software is licensed under the Silence Laboratories License Agreement.
+
 ///     Multiplies `a` and `b` in the finite field of order 2^128
 ///     modulo the irreducible polynomial f(x) = 1 + x + x^2 + x^7 + x^128
 
