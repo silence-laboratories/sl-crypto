@@ -96,7 +96,6 @@ impl Sink<Vec<u8>> for MessageRelay {
                 this.queue.push(msg);
             }
         } else {
-            tracing::debug!("pub msg {:X}", hdr.id);
             inner.send(item);
         }
 
@@ -234,7 +233,6 @@ impl Inner {
                 }
                 MsgEntry::Ready(_) => {
                     // ignore dups
-                    tracing::info!("msg send dup {:?}", id)
                 }
             },
 

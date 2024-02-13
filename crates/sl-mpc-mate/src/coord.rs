@@ -7,12 +7,16 @@ use crate::message::*;
 
 mod buffered;
 
-pub mod adversary;
-pub mod simple;
 pub mod stats;
 
-pub use buffered::BufferedMsgRelay;
+#[cfg(feature = "simple-relay")]
+pub mod adversary;
+#[cfg(feature = "simple-relay")]
+pub mod simple;
+#[cfg(feature = "simple-relay")]
 pub use simple::SimpleMessageRelay;
+
+pub use buffered::BufferedMsgRelay;
 
 pub struct MessageSendError;
 

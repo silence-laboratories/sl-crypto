@@ -38,11 +38,11 @@ lint:
   stage: test
   script:
     - cargo fmt --all -- --check
-    - cargo clippy --all -- -D warnings
+    - cargo clippy --all --all-features -- -D warnings
     - cargo audit
 
 test:
   stage: test
   needs: [ "lint" ]
   script:
-    - cargo test --release
+    - cargo test --all-features --release
