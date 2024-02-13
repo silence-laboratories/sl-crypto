@@ -320,30 +320,15 @@ mod tests {
             MessageTag::tag(0),
         );
 
-        c1.send(
-            Builder::<Signed>::encode(
-                &msg_id,
-                Duration::new(10, 0),
-                &sk,
-                &(0u32, 255u64),
-            )
-            .unwrap(),
-        )
-        .await
-        .unwrap();
+        let msg_to_send = allocate_message(&msg_id, 10, &[0; 5]);
+        c1.send(msg_to_send.clone()).await.unwrap();
 
         let mut c2 = coord.connect();
 
         c2.send(AskMsg::allocate(&msg_id, 100)).await.unwrap();
 
-        let mut msg = c2.next().await.unwrap();
+        let msg_recv = c2.next().await.unwrap();
 
-        let payload: (u32, u64) = Message::verify_and_decode(
-            Message::from_buffer(&mut msg).unwrap(),
-            &sk.verifying_key(),
-        )
-        .unwrap();
-
-        assert_eq!(payload, (0u32, 255u64));
+        assert_eq!(msg_to_send, msg_recv);
     }
 }
