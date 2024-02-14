@@ -13,9 +13,6 @@ pub mod bip32;
 pub mod coord;
 pub mod message;
 
-/// Reexport bincode
-pub use bincode;
-
 /// Session ID
 pub type SessionId = ByteArray<32>;
 
