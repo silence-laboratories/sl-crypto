@@ -74,6 +74,19 @@ fn h_function(index: usize, session_id: &[u8], pk: &[u8; 32]) -> [u8; 32] {
     output
 }
 
+// create LAMBDA_C_BYTES ot seed
+fn h_function_2(index: usize, pk: &[u8; 32]) -> [u8; LAMBDA_C_BYTES] {
+    let mut t = Transcript::new(&ENDEMIC_OT_LABEL);
+
+    t.append_message(b"index", &(index as u16).to_be_bytes());
+    t.append_message(b"pk", pk);
+
+    let mut output = [0u8; LAMBDA_C_BYTES];
+    t.challenge_bytes(b"ot-seed", &mut output);
+
+    output
+}
+
 /// Sender of the Endemic OT protocol.
 /// 1 out of 2 Endemic OT Fig.8 https://eprint.iacr.org/2019/706.pdf
 pub struct EndemicOTSender;
@@ -105,14 +118,8 @@ impl EndemicOTSender {
                 msg2.m_b_list[idx] = [m_b_0, m_b_1];
 
                 // check key generation
-                let rho_0 = t_b_0.diffie_hellman(&m_a_0).to_bytes()
-                    [0..LAMBDA_C_BYTES]
-                    .try_into()
-                    .unwrap();
-                let rho_1 = t_b_1.diffie_hellman(&m_a_1).to_bytes()
-                    [0..LAMBDA_C_BYTES]
-                    .try_into()
-                    .unwrap();
+                let rho_0 = h_function_2(idx, &t_b_0.diffie_hellman(&m_a_0).to_bytes());
+                let rho_1 = h_function_2(idx, &t_b_1.diffie_hellman(&m_a_1).to_bytes());
 
                 OneTimePadEncryptionKeys { rho_0, rho_1 }
             }),
@@ -177,7 +184,7 @@ impl EndemicOTReceiver {
                 let res = self.t_a_list[idx]
                     .diffie_hellman(&PublicKey::from(m_b_value))
                     .to_bytes();
-                res[0..LAMBDA_C_BYTES].try_into().unwrap()
+                h_function_2(idx, &res)
             });
 
         ReceiverOutput {
