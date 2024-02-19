@@ -5,8 +5,8 @@ pub mod consts {
     // Bits on underlying Scalar
     pub const KAPPA: usize = 256;
 
-    // Computational security parameter, fixed to /lambda_c = 256
-    // 256 OT seeds each 256-bit
+    // Computational security parameter, fixed to /lambda_c = 128
+    // 128 OT seeds each 128-bit
     pub const LAMBDA_C: usize = 128;
 
     pub const LAMBDA_S: usize = 128;
