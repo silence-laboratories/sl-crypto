@@ -118,8 +118,14 @@ impl EndemicOTSender {
                 msg2.m_b_list[idx] = [m_b_0, m_b_1];
 
                 // check key generation
-                let rho_0 = h_function_2(idx, &t_b_0.diffie_hellman(&m_a_0).to_bytes());
-                let rho_1 = h_function_2(idx, &t_b_1.diffie_hellman(&m_a_1).to_bytes());
+                let rho_0 = h_function_2(
+                    idx,
+                    &t_b_0.diffie_hellman(&m_a_0).to_bytes(),
+                );
+                let rho_1 = h_function_2(
+                    idx,
+                    &t_b_1.diffie_hellman(&m_a_1).to_bytes(),
+                );
 
                 OneTimePadEncryptionKeys { rho_0, rho_1 }
             }),
