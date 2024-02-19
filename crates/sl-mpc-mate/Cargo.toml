@@ -2,6 +2,7 @@
 name = "sl-mpc-mate"
 version = "0.1.0"
 edition = "2021"
+license = "SLL"
 description = "Utilities for secure multi-party computation"
 publish = false
 
