@@ -444,16 +444,16 @@ impl<const C: usize, const M: usize, const P: usize> Deref for SK<C, M, P> {
 
 pub fn decompose<const C: usize, const M: usize>(
     c: &Uint<C>,
-    m1: &Uint<M>,
-    m2: &Uint<M>,
+    p: &Uint<M>,
+    q: &Uint<M>,
 ) -> (Uint<M>, Uint<M>)
 where
     Uint<C>: Split<Output = Uint<M>>,
 {
     let (hi, lo) = c.split();
 
-    let cp: Uint<M> = Uint::const_rem_wide((lo, hi), m1).0;
-    let cq: Uint<M> = Uint::const_rem_wide((lo, hi), m2).0;
+    let cp: Uint<M> = Uint::const_rem_wide((lo, hi), p).0;
+    let cq: Uint<M> = Uint::const_rem_wide((lo, hi), q).0;
 
     (cp, cq)
 }
