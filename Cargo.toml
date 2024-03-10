@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-        "crates/sl-mpc-mate",
-        "crates/sl-oblivious",
-        "crates/sl-paillier"
+  "crates/sl-mpc-mate",
+  "crates/sl-oblivious",
+  "crates/sl-paillier",
+  "crates/sl-mpc-traits",
 ]
 
 [profile.bench]
