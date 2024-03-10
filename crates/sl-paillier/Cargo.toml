@@ -6,9 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crypto-bigint = { version = "0.5.5", default-features = false, features = ["rand_core"] }
-crypto-primes = "0.5"
-rand_core = "0.6.4"
+crypto-bigint = { version = "0.5.5", default-features = false, features = [
+  "rand_core",
+] }
+crypto-primes = { version = "0.5", default_features = false }
+rand_core = { version = "0.6.4", default_features = false }
+serde = { version = "1.0", default-features = false, features = [
+  "derive",
+], optional = true }
+
 
 [dev-dependencies]
 lazy_static = "1.4"
@@ -17,7 +23,13 @@ rand = "0.8"
 criterion = "0.5"
 kzen-paillier = { version = "0.4.3" }
 curv-kzen = { version = "0.10.0" }
+serde_json = "1.0"
+bincode = "1"
 
 [[bench]]
 name = "sl-paillier"
 harness = false
+
+[features]
+default = []
+serde = ["dep:serde", "crypto-bigint/serde"]

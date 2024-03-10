@@ -4,44 +4,181 @@
 use std::ops::Deref;
 
 use crypto_bigint::modular::runtime_mod::{DynResidue, DynResidueParams};
-use crypto_bigint::{Encoding, NonZero, RandomMod, Split, Uint};
+use crypto_bigint::{Bounded, Encoding, NonZero, RandomMod, Split, Uint};
 use crypto_bigint::{U1024, U2048, U4096};
 
 use crypto_primes::generate_prime_with_rng;
 
 use rand_core::CryptoRngCore;
 
-// #[cfg(test)]
-// #[macro_use(quickcheck)]
-// extern crate quickcheck_macros;
+// print-type-size type: `SK<64, 32, 16>`: 5400 bytes, alignment: 8 bytes
+// print-type-size     field `.phi`: 256 bytes
+// print-type-size     field `.inv_phi`: 256 bytes
+// print-type-size     field `.p`: 128 bytes
+// print-type-size     field `.hp`: 128 bytes
+// print-type-size     field `.q`: 128 bytes
+// print-type-size     field `.hq`: 128 bytes
+// print-type-size     field `.pk`: 2312 bytes
+// print-type-size     field `.pp_params`: 1032 bytes
+// print-type-size     field `.qq_params`: 1032 bytes
 
-pub mod paillier {
+pub type SK2048 = SK<{ U4096::LIMBS }, { U2048::LIMBS }, { U1024::LIMBS }>;
+pub type PK2048 = PK<{ U4096::LIMBS }, { U2048::LIMBS }>;
+pub type MinimalSK2048 = MinimalSK<{ U1024::LIMBS }>;
+pub type MinimalPK2048 = MinimalPK<{ U4096::LIMBS }, { U2048::LIMBS }>;
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct MinimalSK<const P: usize>
+where
+    Uint<P>: Bounded + Encoding,
+{
+    pub p: Uint<P>,
+    pub q: Uint<P>,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct MinimalPK<const NN: usize, const N: usize>
+where
+    Uint<N>: Bounded + Encoding,
+{
+    pub n: NonZero<Uint<N>>,
+}
+
+impl<const NN: usize, const N: usize> MinimalPK<NN, N>
+where
+    Uint<N>: Bounded + Encoding,
+    Uint<NN>: From<(Uint<N>, Uint<N>)>,
+{
+    pub fn compute_nn(&self) -> Uint<NN> {
+        self.n.square_wide().into()
+    }
+}
+
+impl<const NN: usize, const N: usize> From<MinimalPK<NN, N>> for PK<NN, N>
+where
+    Uint<N>: Bounded + Encoding,
+    Uint<NN>: Bounded + Encoding,
+    Uint<NN>: From<(Uint<N>, Uint<N>)>,
+{
+    fn from(value: MinimalPK<NN, N>) -> Self {
+        let nn: Uint<NN> = value.n.square_wide().into();
+        PK {
+            n: value.n,
+            params: DynResidueParams::new(&nn),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serialize {
     use super::*;
+    use serde::{Deserialize, Deserializer, Serialize};
+    impl Serialize for SK2048 {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let minimal = self.to_minimal();
+            minimal.serialize(serializer)
+        }
+    }
 
-    // print-type-size type: `SK<64, 32, 16>`: 5400 bytes, alignment: 8 bytes
-    // print-type-size     field `.phi`: 256 bytes
-    // print-type-size     field `.inv_phi`: 256 bytes
-    // print-type-size     field `.p`: 128 bytes
-    // print-type-size     field `.hp`: 128 bytes
-    // print-type-size     field `.q`: 128 bytes
-    // print-type-size     field `.hq`: 128 bytes
-    // print-type-size     field `.pk`: 2312 bytes
-    // print-type-size     field `.pp_params`: 1032 bytes
-    // print-type-size     field `.qq_params`: 1032 bytes
+    impl<'de> Deserialize<'de> for SK2048 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let minimal = MinimalSK2048::deserialize(deserializer)?;
+            Ok(minimal.into())
+        }
+    }
 
-    pub type SK2048 =
-        SK<{ U4096::LIMBS }, { U2048::LIMBS }, { U1024::LIMBS }>;
-    pub type PK2048 = PK<{ U4096::LIMBS }, { U2048::LIMBS }>;
+    impl Serialize for PK2048 {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let minimal = self.to_minimal();
+            minimal.serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for PK2048 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let minimal = MinimalPK2048::deserialize(deserializer)?;
+            Ok(minimal.into())
+        }
+    }
+
+    impl Serialize for RawCiphertext<{ U4096::LIMBS }> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            self.0.serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for RawCiphertext<{ U4096::LIMBS }> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let c = Uint::<{ U4096::LIMBS }>::deserialize(deserializer)?;
+            Ok(RawCiphertext(c))
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct RawPlaintext<const L: usize>(Uint<L>);
 
-#[derive(Debug, PartialEq)]
+impl<const L: usize> RawPlaintext<L> {
+    pub fn to_uint(&self) -> Uint<L> {
+        self.0
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct RawCiphertext<const L: usize>(Uint<L>);
 
-impl<const L: usize> RawCiphertext<L> {
+impl<const L: usize> RawCiphertext<L>
+where
+    Uint<L>: Encoding,
+{
     pub fn from(c: Uint<L>) -> Self {
+        Self(c)
+    }
+
+    pub fn to_be_bytes(&self) -> <Uint<L> as Encoding>::Repr {
+        self.0.to_be_bytes()
+    }
+
+    pub fn to_le_bytes(&self) -> <Uint<L> as Encoding>::Repr {
+        self.0.to_le_bytes()
+    }
+
+    pub fn to_uint(&self) -> Uint<L> {
+        self.0
+    }
+
+    pub fn from_be_bytes(bytes: <Uint<L> as Encoding>::Repr) -> Self {
+        Self(Uint::from_be_bytes(bytes))
+    }
+
+    pub fn from_le_bytes(bytes: <Uint<L> as Encoding>::Repr) -> Self {
+        Self(Uint::from_le_bytes(bytes))
+    }
+
+    pub fn from_uint(c: Uint<L>) -> Self {
         Self(c)
     }
 }
@@ -68,7 +205,7 @@ pub struct PK<const C: usize, const M: usize> {
     params: DynResidueParams<C>, // mod N^2
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SK<const C: usize, const M: usize, const P: usize> {
     pk: PK<C, M>,
     phi: Uint<M>,
@@ -98,8 +235,17 @@ where
 
     pub fn gen(rng: &mut impl CryptoRngCore) -> Self {
         let (p, q) = Self::gen_pq(rng);
-
         SK::from_pq(&p, &q)
+    }
+
+    pub fn gen_keys(rng: &mut impl CryptoRngCore) -> (SK<C, M, P>, PK<C, M>) {
+        let sk = SK::gen(rng);
+        let pk = sk.public_key();
+        (sk, pk)
+    }
+
+    pub fn get_phi(&self) -> &Uint<M> {
+        &self.phi
     }
 
     pub fn from_pq(p: &Uint<P>, q: &Uint<P>) -> Self {
@@ -207,7 +353,6 @@ where
         param: &DynResidueParams<M>,
     ) -> Uint<P> {
         // L_p(cp^{p-1} mod p^2) h_p mod p
-
         let mp: Uint<P> = DynResidue::new(&cp, *param)
             .pow_bounded_exp(
                 &p.wrapping_sub(&Uint::ONE).resize::<P>(),
@@ -233,6 +378,69 @@ where
         let mq = self.mp(cq, &self.q, &self.hq, &self.qq_params);
 
         RawPlaintext(recombine(&self.pinv_q, &mp, &mq, &self.p, &self.q))
+    }
+
+    pub fn extract_n_root(
+        &self,
+        z: &Uint<M>,
+        init_params: &(
+            Uint<P>,
+            Uint<P>,
+            DynResidueParams<P>,
+            DynResidueParams<P>,
+        ),
+    ) -> Uint<M> {
+        let (zp, zq) = decompose(z, &self.p, &self.q);
+        let rp = DynResidue::new(&zp, init_params.2)
+            .pow(&init_params.0)
+            .retrieve();
+        let rq = DynResidue::new(&zq, init_params.3)
+            .pow(&init_params.1)
+            .retrieve();
+
+        recombine(&self.pinv_q, &rp, &rq, &self.p, &self.q)
+    }
+
+    // To reduce recalculation of constant params
+    pub fn extract_n_root_init_params(
+        &self,
+    ) -> (Uint<P>, Uint<P>, DynResidueParams<P>, DynResidueParams<P>) {
+        let dk_qminusone = self.q.wrapping_sub(&Uint::ONE);
+        let dk_pminusone = self.p.wrapping_sub(&Uint::ONE);
+        let dk_dn = self.n.inv_mod(&self.phi).0;
+
+        let (dk_dp, dk_dq) = decompose(&dk_dn, &dk_pminusone, &dk_qminusone);
+
+        let p_params = DynResidueParams::new(&self.p);
+        let q_params = DynResidueParams::new(&self.q);
+
+        (dk_dp, dk_dq, p_params, q_params)
+    }
+}
+
+impl<const C: usize, const M: usize, const P: usize> SK<C, M, P>
+where
+    Uint<P>: Bounded + Encoding,
+{
+    pub fn to_minimal(&self) -> MinimalSK<P> {
+        MinimalSK {
+            p: self.p,
+            q: self.q,
+        }
+    }
+}
+
+impl<const C: usize, const M: usize, const P: usize> From<MinimalSK<P>>
+    for SK<C, M, P>
+where
+    Uint<P>: Bounded + Encoding,
+    Uint<C>: Split<Output = Uint<M>>,
+    Uint<C>: From<(Uint<M>, Uint<M>)>,
+    Uint<M>: From<(Uint<P>, Uint<P>)>,
+    Uint<M>: Encoding + Split<Output = Uint<P>>,
+{
+    fn from(minimal: MinimalSK<P>) -> Self {
+        SK::from_pq(&minimal.p, &minimal.q)
     }
 }
 
@@ -262,9 +470,9 @@ where
 
 // Algo 14.71 with Note 14.75 (i)
 pub fn recombine<const M: usize, const P: usize>(
-    c_2: &Uint<P>,
-    v_1: &Uint<P>,
-    v_2: &Uint<P>,
+    p_inv_q: &Uint<P>,
+    v1: &Uint<P>,
+    v2: &Uint<P>,
     p: &Uint<P>,
     q: &Uint<P>,
 ) -> Uint<M>
@@ -274,14 +482,18 @@ where
     // C_2 = p^-1 mod q
     // let c_2 = p.inv_odd_mod(q).0;
 
+    let non_zero_q = NonZero::new(*q).unwrap();
     // d = (v_2 - v_1) mod q
-    let d = v_2.sub_mod(v_1, q);
+    // NOTE: Peforming one mod reduction, as sub_mod assumes
+    // that v2 - v1 is in range [-q, q);
+    let v1_less_q = v1 % non_zero_q;
+    let d = v2.sub_mod(&v1_less_q, q);
 
     // u = (v_2 - v_1) C_2 mod q
-    let u: Uint<P> = Uint::const_rem_wide(d.mul_wide(c_2), q).0;
+    let u: Uint<P> = Uint::const_rem_wide(d.mul_wide(p_inv_q), q).0;
 
     // x = v_1 + u p
-    Uint::from(u.mul_wide(p)).wrapping_add(&v_1.resize())
+    Uint::from(u.mul_wide(p)).wrapping_add(&v1.resize())
 }
 
 impl<const C: usize, const M: usize> PK<C, M>
@@ -300,7 +512,15 @@ where
         }
     }
 
-    pub fn get_n(&self) -> &Uint<M> {
+    pub fn to_minimal(&self) -> MinimalPK<C, M>
+    where
+        Uint<M>: Bounded + Encoding,
+        Uint<C>: Bounded + Encoding,
+    {
+        MinimalPK { n: self.n }
+    }
+
+    pub fn get_n(&self) -> &NonZero<Uint<M>> {
         &self.n
     }
 
@@ -351,8 +571,7 @@ where
         let r = DynResidue::new(&r.resize(), self.params);
 
         // r^N mod N^2
-        let r_pow_n =
-            r.pow_bounded_exp(&self.n.resize::<M>(), Uint::<M>::BITS);
+        let r_pow_n = r.pow_bounded_exp(&self.n, self.n.bits_vartime());
 
         //
         // g == (1 + N)
@@ -370,7 +589,6 @@ where
 
         // c = g^m * r^N mod N^2
         let c = g_pow_m.mul(&r_pow_n);
-
         RawCiphertext(c.retrieve())
     }
 
@@ -392,9 +610,7 @@ where
         m: &RawPlaintext<M>,
     ) -> RawCiphertext<C> {
         // c = c^m mod N^2
-        let c = DynResidue::new(&c.0, self.params)
-            .pow_bounded_exp(&m.0.resize::<M>(), Uint::<M>::BITS)
-            .retrieve();
+        let c = DynResidue::new(&c.0, self.params).pow(&m.0).retrieve();
 
         RawCiphertext(c)
     }
@@ -433,11 +649,11 @@ mod tests {
     static R: &str = "1a8b6c80c0cad628e4146e473d49b90b445d09e9a7934431c5cb3e7a43b162018e50b116ed8a0ebaf4b8907a18ad30edfbf573614ededd1bc763265be3a6eeef307d40c2431fa9970590fecd7c8af25d599b513749f998c1ba7a64caeedb2d5dd034f718b9efdf5cf62b129459134b257cf28c61bbe40fc4c20caec7c58b9fa4fa4aea0e2164a398a3c2a21cd012aee7bba3f502b9b10680a36e615d81ef690346d33c05966415c0bff5e6f856ca2bca5786947cca9adfd8300cbf0d2d6f0d4c848b21f46961443fb4519b8ee2dae018c586afe0ee0f430fde643e423cce0cf56f0a59baf6652b250ef6184ffcf09039d34e0a2e0d95c3b24295929e3db4d5f4";
 
     lazy_static::lazy_static! {
-        static ref SK: paillier::SK2048 = {
+        static ref SK: SK2048 = {
             let p: U1024 = from_hex(P);
             let q: U1024 = from_hex(Q);
 
-            paillier::SK2048::from_pq(&p, &q)
+            SK2048::from_pq(&p, &q)
         };
 
         static ref RU: U2048 = from_hex(R);
@@ -581,7 +797,7 @@ mod tests {
         const R: u8 = 83;
         const N: u8 = P * Q;
 
-        let pk = paillier::PK2048::from_n(&N.into());
+        let pk = PK2048::from_n(&N.into());
 
         let m = pk.message(&[M]).unwrap();
 
@@ -589,7 +805,7 @@ mod tests {
 
         assert_eq!(c, RawCiphertext::from(U4096::from_u64(23911u64)));
 
-        let sk = paillier::SK2048::from_pq(&11u8.into(), &17u8.into());
+        let sk = SK2048::from_pq(&11u8.into(), &17u8.into());
 
         assert_eq!(sk.decrypt(&c), m);
         assert_eq!(sk.decrypt_fast(&c), m);
@@ -611,16 +827,31 @@ mod tests {
     #[test]
     fn gen() {
         let mut rng = rand::thread_rng();
+        let (p, q) = SK2048::gen_pq(&mut rng);
+        let sk = SK2048::from_pq(&p, &q);
+        let _: U2048 = sk.gen_r(&mut rng);
+    }
 
-        let (p, q) = paillier::SK2048::gen_pq(&mut rng);
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_ser_de() {
+        let mut rng = rand::thread_rng();
+        let (p, q) = SK2048::gen_pq(&mut rng);
 
-        let sk = paillier::SK2048::from_pq(&p, &q);
+        let sk = SK2048::from_pq(&p, &q);
+        let pk = sk.public_key();
+        let s1 = serde_json::to_string_pretty(&sk).unwrap();
+        let p1 = serde_json::to_string_pretty(&pk).unwrap();
+        let sk: SK2048 = serde_json::from_str(&s1).unwrap();
+        let pk: PK2048 = serde_json::from_str(&p1).unwrap();
 
-        let r: U2048 = sk.gen_r(&mut rng);
+        let s2 = serde_json::to_string_pretty(&sk).unwrap();
+        let p2 = serde_json::to_string_pretty(&pk).unwrap();
+        assert_eq!(s1, s2);
+        assert_eq!(p1, p2);
 
-        println!("P {p:x}");
-        println!("Q {q:x}");
-        println!("R {r:x}");
-        println!("N {}", sk.get_n());
+        let s1b = bincode::serialize(&sk).unwrap();
+        let sk1: SK2048 = bincode::deserialize(&s1b).unwrap();
+        assert_eq!(sk.to_minimal(), sk1.to_minimal());
     }
 }
