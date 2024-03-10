@@ -4,7 +4,7 @@
 use std::ops::Deref;
 
 use crypto_bigint::modular::runtime_mod::{DynResidue, DynResidueParams};
-use crypto_bigint::{Encoding, NonZero, RandomMod, Split, Uint};
+use crypto_bigint::{Bounded, Encoding, NonZero, RandomMod, Split, Uint};
 use crypto_bigint::{U1024, U2048, U4096};
 
 use crypto_primes::generate_prime_with_rng;
@@ -16,6 +16,7 @@ use rand_core::CryptoRngCore;
 // extern crate quickcheck_macros;
 
 pub mod paillier {
+
     use super::*;
 
     // print-type-size type: `SK<64, 32, 16>`: 5400 bytes, alignment: 8 bytes
@@ -32,16 +33,215 @@ pub mod paillier {
     pub type SK2048 =
         SK<{ U4096::LIMBS }, { U2048::LIMBS }, { U1024::LIMBS }>;
     pub type PK2048 = PK<{ U4096::LIMBS }, { U2048::LIMBS }>;
+
+    // impl serde::Serialize for SK2048 {
+    //     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    //     where
+    //         S: serde::Serializer,
+    //     {
+    //         use serde::ser::SerializeStruct;
+    //         let mut state = serializer.serialize_struct("SK2048", 8)?;
+    //         state.serialize_field("p", &self.p)?;
+    //         state.serialize_field("q", &self.q)?;
+    //         state.end()
+    //     }
+    // }
+    // impl serde::Serialize for PK2048 {
+    //     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    //     where
+    //         S: serde::Serializer,
+    //     {
+    //         use serde::ser::SerializeStruct;
+    //         let mut state = serializer.serialize_struct("PK2048", 2)?;
+    //         state.serialize_field("n", self.get_n())?;
+    //         state.end()
+    //     }
+    // }
+
+    // impl<'de> serde::Deserialize<'de> for SK2048 {
+    //     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    //     where
+    //         D: serde::Deserializer<'de>,
+    //     {
+    //         #[derive(serde::Deserialize)]
+    //         #[serde(field_identifier, rename_all = "lowercase")]
+    //         enum Field {
+    //             P,
+    //             Q,
+    //         }
+
+    //         struct DurationVisitor;
+
+    //         impl<'de> serde::de::Visitor<'de> for DurationVisitor {
+    //             type Value = SK2048;
+
+    //             fn expecting(
+    //                 &self,
+    //                 formatter: &mut fmt::Formatter,
+    //             ) -> fmt::Result {
+    //                 formatter.write_str("struct SK2048")
+    //             }
+
+    //             fn visit_seq<V>(self, mut seq: V) -> Result<SK2048, V::Error>
+    //             where
+    //                 V: serde::de::SeqAccess<'de>,
+    //             {
+    //                 let p = seq.next_element()?.ok_or_else(|| {
+    //                     serde::de::Error::invalid_length(0, &self)
+    //                 })?;
+    //                 let q = seq.next_element()?.ok_or_else(|| {
+    //                     serde::de::Error::invalid_length(1, &self)
+    //                 })?;
+    //                 Ok(SK2048::from_pq(
+    //                     &Uint::from_le_hex(p),
+    //                     &Uint::from_le_hex(q),
+    //                 ))
+    //             }
+
+    //             fn visit_map<V>(self, mut map: V) -> Result<SK2048, V::Error>
+    //             where
+    //                 V: serde::de::MapAccess<'de>,
+    //             {
+    //                 let mut p = None;
+    //                 let mut q = None;
+    //                 while let Some(key) = map.next_key()? {
+    //                     match key {
+    //                         Field::P => {
+    //                             if p.is_some() {
+    //                                 return Err(
+    //                                     serde::de::Error::duplicate_field(
+    //                                         "p",
+    //                                     ),
+    //                                 );
+    //                             }
+    //                             p = Some(map.next_value()?);
+    //                         }
+    //                         Field::Q => {
+    //                             if q.is_some() {
+    //                                 return Err(
+    //                                     serde::de::Error::duplicate_field(
+    //                                         "q",
+    //                                     ),
+    //                                 );
+    //                             }
+    //                             q = Some(map.next_value()?);
+    //                         }
+    //                     }
+    //                 }
+    //                 let p = p.ok_or_else(|| {
+    //                     serde::de::Error::missing_field("secs")
+    //                 })?;
+    //                 let q = q.ok_or_else(|| {
+    //                     serde::de::Error::missing_field("nanos")
+    //                 })?;
+    //                 Ok(SK2048::from_pq(
+    //                     &Uint::from_le_hex(p),
+    //                     &Uint::from_le_hex(q),
+    //                 ))
+    //             }
+    //         }
+
+    //         const FIELDS: &'static [&'static str] = &["p", "q"];
+    //         deserializer.deserialize_struct("SK2048", FIELDS, DurationVisitor)
+    //     }
+    // }
+
+    // impl<'de> serde::Deserialize<'de> for PK2048 {
+    //     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    //     where
+    //         D: serde::Deserializer<'de>,
+    //     {
+    //         #[derive(serde::Deserialize)]
+    //         #[serde(field_identifier, rename_all = "lowercase")]
+    //         enum Field {
+    //             N,
+    //         }
+
+    //         struct PKVisitor;
+
+    //         impl<'de> serde::de::Visitor<'de> for PKVisitor {
+    //             type Value = PK2048;
+
+    //             fn expecting(
+    //                 &self,
+    //                 formatter: &mut fmt::Formatter,
+    //             ) -> fmt::Result {
+    //                 formatter.write_str("struct PK2048")
+    //             }
+
+    //             fn visit_map<V>(self, mut map: V) -> Result<PK2048, V::Error>
+    //             where
+    //                 V: serde::de::MapAccess<'de>,
+    //             {
+    //                 let mut n = None;
+    //                 while let Some(key) = map.next_key()? {
+    //                     match key {
+    //                         Field::N => {
+    //                             if n.is_some() {
+    //                                 return Err(
+    //                                     serde::de::Error::duplicate_field(
+    //                                         "n",
+    //                                     ),
+    //                                 );
+    //                             }
+    //                             n = Some(map.next_value()?);
+    //                         }
+    //                     }
+    //                 }
+    //                 let n = n.ok_or_else(|| {
+    //                     serde::de::Error::missing_field("n")
+    //                 })?;
+    //                 Ok(PK2048::from_n(&Uint::from_le_hex(n)))
+    //             }
+    //         }
+
+    //         const FIELDS: &'static [&'static str] = &["n"];
+    //         deserializer.deserialize_struct("PK2048", FIELDS, PKVisitor)
+    //     }
+    // }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct RawPlaintext<const L: usize>(Uint<L>);
 
-#[derive(Debug, PartialEq)]
+impl<const L: usize> RawPlaintext<L> {
+    pub fn to_uint(&self) -> Uint<L> {
+        self.0
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct RawCiphertext<const L: usize>(Uint<L>);
 
-impl<const L: usize> RawCiphertext<L> {
+impl<const L: usize> RawCiphertext<L>
+where
+    Uint<L>: Encoding,
+{
     pub fn from(c: Uint<L>) -> Self {
+        Self(c)
+    }
+
+    pub fn to_be_bytes(&self) -> <Uint<L> as Encoding>::Repr {
+        self.0.to_be_bytes()
+    }
+
+    pub fn to_le_bytes(&self) -> <Uint<L> as Encoding>::Repr {
+        self.0.to_le_bytes()
+    }
+
+    pub fn to_uint(&self) -> Uint<L> {
+        self.0
+    }
+
+    pub fn from_be_bytes(bytes: <Uint<L> as Encoding>::Repr) -> Self {
+        Self(Uint::from_be_bytes(bytes))
+    }
+
+    pub fn from_le_bytes(bytes: <Uint<L> as Encoding>::Repr) -> Self {
+        Self(Uint::from_le_bytes(bytes))
+    }
+
+    pub fn from_uint(c: Uint<L>) -> Self {
         Self(c)
     }
 }
@@ -68,7 +268,7 @@ pub struct PK<const C: usize, const M: usize> {
     params: DynResidueParams<C>, // mod N^2
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SK<const C: usize, const M: usize, const P: usize> {
     pk: PK<C, M>,
     phi: Uint<M>,
@@ -98,8 +298,17 @@ where
 
     pub fn gen(rng: &mut impl CryptoRngCore) -> Self {
         let (p, q) = Self::gen_pq(rng);
-
         SK::from_pq(&p, &q)
+    }
+
+    pub fn gen_keys(rng: &mut impl CryptoRngCore) -> (SK<C, M, P>, PK<C, M>) {
+        let sk = SK::gen(rng);
+        let pk = sk.public_key();
+        (sk, pk)
+    }
+
+    pub fn get_phi(&self) -> &Uint<M> {
+        &self.phi
     }
 
     pub fn from_pq(p: &Uint<P>, q: &Uint<P>) -> Self {
@@ -207,7 +416,6 @@ where
         param: &DynResidueParams<M>,
     ) -> Uint<P> {
         // L_p(cp^{p-1} mod p^2) h_p mod p
-
         let mp: Uint<P> = DynResidue::new(&cp, *param)
             .pow_bounded_exp(
                 &p.wrapping_sub(&Uint::ONE).resize::<P>(),
@@ -233,6 +441,43 @@ where
         let mq = self.mp(cq, &self.q, &self.hq, &self.qq_params);
 
         RawPlaintext(recombine(&self.pinv_q, &mp, &mq, &self.p, &self.q))
+    }
+
+    pub fn extract_n_root(
+        &self,
+        z: &Uint<M>,
+        init_params: &(
+            Uint<P>,
+            Uint<P>,
+            DynResidueParams<P>,
+            DynResidueParams<P>,
+        ),
+    ) -> Uint<M> {
+        let (zp, zq) = decompose(z, &self.p, &self.q);
+        let rp = DynResidue::new(&zp, init_params.2)
+            .pow(&init_params.0)
+            .retrieve();
+        let rq = DynResidue::new(&zq, init_params.3)
+            .pow(&init_params.1)
+            .retrieve();
+
+        recombine(&self.pinv_q, &rp, &rq, &self.p, &self.q)
+    }
+
+    // To reduce recalculation of constant params
+    pub fn extract_n_root_init_params(
+        &self,
+    ) -> (Uint<P>, Uint<P>, DynResidueParams<P>, DynResidueParams<P>) {
+        let dk_qminusone = self.q.wrapping_sub(&Uint::ONE);
+        let dk_pminusone = self.p.wrapping_sub(&Uint::ONE);
+        let dk_dn = self.n.inv_mod(&self.phi).0;
+
+        let (dk_dp, dk_dq) = decompose(&dk_dn, &dk_pminusone, &dk_qminusone);
+
+        let p_params = DynResidueParams::new(&self.p);
+        let q_params = DynResidueParams::new(&self.q);
+
+        (dk_dp, dk_dq, p_params, q_params)
     }
 }
 
@@ -281,6 +526,7 @@ where
     let u: Uint<P> = Uint::const_rem_wide(d.mul_wide(c_2), q).0;
 
     // x = v_1 + u p
+    // TODO: Overflow?
     Uint::from(u.mul_wide(p)).wrapping_add(&v_1.resize())
 }
 
@@ -300,6 +546,7 @@ where
         }
     }
 
+    // TODO: Make it NonZero only
     pub fn get_n(&self) -> &Uint<M> {
         &self.n
     }
@@ -351,8 +598,7 @@ where
         let r = DynResidue::new(&r.resize(), self.params);
 
         // r^N mod N^2
-        let r_pow_n =
-            r.pow_bounded_exp(&self.n.resize::<M>(), Uint::<M>::BITS);
+        let r_pow_n = r.pow_bounded_exp(&self.n, self.n.bits_vartime());
 
         //
         // g == (1 + N)
@@ -370,7 +616,6 @@ where
 
         // c = g^m * r^N mod N^2
         let c = g_pow_m.mul(&r_pow_n);
-
         RawCiphertext(c.retrieve())
     }
 
@@ -392,9 +637,7 @@ where
         m: &RawPlaintext<M>,
     ) -> RawCiphertext<C> {
         // c = c^m mod N^2
-        let c = DynResidue::new(&c.0, self.params)
-            .pow_bounded_exp(&m.0.resize::<M>(), Uint::<M>::BITS)
-            .retrieve();
+        let c = DynResidue::new(&c.0, self.params).pow(&m.0).retrieve();
 
         RawCiphertext(c)
     }
@@ -434,13 +677,14 @@ mod tests {
 
     lazy_static::lazy_static! {
         static ref SK: paillier::SK2048 = {
-            let p: U1024 = from_hex(P);
-            let q: U1024 = from_hex(Q);
-
-            paillier::SK2048::from_pq(&p, &q)
+            let mut rng = rand::thread_rng();
+            paillier::SK2048::gen(&mut rng)
         };
 
-        static ref RU: U2048 = from_hex(R);
+        static ref RU: U2048 = {
+            let mut rng = rand::thread_rng();
+            SK.gen_r(&mut rng)
+        };
     }
 
     fn from_hex<const L: usize>(h: &str) -> Uint<L> {
@@ -623,4 +867,26 @@ mod tests {
         println!("R {r:x}");
         println!("N {}", sk.get_n());
     }
+    // #[test]
+    // fn test_ser_de() {
+    //     let mut rng = rand::thread_rng();
+    //     let (p, q) = paillier::SK2048::gen_pq(&mut rng);
+
+    //     let sk = paillier::SK2048::from_pq(&p, &q);
+    //     let pk = sk.public_key();
+    //     let s1 = serde_json::to_string_pretty(&sk).unwrap();
+    //     let p1 = serde_json::to_string_pretty(&pk).unwrap();
+    //     let sk: paillier::SK2048 = serde_json::from_str(&s1).unwrap();
+    //     let pk: paillier::PK2048 = serde_json::from_str(&p1).unwrap();
+
+    //     let s2 = serde_json::to_string_pretty(&sk).unwrap();
+    //     let p2 = serde_json::to_string_pretty(&pk).unwrap();
+    //     println!("PK:{}", p1);
+    //     assert_eq!(s1, s2);
+    //     assert_eq!(p1, p2);
+
+    //     let s1b = bincode::serialize(&sk).unwrap();
+    //     let s2b: paillier::SK2048 = bincode::deserialize(&s1b).unwrap();
+    //     // let s2bb = bincode::serialize(&s2b).unwrap();
+    // }
 }
