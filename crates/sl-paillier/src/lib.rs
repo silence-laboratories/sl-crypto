@@ -45,21 +45,31 @@ where
 pub struct MinimalPK<const NN: usize, const N: usize>
 where
     Uint<N>: Bounded + Encoding,
-    Uint<NN>: Bounded + Encoding,
 {
     pub n: NonZero<Uint<N>>,
-    pub nn: Uint<NN>,
+}
+
+impl<const NN: usize, const N: usize> MinimalPK<NN, N>
+where
+    Uint<N>: Bounded + Encoding,
+    Uint<NN>: From<(Uint<N>, Uint<N>)>,
+{
+    pub fn compute_nn(&self) -> Uint<NN> {
+        self.n.square_wide().into()
+    }
 }
 
 impl<const NN: usize, const N: usize> From<MinimalPK<NN, N>> for PK<NN, N>
 where
     Uint<N>: Bounded + Encoding,
     Uint<NN>: Bounded + Encoding,
+    Uint<NN>: From<(Uint<N>, Uint<N>)>,
 {
     fn from(value: MinimalPK<NN, N>) -> Self {
+        let nn: Uint<NN> = value.n.square_wide().into();
         PK {
             n: value.n,
-            params: DynResidueParams::new(&value.nn),
+            params: DynResidueParams::new(&nn),
         }
     }
 }
@@ -507,10 +517,7 @@ where
         Uint<M>: Bounded + Encoding,
         Uint<C>: Bounded + Encoding,
     {
-        MinimalPK {
-            n: self.n,
-            nn: *self.params.modulus(),
-        }
+        MinimalPK { n: self.n }
     }
 
     pub fn get_n(&self) -> &NonZero<Uint<M>> {
