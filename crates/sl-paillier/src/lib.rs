@@ -9,13 +9,17 @@ use crypto_bigint::{U1024, U2048, U4096};
 
 use crypto_primes::generate_prime_with_rng;
 
+use paillier::{MinimalPK, MinimalSK};
 use rand_core::CryptoRngCore;
+use serde::{Deserialize, Deserializer, Serialize};
 
 // #[cfg(test)]
 // #[macro_use(quickcheck)]
 // extern crate quickcheck_macros;
 
 pub mod paillier {
+
+    use serde::{Deserialize, Serialize};
 
     use super::*;
 
@@ -33,172 +37,80 @@ pub mod paillier {
     pub type SK2048 =
         SK<{ U4096::LIMBS }, { U2048::LIMBS }, { U1024::LIMBS }>;
     pub type PK2048 = PK<{ U4096::LIMBS }, { U2048::LIMBS }>;
+    pub type MinimalSK2048 = MinimalSK<{ U1024::LIMBS }>;
+    pub type MinimalPK2048 = MinimalPK<{ U4096::LIMBS }, { U2048::LIMBS }>;
 
-    // impl serde::Serialize for SK2048 {
-    //     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    //     where
-    //         S: serde::Serializer,
-    //     {
-    //         use serde::ser::SerializeStruct;
-    //         let mut state = serializer.serialize_struct("SK2048", 8)?;
-    //         state.serialize_field("p", &self.p)?;
-    //         state.serialize_field("q", &self.q)?;
-    //         state.end()
-    //     }
-    // }
-    // impl serde::Serialize for PK2048 {
-    //     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    //     where
-    //         S: serde::Serializer,
-    //     {
-    //         use serde::ser::SerializeStruct;
-    //         let mut state = serializer.serialize_struct("PK2048", 2)?;
-    //         state.serialize_field("n", self.get_n())?;
-    //         state.end()
-    //     }
-    // }
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct MinimalSK<const P: usize>
+    where
+        Uint<P>: Bounded + Encoding,
+    {
+        pub p: Uint<P>,
+        pub q: Uint<P>,
+    }
 
-    // impl<'de> serde::Deserialize<'de> for SK2048 {
-    //     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    //     where
-    //         D: serde::Deserializer<'de>,
-    //     {
-    //         #[derive(serde::Deserialize)]
-    //         #[serde(field_identifier, rename_all = "lowercase")]
-    //         enum Field {
-    //             P,
-    //             Q,
-    //         }
+    #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
+    pub struct MinimalPK<const NN: usize, const N: usize>
+    where
+        Uint<N>: Bounded + Encoding,
+        Uint<NN>: Bounded + Encoding,
+    {
+        pub n: NonZero<Uint<N>>,
+        pub nn: Uint<NN>,
+    }
 
-    //         struct DurationVisitor;
+    impl<const NN: usize, const N: usize> From<MinimalPK<NN, N>> for PK<NN, N>
+    where
+        Uint<N>: Bounded + Encoding,
+        Uint<NN>: Bounded + Encoding,
+    {
+        fn from(value: MinimalPK<NN, N>) -> Self {
+            PK {
+                n: value.n,
+                params: DynResidueParams::new(&value.nn),
+            }
+        }
+    }
 
-    //         impl<'de> serde::de::Visitor<'de> for DurationVisitor {
-    //             type Value = SK2048;
+    impl Serialize for SK2048 {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let minimal = self.to_minimal();
+            minimal.serialize(serializer)
+        }
+    }
 
-    //             fn expecting(
-    //                 &self,
-    //                 formatter: &mut fmt::Formatter,
-    //             ) -> fmt::Result {
-    //                 formatter.write_str("struct SK2048")
-    //             }
+    impl<'de> Deserialize<'de> for SK2048 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let minimal = MinimalSK2048::deserialize(deserializer)?;
+            Ok(minimal.into())
+        }
+    }
 
-    //             fn visit_seq<V>(self, mut seq: V) -> Result<SK2048, V::Error>
-    //             where
-    //                 V: serde::de::SeqAccess<'de>,
-    //             {
-    //                 let p = seq.next_element()?.ok_or_else(|| {
-    //                     serde::de::Error::invalid_length(0, &self)
-    //                 })?;
-    //                 let q = seq.next_element()?.ok_or_else(|| {
-    //                     serde::de::Error::invalid_length(1, &self)
-    //                 })?;
-    //                 Ok(SK2048::from_pq(
-    //                     &Uint::from_le_hex(p),
-    //                     &Uint::from_le_hex(q),
-    //                 ))
-    //             }
+    impl Serialize for PK2048 {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let minimal = self.to_minimal();
+            minimal.serialize(serializer)
+        }
+    }
 
-    //             fn visit_map<V>(self, mut map: V) -> Result<SK2048, V::Error>
-    //             where
-    //                 V: serde::de::MapAccess<'de>,
-    //             {
-    //                 let mut p = None;
-    //                 let mut q = None;
-    //                 while let Some(key) = map.next_key()? {
-    //                     match key {
-    //                         Field::P => {
-    //                             if p.is_some() {
-    //                                 return Err(
-    //                                     serde::de::Error::duplicate_field(
-    //                                         "p",
-    //                                     ),
-    //                                 );
-    //                             }
-    //                             p = Some(map.next_value()?);
-    //                         }
-    //                         Field::Q => {
-    //                             if q.is_some() {
-    //                                 return Err(
-    //                                     serde::de::Error::duplicate_field(
-    //                                         "q",
-    //                                     ),
-    //                                 );
-    //                             }
-    //                             q = Some(map.next_value()?);
-    //                         }
-    //                     }
-    //                 }
-    //                 let p = p.ok_or_else(|| {
-    //                     serde::de::Error::missing_field("secs")
-    //                 })?;
-    //                 let q = q.ok_or_else(|| {
-    //                     serde::de::Error::missing_field("nanos")
-    //                 })?;
-    //                 Ok(SK2048::from_pq(
-    //                     &Uint::from_le_hex(p),
-    //                     &Uint::from_le_hex(q),
-    //                 ))
-    //             }
-    //         }
-
-    //         const FIELDS: &'static [&'static str] = &["p", "q"];
-    //         deserializer.deserialize_struct("SK2048", FIELDS, DurationVisitor)
-    //     }
-    // }
-
-    // impl<'de> serde::Deserialize<'de> for PK2048 {
-    //     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    //     where
-    //         D: serde::Deserializer<'de>,
-    //     {
-    //         #[derive(serde::Deserialize)]
-    //         #[serde(field_identifier, rename_all = "lowercase")]
-    //         enum Field {
-    //             N,
-    //         }
-
-    //         struct PKVisitor;
-
-    //         impl<'de> serde::de::Visitor<'de> for PKVisitor {
-    //             type Value = PK2048;
-
-    //             fn expecting(
-    //                 &self,
-    //                 formatter: &mut fmt::Formatter,
-    //             ) -> fmt::Result {
-    //                 formatter.write_str("struct PK2048")
-    //             }
-
-    //             fn visit_map<V>(self, mut map: V) -> Result<PK2048, V::Error>
-    //             where
-    //                 V: serde::de::MapAccess<'de>,
-    //             {
-    //                 let mut n = None;
-    //                 while let Some(key) = map.next_key()? {
-    //                     match key {
-    //                         Field::N => {
-    //                             if n.is_some() {
-    //                                 return Err(
-    //                                     serde::de::Error::duplicate_field(
-    //                                         "n",
-    //                                     ),
-    //                                 );
-    //                             }
-    //                             n = Some(map.next_value()?);
-    //                         }
-    //                     }
-    //                 }
-    //                 let n = n.ok_or_else(|| {
-    //                     serde::de::Error::missing_field("n")
-    //                 })?;
-    //                 Ok(PK2048::from_n(&Uint::from_le_hex(n)))
-    //             }
-    //         }
-
-    //         const FIELDS: &'static [&'static str] = &["n"];
-    //         deserializer.deserialize_struct("PK2048", FIELDS, PKVisitor)
-    //     }
-    // }
+    impl<'de> Deserialize<'de> for PK2048 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let minimal = MinimalPK2048::deserialize(deserializer)?;
+            Ok(minimal.into())
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -212,6 +124,25 @@ impl<const L: usize> RawPlaintext<L> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct RawCiphertext<const L: usize>(Uint<L>);
+
+impl Serialize for RawCiphertext<{ U4096::LIMBS }> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RawCiphertext<{ U4096::LIMBS }> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let c = Uint::<{ U4096::LIMBS }>::deserialize(deserializer)?;
+        Ok(RawCiphertext(c))
+    }
+}
 
 impl<const L: usize> RawCiphertext<L>
 where
@@ -481,6 +412,32 @@ where
     }
 }
 
+impl<const C: usize, const M: usize, const P: usize> SK<C, M, P>
+where
+    Uint<P>: Bounded + Encoding,
+{
+    pub fn to_minimal(&self) -> MinimalSK<P> {
+        MinimalSK {
+            p: self.p,
+            q: self.q,
+        }
+    }
+}
+
+impl<const C: usize, const M: usize, const P: usize> From<MinimalSK<P>>
+    for SK<C, M, P>
+where
+    Uint<P>: Bounded + Encoding,
+    Uint<C>: Split<Output = Uint<M>>,
+    Uint<C>: From<(Uint<M>, Uint<M>)>,
+    Uint<M>: From<(Uint<P>, Uint<P>)>,
+    Uint<M>: Encoding + Split<Output = Uint<P>>,
+{
+    fn from(minimal: MinimalSK<P>) -> Self {
+        SK::from_pq(&minimal.p, &minimal.q)
+    }
+}
+
 impl<const C: usize, const M: usize, const P: usize> Deref for SK<C, M, P> {
     type Target = PK<C, M>;
 
@@ -491,25 +448,25 @@ impl<const C: usize, const M: usize, const P: usize> Deref for SK<C, M, P> {
 
 pub fn decompose<const C: usize, const M: usize>(
     c: &Uint<C>,
-    p: &Uint<M>,
-    q: &Uint<M>,
+    m1: &Uint<M>,
+    m2: &Uint<M>,
 ) -> (Uint<M>, Uint<M>)
 where
     Uint<C>: Split<Output = Uint<M>>,
 {
     let (hi, lo) = c.split();
 
-    let cp: Uint<M> = Uint::const_rem_wide((lo, hi), p).0;
-    let cq: Uint<M> = Uint::const_rem_wide((lo, hi), q).0;
+    let cp: Uint<M> = Uint::const_rem_wide((lo, hi), m1).0;
+    let cq: Uint<M> = Uint::const_rem_wide((lo, hi), m2).0;
 
     (cp, cq)
 }
 
 // Algo 14.71 with Note 14.75 (i)
 pub fn recombine<const M: usize, const P: usize>(
-    c_2: &Uint<P>,
-    v_1: &Uint<P>,
-    v_2: &Uint<P>,
+    p_inv_q: &Uint<P>,
+    v1: &Uint<P>,
+    v2: &Uint<P>,
     p: &Uint<P>,
     q: &Uint<P>,
 ) -> Uint<M>
@@ -519,15 +476,18 @@ where
     // C_2 = p^-1 mod q
     // let c_2 = p.inv_odd_mod(q).0;
 
+    let non_zero_q = NonZero::new(*q).unwrap();
     // d = (v_2 - v_1) mod q
-    let d = v_2.sub_mod(v_1, q);
+    // NOTE: Peforming one mod reduction, as sub_mod assumes
+    // that v2 - v1 is in range [-q, q);
+    let v1_less_q = v1 % non_zero_q;
+    let d = v2.sub_mod(&v1_less_q, q);
 
     // u = (v_2 - v_1) C_2 mod q
-    let u: Uint<P> = Uint::const_rem_wide(d.mul_wide(c_2), q).0;
+    let u: Uint<P> = Uint::const_rem_wide(d.mul_wide(p_inv_q), q).0;
 
     // x = v_1 + u p
-    // TODO: Overflow?
-    Uint::from(u.mul_wide(p)).wrapping_add(&v_1.resize())
+    Uint::from(u.mul_wide(p)).wrapping_add(&v1.resize())
 }
 
 impl<const C: usize, const M: usize> PK<C, M>
@@ -546,8 +506,18 @@ where
         }
     }
 
-    // TODO: Make it NonZero only
-    pub fn get_n(&self) -> &Uint<M> {
+    pub fn to_minimal(&self) -> MinimalPK<C, M>
+    where
+        Uint<M>: Bounded + Encoding,
+        Uint<C>: Bounded + Encoding,
+    {
+        MinimalPK {
+            n: self.n,
+            nn: *self.params.modulus(),
+        }
+    }
+
+    pub fn get_n(&self) -> &NonZero<Uint<M>> {
         &self.n
     }
 
@@ -677,14 +647,13 @@ mod tests {
 
     lazy_static::lazy_static! {
         static ref SK: paillier::SK2048 = {
-            let mut rng = rand::thread_rng();
-            paillier::SK2048::gen(&mut rng)
+            let p: U1024 = from_hex(P);
+            let q: U1024 = from_hex(Q);
+
+            paillier::SK2048::from_pq(&p, &q)
         };
 
-        static ref RU: U2048 = {
-            let mut rng = rand::thread_rng();
-            SK.gen_r(&mut rng)
-        };
+        static ref RU: U2048 = from_hex(R);
     }
 
     fn from_hex<const L: usize>(h: &str) -> Uint<L> {
@@ -855,38 +824,29 @@ mod tests {
     #[test]
     fn gen() {
         let mut rng = rand::thread_rng();
-
+        let (p, q) = paillier::SK2048::gen_pq(&mut rng);
+        let sk = paillier::SK2048::from_pq(&p, &q);
+        let _: U2048 = sk.gen_r(&mut rng);
+    }
+    #[test]
+    fn test_ser_de() {
+        let mut rng = rand::thread_rng();
         let (p, q) = paillier::SK2048::gen_pq(&mut rng);
 
         let sk = paillier::SK2048::from_pq(&p, &q);
+        let pk = sk.public_key();
+        let s1 = serde_json::to_string_pretty(&sk).unwrap();
+        let p1 = serde_json::to_string_pretty(&pk).unwrap();
+        let sk: paillier::SK2048 = serde_json::from_str(&s1).unwrap();
+        let pk: paillier::PK2048 = serde_json::from_str(&p1).unwrap();
 
-        let r: U2048 = sk.gen_r(&mut rng);
+        let s2 = serde_json::to_string_pretty(&sk).unwrap();
+        let p2 = serde_json::to_string_pretty(&pk).unwrap();
+        assert_eq!(s1, s2);
+        assert_eq!(p1, p2);
 
-        println!("P {p:x}");
-        println!("Q {q:x}");
-        println!("R {r:x}");
-        println!("N {}", sk.get_n());
+        let s1b = bincode::serialize(&sk).unwrap();
+        let sk1: paillier::SK2048 = bincode::deserialize(&s1b).unwrap();
+        assert_eq!(sk.to_minimal(), sk1.to_minimal());
     }
-    // #[test]
-    // fn test_ser_de() {
-    //     let mut rng = rand::thread_rng();
-    //     let (p, q) = paillier::SK2048::gen_pq(&mut rng);
-
-    //     let sk = paillier::SK2048::from_pq(&p, &q);
-    //     let pk = sk.public_key();
-    //     let s1 = serde_json::to_string_pretty(&sk).unwrap();
-    //     let p1 = serde_json::to_string_pretty(&pk).unwrap();
-    //     let sk: paillier::SK2048 = serde_json::from_str(&s1).unwrap();
-    //     let pk: paillier::PK2048 = serde_json::from_str(&p1).unwrap();
-
-    //     let s2 = serde_json::to_string_pretty(&sk).unwrap();
-    //     let p2 = serde_json::to_string_pretty(&pk).unwrap();
-    //     println!("PK:{}", p1);
-    //     assert_eq!(s1, s2);
-    //     assert_eq!(p1, p2);
-
-    //     let s1b = bincode::serialize(&sk).unwrap();
-    //     let s2b: paillier::SK2048 = bincode::deserialize(&s1b).unwrap();
-    //     // let s2bb = bincode::serialize(&s2b).unwrap();
-    // }
 }
