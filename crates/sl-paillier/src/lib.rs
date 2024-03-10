@@ -9,69 +9,65 @@ use crypto_bigint::{U1024, U2048, U4096};
 
 use crypto_primes::generate_prime_with_rng;
 
-use paillier::{MinimalPK, MinimalSK};
 use rand_core::CryptoRngCore;
-use serde::{Deserialize, Deserializer, Serialize};
 
-// #[cfg(test)]
-// #[macro_use(quickcheck)]
-// extern crate quickcheck_macros;
+// print-type-size type: `SK<64, 32, 16>`: 5400 bytes, alignment: 8 bytes
+// print-type-size     field `.phi`: 256 bytes
+// print-type-size     field `.inv_phi`: 256 bytes
+// print-type-size     field `.p`: 128 bytes
+// print-type-size     field `.hp`: 128 bytes
+// print-type-size     field `.q`: 128 bytes
+// print-type-size     field `.hq`: 128 bytes
+// print-type-size     field `.pk`: 2312 bytes
+// print-type-size     field `.pp_params`: 1032 bytes
+// print-type-size     field `.qq_params`: 1032 bytes
 
-pub mod paillier {
+pub type SK2048 = SK<{ U4096::LIMBS }, { U2048::LIMBS }, { U1024::LIMBS }>;
+pub type PK2048 = PK<{ U4096::LIMBS }, { U2048::LIMBS }>;
+pub type MinimalSK2048 = MinimalSK<{ U1024::LIMBS }>;
+pub type MinimalPK2048 = MinimalPK<{ U4096::LIMBS }, { U2048::LIMBS }>;
 
-    use serde::{Deserialize, Serialize};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-    use super::*;
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct MinimalSK<const P: usize>
+where
+    Uint<P>: Bounded + Encoding,
+{
+    pub p: Uint<P>,
+    pub q: Uint<P>,
+}
 
-    // print-type-size type: `SK<64, 32, 16>`: 5400 bytes, alignment: 8 bytes
-    // print-type-size     field `.phi`: 256 bytes
-    // print-type-size     field `.inv_phi`: 256 bytes
-    // print-type-size     field `.p`: 128 bytes
-    // print-type-size     field `.hp`: 128 bytes
-    // print-type-size     field `.q`: 128 bytes
-    // print-type-size     field `.hq`: 128 bytes
-    // print-type-size     field `.pk`: 2312 bytes
-    // print-type-size     field `.pp_params`: 1032 bytes
-    // print-type-size     field `.qq_params`: 1032 bytes
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct MinimalPK<const NN: usize, const N: usize>
+where
+    Uint<N>: Bounded + Encoding,
+    Uint<NN>: Bounded + Encoding,
+{
+    pub n: NonZero<Uint<N>>,
+    pub nn: Uint<NN>,
+}
 
-    pub type SK2048 =
-        SK<{ U4096::LIMBS }, { U2048::LIMBS }, { U1024::LIMBS }>;
-    pub type PK2048 = PK<{ U4096::LIMBS }, { U2048::LIMBS }>;
-    pub type MinimalSK2048 = MinimalSK<{ U1024::LIMBS }>;
-    pub type MinimalPK2048 = MinimalPK<{ U4096::LIMBS }, { U2048::LIMBS }>;
-
-    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-    pub struct MinimalSK<const P: usize>
-    where
-        Uint<P>: Bounded + Encoding,
-    {
-        pub p: Uint<P>,
-        pub q: Uint<P>,
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
-    pub struct MinimalPK<const NN: usize, const N: usize>
-    where
-        Uint<N>: Bounded + Encoding,
-        Uint<NN>: Bounded + Encoding,
-    {
-        pub n: NonZero<Uint<N>>,
-        pub nn: Uint<NN>,
-    }
-
-    impl<const NN: usize, const N: usize> From<MinimalPK<NN, N>> for PK<NN, N>
-    where
-        Uint<N>: Bounded + Encoding,
-        Uint<NN>: Bounded + Encoding,
-    {
-        fn from(value: MinimalPK<NN, N>) -> Self {
-            PK {
-                n: value.n,
-                params: DynResidueParams::new(&value.nn),
-            }
+impl<const NN: usize, const N: usize> From<MinimalPK<NN, N>> for PK<NN, N>
+where
+    Uint<N>: Bounded + Encoding,
+    Uint<NN>: Bounded + Encoding,
+{
+    fn from(value: MinimalPK<NN, N>) -> Self {
+        PK {
+            n: value.n,
+            params: DynResidueParams::new(&value.nn),
         }
     }
+}
 
+#[cfg(feature = "serde")]
+mod serialize {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize};
     impl Serialize for SK2048 {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -111,6 +107,25 @@ pub mod paillier {
             Ok(minimal.into())
         }
     }
+
+    impl Serialize for RawCiphertext<{ U4096::LIMBS }> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            self.0.serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for RawCiphertext<{ U4096::LIMBS }> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let c = Uint::<{ U4096::LIMBS }>::deserialize(deserializer)?;
+            Ok(RawCiphertext(c))
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -124,25 +139,6 @@ impl<const L: usize> RawPlaintext<L> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct RawCiphertext<const L: usize>(Uint<L>);
-
-impl Serialize for RawCiphertext<{ U4096::LIMBS }> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for RawCiphertext<{ U4096::LIMBS }> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let c = Uint::<{ U4096::LIMBS }>::deserialize(deserializer)?;
-        Ok(RawCiphertext(c))
-    }
-}
 
 impl<const L: usize> RawCiphertext<L>
 where
@@ -646,11 +642,11 @@ mod tests {
     static R: &str = "1a8b6c80c0cad628e4146e473d49b90b445d09e9a7934431c5cb3e7a43b162018e50b116ed8a0ebaf4b8907a18ad30edfbf573614ededd1bc763265be3a6eeef307d40c2431fa9970590fecd7c8af25d599b513749f998c1ba7a64caeedb2d5dd034f718b9efdf5cf62b129459134b257cf28c61bbe40fc4c20caec7c58b9fa4fa4aea0e2164a398a3c2a21cd012aee7bba3f502b9b10680a36e615d81ef690346d33c05966415c0bff5e6f856ca2bca5786947cca9adfd8300cbf0d2d6f0d4c848b21f46961443fb4519b8ee2dae018c586afe0ee0f430fde643e423cce0cf56f0a59baf6652b250ef6184ffcf09039d34e0a2e0d95c3b24295929e3db4d5f4";
 
     lazy_static::lazy_static! {
-        static ref SK: paillier::SK2048 = {
+        static ref SK: SK2048 = {
             let p: U1024 = from_hex(P);
             let q: U1024 = from_hex(Q);
 
-            paillier::SK2048::from_pq(&p, &q)
+            SK2048::from_pq(&p, &q)
         };
 
         static ref RU: U2048 = from_hex(R);
@@ -794,7 +790,7 @@ mod tests {
         const R: u8 = 83;
         const N: u8 = P * Q;
 
-        let pk = paillier::PK2048::from_n(&N.into());
+        let pk = PK2048::from_n(&N.into());
 
         let m = pk.message(&[M]).unwrap();
 
@@ -802,7 +798,7 @@ mod tests {
 
         assert_eq!(c, RawCiphertext::from(U4096::from_u64(23911u64)));
 
-        let sk = paillier::SK2048::from_pq(&11u8.into(), &17u8.into());
+        let sk = SK2048::from_pq(&11u8.into(), &17u8.into());
 
         assert_eq!(sk.decrypt(&c), m);
         assert_eq!(sk.decrypt_fast(&c), m);
@@ -824,21 +820,23 @@ mod tests {
     #[test]
     fn gen() {
         let mut rng = rand::thread_rng();
-        let (p, q) = paillier::SK2048::gen_pq(&mut rng);
-        let sk = paillier::SK2048::from_pq(&p, &q);
+        let (p, q) = SK2048::gen_pq(&mut rng);
+        let sk = SK2048::from_pq(&p, &q);
         let _: U2048 = sk.gen_r(&mut rng);
     }
+
+    #[cfg(feature = "serde")]
     #[test]
     fn test_ser_de() {
         let mut rng = rand::thread_rng();
-        let (p, q) = paillier::SK2048::gen_pq(&mut rng);
+        let (p, q) = SK2048::gen_pq(&mut rng);
 
-        let sk = paillier::SK2048::from_pq(&p, &q);
+        let sk = SK2048::from_pq(&p, &q);
         let pk = sk.public_key();
         let s1 = serde_json::to_string_pretty(&sk).unwrap();
         let p1 = serde_json::to_string_pretty(&pk).unwrap();
-        let sk: paillier::SK2048 = serde_json::from_str(&s1).unwrap();
-        let pk: paillier::PK2048 = serde_json::from_str(&p1).unwrap();
+        let sk: SK2048 = serde_json::from_str(&s1).unwrap();
+        let pk: PK2048 = serde_json::from_str(&p1).unwrap();
 
         let s2 = serde_json::to_string_pretty(&sk).unwrap();
         let p2 = serde_json::to_string_pretty(&pk).unwrap();
@@ -846,7 +844,7 @@ mod tests {
         assert_eq!(p1, p2);
 
         let s1b = bincode::serialize(&sk).unwrap();
-        let sk1: paillier::SK2048 = bincode::deserialize(&s1b).unwrap();
+        let sk1: SK2048 = bincode::deserialize(&s1b).unwrap();
         assert_eq!(sk.to_minimal(), sk1.to_minimal());
     }
 }
