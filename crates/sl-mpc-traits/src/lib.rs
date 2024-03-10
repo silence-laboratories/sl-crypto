@@ -1,5 +1,3 @@
-use serde::{de::DeserializeOwned, Serialize};
-
 /// Trait that defines a state transition for any round based protocol.
 pub trait Round {
     /// Output of the state transition.
@@ -10,6 +8,10 @@ pub trait Round {
     fn process(self, messages: Self::Input) -> Self::Output;
 }
 
+#[cfg(feature = "serde")]
+use serde::{de::DeserializeOwned, Serialize};
+
+#[cfg(feature = "serde")]
 /// Trait that signifies a persistent object.
 /// Encoded using bincode.
 pub trait PersistentObject:
