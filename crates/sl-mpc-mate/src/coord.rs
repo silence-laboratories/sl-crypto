@@ -12,7 +12,10 @@ pub mod stats;
 #[cfg(feature = "simple-relay")]
 pub mod adversary;
 #[cfg(feature = "simple-relay")]
+pub mod pair;
+#[cfg(feature = "simple-relay")]
 pub mod simple;
+
 #[cfg(feature = "simple-relay")]
 pub use simple::SimpleMessageRelay;
 
