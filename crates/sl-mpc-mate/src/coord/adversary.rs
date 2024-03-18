@@ -178,7 +178,7 @@ impl Stream for Connection {
 }
 
 impl Sink<Vec<u8>> for Connection {
-    type Error = InvalidMessage;
+    type Error = MessageSendError;
 
     fn poll_ready(
         self: Pin<&mut Self>,
