@@ -3,33 +3,10 @@
 
 use std::{fmt, ops::Deref, time::Duration};
 
-use aead::{generic_array::typenum::Unsigned, AeadCore, Nonce};
-
-use chacha20poly1305::ChaCha20Poly1305;
 use sha2::{Digest, Sha256};
-
-pub use ed25519_dalek::{SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH};
-pub use x25519_dalek::{PublicKey, ReusableSecret, StaticSecret};
-
-type Aead = ChaCha20Poly1305;
 
 pub const MESSAGE_ID_SIZE: usize = 32;
 pub const MESSAGE_HEADER_SIZE: usize = MESSAGE_ID_SIZE + 4;
-
-pub const TAG_SIZE: usize = <Aead as AeadCore>::TagSize::USIZE;
-pub const NONCE_SIZE: usize = <Aead as AeadCore>::NonceSize::USIZE;
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum InvalidMessage {
-    /// We are trying to read more data than available
-    MessageTooShort,
-
-    /// Received an unexpected message
-    RecvError,
-
-    /// Send error
-    SendError,
-}
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct InstanceId([u8; 32]);
@@ -123,7 +100,7 @@ impl MsgId {
     /// Create ID for a broadcast message, without a designated receiver.
     pub fn broadcast(
         instance: &InstanceId,
-        sender_pk: &[u8; PUBLIC_KEY_LENGTH],
+        sender_pk: &[u8],
         tag: MessageTag,
     ) -> Self {
         Self::new(instance, sender_pk, None, tag)
@@ -214,35 +191,5 @@ pub struct AskMsg;
 impl AskMsg {
     pub fn allocate(id: &MsgId, ttl: u32) -> Vec<u8> {
         allocate_message(id, ttl, &[])
-    }
-}
-
-/// Counter to create a unuque nonce.
-#[derive(Default)]
-pub struct NonceCounter(u32);
-
-impl NonceCounter {
-    /// New counter initialized by 0.
-    pub fn new() -> Self {
-        Self(0)
-    }
-
-    /// Increment counter.
-    pub fn next_nonce(&mut self) -> Self {
-        self.0 = self.0.wrapping_add(1);
-        Self(self.0)
-    }
-
-    // Consume counter and create a nonce. This way
-    // we can't create two equal nonces from the same counter.
-    //
-    // This is private method and should be called
-    // from encrypt() to avoid using generated nonce
-    // more than once.
-    pub fn nonce(self) -> Nonce<Aead> {
-        let mut nonce = Nonce::<Aead>::default();
-        nonce[..4].copy_from_slice(&self.0.to_le_bytes());
-
-        nonce
     }
 }

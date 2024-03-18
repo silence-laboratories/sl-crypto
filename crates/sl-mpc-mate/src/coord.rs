@@ -18,11 +18,12 @@ pub use simple::SimpleMessageRelay;
 
 pub use buffered::BufferedMsgRelay;
 
+#[derive(Debug, Copy, Clone)]
 pub struct MessageSendError;
 
 pub trait Relay:
     Stream<Item = Vec<u8>>
-    + Sink<Vec<u8>, Error = InvalidMessage>
+    + Sink<Vec<u8>, Error = MessageSendError>
     + Unpin
     + 'static
 {
@@ -31,7 +32,7 @@ pub trait Relay:
 impl<T> Relay for T
 where
     T: Stream<Item = Vec<u8>>,
-    T: Sink<Vec<u8>, Error = InvalidMessage>,
+    T: Sink<Vec<u8>, Error = MessageSendError>,
     T: Unpin,
     T: 'static,
 {

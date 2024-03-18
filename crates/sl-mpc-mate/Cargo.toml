@@ -7,17 +7,7 @@ description = "Utilities for secure multi-party computation"
 publish = false
 
 [dependencies]
-generic-array = { version = "0.14.7" }
 tokio = { version = "1", features = ["rt", "sync", "time"], optional = true }
-aead = { version = "0.5.2" }
-chacha20 = { version = "0.9" }
-chacha20poly1305 = { version = "0.10.1" }
-x25519-dalek = { version = "2.0.0", features = [
-  "static_secrets",
-  "reusable_secrets",
-  "zeroize",
-] }
-ed25519-dalek = { version = "2.0.0" }
 sha2 = { version = "0.10" }
 rand = "0.8.5"
 rand_core = "0.6"
