@@ -7,8 +7,8 @@
 //! xi = kappa + 2 * lambda_s
 //! kappa = |q| = 256
 //! lambda_s = 128
-//! lambda_c = 256
-//! l = 2, rho = 1, OT_WIDTH = l + rho = 3
+//! lambda_c = 128
+//! l = 2, rho = 2, OT_WIDTH = l + rho = 4
 
 use std::array;
 
@@ -59,7 +59,7 @@ fn generate_gadget_vec(session_id: &[u8]) -> impl Iterator<Item = Scalar> {
 pub struct RVOLEOutput {
     a_tilde: [[[u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
     eta: [[u8; KAPPA_BYTES]; RHO],
-    mu_hash: [u8; 64],
+    mu_hash: [u8; 2 * LAMBDA_C_BYTES],
 }
 
 impl RVOLEOutput {
@@ -73,7 +73,7 @@ impl Default for RVOLEOutput {
         RVOLEOutput {
             a_tilde: [[[0u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
             eta: [[0u8; KAPPA_BYTES]; RHO],
-            mu_hash: [0u8; 64],
+            mu_hash: [0u8; 2 * LAMBDA_C_BYTES],
         }
     }
 }
@@ -221,7 +221,7 @@ impl RVOLEReceiver {
             }
         }
 
-        let mut mu_prime_hash = [0u8; 64];
+        let mut mu_prime_hash = [0u8; 2 * LAMBDA_C_BYTES];
         t.challenge_bytes(b"mu-hash", &mut mu_prime_hash);
 
         if rvole_output.mu_hash.ct_ne(&mu_prime_hash).into() {
