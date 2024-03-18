@@ -16,7 +16,7 @@ pub use futures_util::{Sink, SinkExt, Stream, StreamExt};
 
 use crate::message::*;
 
-use super::MessageRelayService;
+use super::{MessageRelayService, MessageSendError};
 
 #[derive(Debug)]
 struct Expire(Instant, MsgId, Kind);
@@ -71,7 +71,7 @@ impl Stream for MessageRelay {
 }
 
 impl Sink<Vec<u8>> for MessageRelay {
-    type Error = InvalidMessage;
+    type Error = MessageSendError;
 
     fn poll_ready(
         self: Pin<&mut Self>,
@@ -86,8 +86,7 @@ impl Sink<Vec<u8>> for MessageRelay {
     ) -> Result<(), Self::Error> {
         let this = &mut *self;
 
-        let hdr =
-            MsgHdr::from(&item).ok_or(InvalidMessage::MessageTooShort)?;
+        let hdr = MsgHdr::from(&item).ok_or(MessageSendError)?;
 
         let mut inner = this.inner.lock().unwrap();
 
@@ -305,7 +304,7 @@ mod tests {
 
     #[tokio::test]
     async fn coord() {
-        let sk = SigningKey::from_bytes(&rand::random());
+        let sk = &[100];
 
         let coord = SimpleMessageRelay::new();
 
@@ -313,7 +312,7 @@ mod tests {
 
         let msg_id = MsgId::new(
             &InstanceId::from([0; 32]),
-            sk.verifying_key().as_bytes(),
+            sk,
             None,
             MessageTag::tag(0),
         );
