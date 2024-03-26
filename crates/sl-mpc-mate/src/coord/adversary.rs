@@ -155,9 +155,11 @@ impl EvilMessageRelay {
     }
 }
 
-impl MessageRelayService<Connection> for EvilMessageRelay {
-    fn connect(&self) -> Connection {
-        Self::connect(self)
+impl MessageRelayService for EvilMessageRelay {
+    type MessageRelay = Connection;
+
+    async fn connect(&self) -> Option<Connection> {
+        Some(Self::connect(self))
     }
 }
 
