@@ -1,6 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
+use std::future::Future;
+
 pub use futures_util::{Sink, SinkExt, Stream, StreamExt};
 
 use crate::message::*;
@@ -38,6 +40,8 @@ where
 {
 }
 
-pub trait MessageRelayService<R: Relay> {
-    fn connect(&self) -> R;
+pub trait MessageRelayService {
+    type MessageRelay: Relay;
+
+    fn connect(&self) -> impl Future<Output = Option<Self::MessageRelay>>;
 }
