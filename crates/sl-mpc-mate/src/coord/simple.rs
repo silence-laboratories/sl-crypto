@@ -154,9 +154,11 @@ impl SimpleMessageRelay {
     }
 }
 
-impl MessageRelayService<MessageRelay> for SimpleMessageRelay {
-    fn connect(&self) -> MessageRelay {
-        Self::connect(self)
+impl MessageRelayService for SimpleMessageRelay {
+    type MessageRelay = MessageRelay;
+
+    async fn connect(&self) -> Option<Self::MessageRelay> {
+        Some(Self::connect(self))
     }
 }
 
