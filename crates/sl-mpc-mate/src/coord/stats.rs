@@ -127,6 +127,8 @@ impl<R: Relay> Sink<Vec<u8>> for RelayStats<R> {
     }
 }
 
+impl<R: Relay> Relay for RelayStats<R> {}
+
 impl<R: Relay> Deref for RelayStats<R> {
     type Target = R;
 

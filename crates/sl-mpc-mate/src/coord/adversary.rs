@@ -216,3 +216,5 @@ impl Sink<Vec<u8>> for Connection {
         Poll::Ready(Ok(()))
     }
 }
+
+impl Relay for Connection {}
