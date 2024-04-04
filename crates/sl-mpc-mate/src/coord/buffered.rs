@@ -43,33 +43,26 @@ impl<R: Relay> BufferedMsgRelay<R> {
             return Some(self.in_buf.swap_remove(idx));
         }
 
+        self.relay.flush().await.ok()?;
+
         loop {
-            // well, we have to poll_next() something suitable.
             let msg = self.relay.next().await?;
 
-            let id = if let Some(hdr) = MsgHdr::from(&msg) {
-                hdr.id
-            } else {
-                // FIXME here we drop an invalid message. How to handle?
-                continue;
-            };
-
-            if predicate(&id) {
-                // good, got it, return
-                return Some(msg);
-            } else {
-                // push into the buffer and try again
-                self.in_buf.push(msg);
+            if let Some(hdr) = MsgHdr::from(&msg) {
+                if predicate(&hdr.id) {
+                    // good, return it
+                    return Some(msg);
+                } else {
+                    // push into the buffer and try again
+                    self.in_buf.push(msg);
+                }
             }
         }
     }
 
     /// Function to receive message based on certain ID
     pub async fn recv(&mut self, id: &MsgId, ttl: u32) -> Option<Vec<u8>> {
-        let msg = AskMsg::allocate(id, ttl);
-
-        self.relay.send(msg).await.ok()?;
-
+        self.relay.ask(id, ttl).await.ok()?;
         self.wait_for(|msg| msg.eq(id)).await
     }
 
@@ -130,6 +123,8 @@ impl<R: Relay> Sink<Vec<u8>> for BufferedMsgRelay<R> {
         self.relay.poll_close_unpin(cx)
     }
 }
+
+impl<R: Relay> Relay for BufferedMsgRelay<R> {}
 
 impl<R: Relay> Deref for BufferedMsgRelay<R> {
     type Target = R;

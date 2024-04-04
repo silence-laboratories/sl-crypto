@@ -1,9 +1,13 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::future::Future;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
-pub use futures_util::{Sink, SinkExt, Stream, StreamExt};
+pub use futures_util::{sink::Feed, Sink, SinkExt, Stream, StreamExt};
 
 use crate::message::*;
 
@@ -23,21 +27,37 @@ pub use buffered::BufferedMsgRelay;
 #[derive(Debug, Copy, Clone)]
 pub struct MessageSendError;
 
+pub struct MaybeFeed<'a, S: ?Sized>(Option<Feed<'a, S, Vec<u8>>>);
+
+impl<Si: Sink<Vec<u8>> + Unpin> MaybeFeed<'_, Si> {
+    pub fn skip() -> Self {
+        Self(None)
+    }
+}
+
+impl<Si: Sink<Vec<u8>> + Unpin> Future for MaybeFeed<'_, Si> {
+    type Output = Result<(), Si::Error>;
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Self::Output> {
+        match &mut self.get_mut().0 {
+            None => Poll::Ready(Ok(())),
+            Some(feed) => Pin::new(feed).poll(cx),
+        }
+    }
+}
+
 pub trait Relay:
     Stream<Item = Vec<u8>>
     + Sink<Vec<u8>, Error = MessageSendError>
     + Unpin
     + 'static
 {
-}
-
-impl<T> Relay for T
-where
-    T: Stream<Item = Vec<u8>>,
-    T: Sink<Vec<u8>, Error = MessageSendError>,
-    T: Unpin,
-    T: 'static,
-{
+    fn ask(&mut self, id: &MsgId, ttl: u32) -> MaybeFeed<'_, Self> {
+        MaybeFeed(Some(self.feed(AskMsg::allocate(id, ttl))))
+    }
 }
 
 pub trait MessageRelayService {

@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 pub use futures_util::{Sink, SinkExt, Stream, StreamExt};
 
-use crate::message::*;
+use crate::{coord::Relay, message::*};
 
 use super::{MessageRelayService, MessageSendError};
 
@@ -115,6 +115,8 @@ impl Sink<Vec<u8>> for MessageRelay {
         Poll::Ready(Ok(()))
     }
 }
+
+impl Relay for MessageRelay {}
 
 #[derive(Debug, Default)]
 pub struct SimpleMessageRelay {
