@@ -1,8 +1,6 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use elliptic_curve::bigint::{Encoding, U256};
-use elliptic_curve::ops::Reduce;
 use elliptic_curve::{Field, Group};
 use std::array;
 
@@ -12,9 +10,7 @@ use rand::prelude::*;
 use crate::{
     constants::ENDEMIC_OT_LABEL, params::consts::*, utils::ExtractBit,
 };
-use k256::{
-    elliptic_curve::group::GroupEncoding, ProjectivePoint, Scalar, Secp256k1,
-};
+use k256::{elliptic_curve::group::GroupEncoding, ProjectivePoint, Scalar};
 use std::ops::Neg;
 
 /// EndemicOT Message 1
@@ -67,6 +63,19 @@ pub struct ReceiverOutput {
     pub(crate) otp_dec_keys: [[u8; LAMBDA_C_BYTES]; LAMBDA_C],
 }
 
+/// Try to decompress point from x coordinate
+fn point_from_x_coord(x: [u8; 32], is_even: bool) -> Option<ProjectivePoint> {
+    let mut point_compressed = [0u8; 33];
+    if is_even {
+        point_compressed[0] = 2u8;
+    } else {
+        point_compressed[0] = 3u8;
+    }
+    point_compressed[1..33].copy_from_slice(x.as_slice());
+
+    decode_point(&point_compressed)
+}
+
 /// RO for EndemicOT
 fn h_function(
     ro_index: usize,
@@ -81,14 +90,18 @@ fn h_function(
     t.append_message(b"batch_index", &(batch_index as u16).to_be_bytes());
     t.append_message(b"pk", &pk.to_affine().to_bytes());
 
-    let mut output = [0u8; 32];
-    t.challenge_bytes(b"", &mut output);
-
-    let s = elliptic_curve::Scalar::<Secp256k1>::reduce(U256::from_be_bytes(
-        output,
-    ));
-
-    ProjectivePoint::GENERATOR * s
+    loop {
+        let mut x_coord = [0u8; 32];
+        t.challenge_bytes(b"x_coord", &mut x_coord);
+        let mut choice = [0u8];
+        t.challenge_bytes(b"point_choice", &mut choice);
+        let is_even = (choice[0] & 0x01) == 0;
+        let point = match point_from_x_coord(x_coord, is_even) {
+            None => continue,
+            Some(v) => v,
+        };
+        return point;
+    }
 }
 
 /// create LAMBDA_C_BYTES ot seed
@@ -209,14 +222,23 @@ impl EndemicOTReceiver {
                 let t_a = &next_state.t_a_list[idx];
 
                 let r_other = ProjectivePoint::random(&mut *rng);
-                let r_choice = ProjectivePoint::GENERATOR * t_a
-                    + h_function(
-                        random_choice_bit,
-                        idx,
-                        session_id,
-                        &r_other,
-                    )
-                    .neg();
+                let h_choice =
+                    h_function(random_choice_bit, idx, session_id, &r_other);
+
+                let r_choice =
+                    ProjectivePoint::GENERATOR * t_a + h_choice.neg();
+
+                // dummy calculation for constant time
+                let h_other = h_function(
+                    random_choice_bit ^ 1,
+                    idx,
+                    session_id,
+                    &r_choice,
+                );
+                let mut temp = [ProjectivePoint::IDENTITY; 2];
+                temp[random_choice_bit] = r_choice;
+                temp[random_choice_bit ^ 1] = h_other;
+                let r_choice = temp[random_choice_bit];
 
                 r_values[random_choice_bit] = encode_point(&r_choice);
                 r_values[random_choice_bit ^ 1] = encode_point(&r_other);
