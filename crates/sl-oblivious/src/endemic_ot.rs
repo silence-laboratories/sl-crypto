@@ -3,6 +3,7 @@
 
 use elliptic_curve::{Field, Group};
 use std::array;
+use std::hint::black_box;
 
 use merlin::Transcript;
 use rand::prelude::*;
@@ -63,19 +64,6 @@ pub struct ReceiverOutput {
     pub(crate) otp_dec_keys: [[u8; LAMBDA_C_BYTES]; LAMBDA_C],
 }
 
-/// Try to decompress point from x coordinate
-fn point_from_x_coord(x: [u8; 32], is_even: bool) -> Option<ProjectivePoint> {
-    let mut point_compressed = [0u8; 33];
-    if is_even {
-        point_compressed[0] = 2u8;
-    } else {
-        point_compressed[0] = 3u8;
-    }
-    point_compressed[1..33].copy_from_slice(x.as_slice());
-
-    decode_point(&point_compressed)
-}
-
 /// RO for EndemicOT
 fn h_function(
     ro_index: usize,
@@ -87,16 +75,15 @@ fn h_function(
 
     t.append_message(b"session-id", session_id);
     t.append_message(b"ro-index", &(ro_index as u16).to_be_bytes());
-    t.append_message(b"batch_index", &(batch_index as u16).to_be_bytes());
+    t.append_message(b"batch-index", &(batch_index as u16).to_be_bytes());
     t.append_message(b"pk", &pk.to_affine().to_bytes());
 
     loop {
-        let mut x_coord = [0u8; 32];
-        t.challenge_bytes(b"x_coord", &mut x_coord);
-        let mut choice = [0u8];
-        t.challenge_bytes(b"point_choice", &mut choice);
-        let is_even = (choice[0] & 0x01) == 0;
-        let point = match point_from_x_coord(x_coord, is_even) {
+        let mut compressed_point = [0u8; 33];
+        t.challenge_bytes(b"compressed-point", &mut compressed_point);
+        compressed_point[0] &= 0x01;
+        compressed_point[0] ^= 0x02;
+        let point = match decode_point(&compressed_point) {
             None => continue,
             Some(v) => v,
         };
@@ -229,16 +216,12 @@ impl EndemicOTReceiver {
                     ProjectivePoint::GENERATOR * t_a + h_choice.neg();
 
                 // dummy calculation for constant time
-                let h_other = h_function(
+                black_box(h_function(
                     random_choice_bit ^ 1,
                     idx,
                     session_id,
                     &r_choice,
-                );
-                let mut temp = [ProjectivePoint::IDENTITY; 2];
-                temp[random_choice_bit] = r_choice;
-                temp[random_choice_bit ^ 1] = h_other;
-                let r_choice = temp[random_choice_bit];
+                ));
 
                 r_values[random_choice_bit] = encode_point(&r_choice);
                 r_values[random_choice_bit ^ 1] = encode_point(&r_other);
