@@ -14,18 +14,23 @@ use crate::{
 use k256::{elliptic_curve::group::GroupEncoding, ProjectivePoint, Scalar};
 use std::ops::Neg;
 
+const POINT_BYTES_SIZE: usize = 33;
+
+/// External representation of a point on a curve
+pub type PointBytes = [u8; POINT_BYTES_SIZE];
+
 /// EndemicOT Message 1
 #[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 #[repr(C)]
 pub struct EndemicOTMsg1 {
     // values r_0 and r_1 from OTReceiver to OTSender
-    r_list: [[[u8; 33]; 2]; LAMBDA_C],
+    r_list: [[PointBytes; 2]; LAMBDA_C],
 }
 
 impl Default for EndemicOTMsg1 {
     fn default() -> Self {
         Self {
-            r_list: [[[0u8; 33]; 2]; LAMBDA_C],
+            r_list: [[[0u8; POINT_BYTES_SIZE]; 2]; LAMBDA_C],
         }
     }
 }
@@ -35,13 +40,13 @@ impl Default for EndemicOTMsg1 {
 #[repr(C)]
 pub struct EndemicOTMsg2 {
     // values m_b_0 and m_b_1 from OTSender to OTReceiver
-    m_b_list: [[[u8; 33]; 2]; LAMBDA_C],
+    m_b_list: [[PointBytes; 2]; LAMBDA_C],
 }
 
 impl Default for EndemicOTMsg2 {
     fn default() -> Self {
         Self {
-            m_b_list: [[[0u8; 33]; 2]; LAMBDA_C],
+            m_b_list: [[[0u8; POINT_BYTES_SIZE]; 2]; LAMBDA_C],
         }
     }
 }
@@ -79,7 +84,7 @@ fn h_function(
     t.append_message(b"pk", &pk.to_affine().to_bytes());
 
     loop {
-        let mut compressed_point = [0u8; 33];
+        let mut compressed_point: PointBytes = [0u8; POINT_BYTES_SIZE];
         t.challenge_bytes(b"compressed-point", &mut compressed_point);
         compressed_point[0] &= 0x01;
         compressed_point[0] ^= 0x02;
@@ -108,12 +113,12 @@ fn h_function_2(
 }
 
 /// Encode ProjectivePoint
-fn encode_point(p: &ProjectivePoint) -> [u8; 33] {
+fn encode_point(p: &ProjectivePoint) -> PointBytes {
     p.to_affine().to_bytes()[..].try_into().unwrap()
 }
 
 /// Decode ProjectivePoint
-fn decode_point(bytes: &[u8; 33]) -> Option<ProjectivePoint> {
+fn decode_point(bytes: &PointBytes) -> Option<ProjectivePoint> {
     let mut repr = <ProjectivePoint as GroupEncoding>::Repr::default();
     AsMut::<[u8]>::as_mut(&mut repr).copy_from_slice(bytes);
 
