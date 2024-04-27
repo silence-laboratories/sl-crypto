@@ -1,6 +1,7 @@
 [package]
 name = "sl-oblivious"
 version = "0.1.0"
+license = "SLL"
 edition = "2021"
 publish = false
 
