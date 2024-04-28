@@ -84,10 +84,10 @@ impl EvilPlay {
                 Poll::Ready(None) => return Poll::Ready(None),
 
                 Poll::Ready(Some(msg)) => {
-                    if let Some(MsgHdr { id, .. }) = MsgHdr::from(&msg) {
+                    if let Ok(hdr) = <&MsgHdr>::try_from(msg.as_slice()) {
                         // check drops
                         if self.drop_msg.iter().any(|(mid, idx)| {
-                            mid.eq(&id) && idx.unwrap_or(party) == party
+                            mid == hdr.id() && idx.unwrap_or(party) == party
                         }) {
                             continue;
                         }
@@ -105,8 +105,8 @@ impl EvilPlay {
         _index: usize,
         msg: Vec<u8>,
     ) -> Result<(), R::Error> {
-        if let Some(hdr) = MsgHdr::from(&msg) {
-            self.seen_msg.insert(hdr.id);
+        if let Ok(hdr) = <&MsgHdr>::try_from(msg.as_slice()) {
+            self.seen_msg.insert(*hdr.id());
         }
 
         client.start_send_unpin(msg)
@@ -167,10 +167,10 @@ impl Stream for Connection {
     type Item = Vec<u8>;
 
     fn poll_next(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        let this = &mut *self;
+        let this = self.get_mut();
 
         this.inner
             .lock()
@@ -190,10 +190,10 @@ impl Sink<Vec<u8>> for Connection {
     }
 
     fn start_send(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         item: Vec<u8>,
     ) -> Result<(), Self::Error> {
-        let this = &mut *self;
+        let this = self.get_mut();
 
         this.inner.lock().unwrap().start_send(
             &mut this.relay,

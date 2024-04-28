@@ -40,11 +40,10 @@ impl Stream for SimplePair {
     type Item = Vec<u8>;
 
     fn poll_next(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        let this = &mut *self;
-        this.inq.poll_recv(cx)
+        self.get_mut().inq.poll_recv(cx)
     }
 }
 
@@ -52,21 +51,23 @@ impl Sink<Vec<u8>> for SimplePair {
     type Error = MessageSendError;
 
     fn poll_ready(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        let this = &mut *self;
-
-        this.out.poll_reserve(cx).map_err(|_| MessageSendError)
+        self.get_mut()
+            .out
+            .poll_reserve(cx)
+            .map_err(|_| MessageSendError)
     }
 
     fn start_send(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         item: Vec<u8>,
     ) -> Result<(), Self::Error> {
-        let this = &mut *self;
-
-        this.out.send_item(item).map_err(|_| MessageSendError)
+        self.get_mut()
+            .out
+            .send_item(item)
+            .map_err(|_| MessageSendError)
     }
 
     fn poll_flush(
@@ -77,12 +78,10 @@ impl Sink<Vec<u8>> for SimplePair {
     }
 
     fn poll_close(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        let this = &mut *self;
-
-        this.out.close();
+        self.get_mut().out.close();
 
         Poll::Ready(Ok(()))
     }

@@ -81,17 +81,18 @@ impl Sink<Vec<u8>> for MessageRelay {
     }
 
     fn start_send(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         item: Vec<u8>,
     ) -> Result<(), Self::Error> {
-        let this = &mut *self;
+        let this = self.get_mut();
 
-        let hdr = MsgHdr::from(&item).ok_or(MessageSendError)?;
+        let hdr: &MsgHdr =
+            item.as_slice().try_into().map_err(|_| MessageSendError)?;
 
         let mut inner = this.inner.lock().unwrap();
 
-        if hdr.kind == Kind::Ask {
-            if let Some(msg) = inner.recv(hdr.id, hdr.ttl, &this.tx) {
+        if item.len() == MESSAGE_HEADER_SIZE {
+            if let Some(msg) = inner.recv(*hdr.id(), hdr.ttl(), &this.tx) {
                 this.queue.push(msg);
             }
         } else {
@@ -178,42 +179,44 @@ impl Inner {
         }
     }
 
-    fn cleanup_later(&mut self, id: MsgId, expire: Instant, kind: Kind) {
-        self.expire.push(Expire(expire, id, kind));
+    fn cleanup_later(&mut self, id: &MsgId, expire: Instant, kind: Kind) {
+        self.expire.push(Expire(expire, *id, kind));
     }
 
     fn cleanup(&mut self, now: Instant) {
-        while let Some(ent) = self.expire.peek() {
-            if ent.0 > now {
+        while let Some(Expire(when, id, kind)) = self.expire.peek() {
+            if *when > now {
                 break;
             }
 
-            let Expire(_, id, kind) = self.expire.pop().unwrap();
-
-            if let Entry::Occupied(ocp) = self.messages.entry(id) {
-                match ocp.get() {
-                    MsgEntry::Ready(_) => {
-                        if kind == Kind::Pub {
-                            ocp.remove();
-                        }
-                    }
+            if let Entry::Occupied(ocp) = self.messages.entry(*id) {
+                if match ocp.get() {
+                    MsgEntry::Ready(_) => kind == &Kind::Pub,
 
                     MsgEntry::Waiters((expire, _)) => {
-                        if kind == Kind::Ask && *expire <= now {
-                            ocp.remove();
-                        }
+                        kind == &Kind::Ask && *expire <= now
                     }
+                } {
+                    ocp.remove();
                 }
             }
+
+            self.expire.pop();
         }
     }
 
     pub fn send(&mut self, msg: Vec<u8>) {
-        let MsgHdr { id, ttl, kind } = MsgHdr::from(&msg).unwrap();
-        let now = Instant::now();
-        let expire = now + ttl;
+        assert!(msg.len() > MESSAGE_HEADER_SIZE);
 
-        assert!(kind == Kind::Pub);
+        let hdr: &MsgHdr = msg.as_slice().try_into().unwrap();
+        let now = Instant::now();
+        let expire = now + hdr.ttl();
+        let id = *hdr.id();
+        let kind = if msg.len() == MESSAGE_HEADER_SIZE {
+            Kind::Ask
+        } else {
+            Kind::Pub
+        };
 
         // we have a locked state, let's cleanup some old entries
         self.cleanup(now);
@@ -232,7 +235,7 @@ impl Inner {
                     ocp.insert(MsgEntry::Ready(msg));
 
                     // remember to cleanup this entry later
-                    self.cleanup_later(id, expire, kind);
+                    self.cleanup_later(&id, expire, kind);
                 }
                 MsgEntry::Ready(_) => {
                     // ignore dups
@@ -242,7 +245,7 @@ impl Inner {
             Entry::Vacant(vac) => {
                 vac.insert(MsgEntry::Ready(msg));
 
-                self.cleanup_later(id, expire, kind);
+                self.cleanup_later(&id, expire, kind);
             }
         }
     }
@@ -273,7 +276,7 @@ impl Inner {
                         b.push(tx.clone());
 
                         // remember to cleanup this entry later
-                        self.cleanup_later(id, expire, Kind::Ask);
+                        self.cleanup_later(&id, expire, Kind::Ask);
                     }
                 }
             }
@@ -282,7 +285,7 @@ impl Inner {
                 // This is the first ASK for the message
                 vac.insert(MsgEntry::Waiters((expire, vec![tx.clone()])));
 
-                self.cleanup_later(id, expire, Kind::Ask);
+                self.cleanup_later(&id, expire, Kind::Ask);
             }
         }
 
@@ -321,7 +324,7 @@ mod tests {
             MessageTag::tag(0),
         );
 
-        let msg_to_send = allocate_message(&msg_id, 10, &[0; 5]);
+        let msg_to_send = allocate_message(&msg_id, 10, 0, &[0; 5]);
         c1.send(msg_to_send.clone()).await.unwrap();
 
         let mut c2 = coord.connect();
