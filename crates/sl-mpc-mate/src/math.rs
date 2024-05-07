@@ -59,6 +59,22 @@ impl<C: CurveArithmetic<Uint = U256>> Polynomial<C> {
         )
     }
 
+    /// Commit to this polynomial by multiplying each coefficient by the generator.
+    pub fn commit_with_generator(
+        &self,
+        generator: &C::ProjectivePoint,
+    ) -> GroupPolynomial<C>
+    where
+        C::ProjectivePoint: GroupEncoding,
+    {
+        GroupPolynomial::new(
+            self.coeffs
+                .iter()
+                .map(|coeff| Opaque::from(*generator * coeff))
+                .collect(),
+        )
+    }
+
     /// Computes the n_i derivative of a polynomial with coefficients u_i_k at the point x
     ///
     /// `n`: order of the derivative
