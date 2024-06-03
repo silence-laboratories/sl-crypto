@@ -45,8 +45,8 @@ impl Default for EndemicOTMsg2 {
 
 /// The one time pad encryption keys for a single choice.
 pub(crate) struct OneTimePadEncryptionKeys {
-    pub(crate) rho_0: [u8; 32],
-    pub(crate) rho_1: [u8; 32],
+    pub(crate) rho_0: [u8; LAMBDA_C_BYTES],
+    pub(crate) rho_1: [u8; LAMBDA_C_BYTES],
 }
 
 /// The output of the OT sender.
@@ -57,7 +57,7 @@ pub struct SenderOutput {
 /// The output of the OT receiver.
 pub struct ReceiverOutput {
     pub(crate) choice_bits: [u8; LAMBDA_C_BYTES], // LAMBDA_C bits
-    pub(crate) otp_dec_keys: [[u8; 32]; LAMBDA_C],
+    pub(crate) otp_dec_keys: [[u8; LAMBDA_C_BYTES]; LAMBDA_C],
 }
 
 // RO for EndemicOT
@@ -70,6 +70,19 @@ fn h_function(index: usize, session_id: &[u8], pk: &[u8; 32]) -> [u8; 32] {
 
     let mut output = [0u8; 32];
     t.challenge_bytes(b"", &mut output);
+
+    output
+}
+
+// create LAMBDA_C_BYTES ot seed
+fn h_function_2(index: usize, pk: &[u8; 32]) -> [u8; LAMBDA_C_BYTES] {
+    let mut t = Transcript::new(&ENDEMIC_OT_LABEL);
+
+    t.append_message(b"index", &(index as u16).to_be_bytes());
+    t.append_message(b"pk", pk);
+
+    let mut output = [0u8; LAMBDA_C_BYTES];
+    t.challenge_bytes(b"ot-seed", &mut output);
 
     output
 }
@@ -105,8 +118,14 @@ impl EndemicOTSender {
                 msg2.m_b_list[idx] = [m_b_0, m_b_1];
 
                 // check key generation
-                let rho_0 = t_b_0.diffie_hellman(&m_a_0).to_bytes();
-                let rho_1 = t_b_1.diffie_hellman(&m_a_1).to_bytes();
+                let rho_0 = h_function_2(
+                    idx,
+                    &t_b_0.diffie_hellman(&m_a_0).to_bytes(),
+                );
+                let rho_1 = h_function_2(
+                    idx,
+                    &t_b_1.diffie_hellman(&m_a_1).to_bytes(),
+                );
 
                 OneTimePadEncryptionKeys { rho_0, rho_1 }
             }),
@@ -160,16 +179,19 @@ impl EndemicOTReceiver {
     }
 
     pub fn process(self, msg2: &EndemicOTMsg2) -> ReceiverOutput {
-        let rho_w_vec: [[u8; 32]; LAMBDA_C] = std::array::from_fn(|idx| {
-            let m_b_values = &msg2.m_b_list[idx];
-            let random_choice_bit = self.packed_choice_bits.extract_bit(idx);
+        let rho_w_vec: [[u8; LAMBDA_C_BYTES]; LAMBDA_C] =
+            std::array::from_fn(|idx| {
+                let m_b_values = &msg2.m_b_list[idx];
+                let random_choice_bit =
+                    self.packed_choice_bits.extract_bit(idx);
 
-            let m_b_value = m_b_values[random_choice_bit as usize];
+                let m_b_value = m_b_values[random_choice_bit as usize];
 
-            self.t_a_list[idx]
-                .diffie_hellman(&PublicKey::from(m_b_value))
-                .to_bytes()
-        });
+                let res = self.t_a_list[idx]
+                    .diffie_hellman(&PublicKey::from(m_b_value))
+                    .to_bytes();
+                h_function_2(idx, &res)
+            });
 
         ReceiverOutput {
             choice_bits: self.packed_choice_bits,
@@ -183,7 +205,7 @@ impl ReceiverOutput {
     /// Create a new `ReceiverOutput`.
     pub fn new(
         choice_bits: [u8; LAMBDA_C_BYTES],
-        otp_dec_keys: [[u8; 32]; LAMBDA_C],
+        otp_dec_keys: [[u8; LAMBDA_C_BYTES]; LAMBDA_C],
     ) -> Self {
         Self {
             choice_bits,
