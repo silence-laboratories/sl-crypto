@@ -12,11 +12,10 @@ elliptic-curve = { version ="0.13" }
 k256 = { version = "0.13", default-features = false, features = [ "arithmetic" ]}
 rand = "0.8"
 rayon = "1"
-x25519-dalek = { version = "2.0.0", features = [ "static_secrets", "zeroize" ] }
 zeroize = "1.6.1"
 bytemuck = { version = "1.14.1", features = [ "derive", "min_const_generics", "extern_crate_alloc" ] }
 serde = { version = "1", optional = true }
 serde_arrays = { version = "0.1", optional = true }
 
 [features]
-serde = [ "dep:serde", "serde_arrays", "serde/derive", "k256/serde", "x25519-dalek/serde" ]
+serde = [ "dep:serde", "serde_arrays", "serde/derive", "k256/serde" ]
