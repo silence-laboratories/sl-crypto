@@ -4,6 +4,7 @@
 use std::ops::{MulAssign, Sub};
 
 use elliptic_curve::{CurveArithmetic, Field};
+#[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
 // Compute minor of a matrix.
@@ -114,12 +115,19 @@ pub fn matrix_inverse<C: CurveArithmetic>(
         return vec![vec![a11, a12], vec![a21, a22]];
     }
 
-    let cofactors = matrix
-        .par_iter()
-        .enumerate()
+    #[cfg(feature = "rayon")]
+    let iter = matrix.par_iter();
+    #[cfg(not(feature = "rayon"))]
+    let iter = matrix.iter();
+
+    let cofactors = iter.enumerate()
         .map(|(r, row)| {
-            row.par_iter()
-                .enumerate()
+            #[cfg(feature = "rayon")]
+            let iter = row.par_iter();
+            #[cfg(not(feature = "rayon"))]
+            let iter = row.iter();
+
+            iter.enumerate()
                 .map(|(c, _)| {
                     let minor = matrix_minor::<C>(&matrix, r, c);
                     let minor_rows = minor.len();
