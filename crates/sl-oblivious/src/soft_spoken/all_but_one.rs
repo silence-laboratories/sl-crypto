@@ -1,7 +1,7 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use elliptic_curve::subtle::ConstantTimeEq;
+use elliptic_curve::subtle::{ConditionallySelectable, ConstantTimeEq};
 use merlin::Transcript;
 
 use crate::{
@@ -120,35 +120,34 @@ pub fn eval_pprf(
         let x_star_0: u8 =
             receiver_ot_seed.choice_bits.extract_bit(j * SOFT_SPOKEN_K) as u8;
 
-        let mut s_star_i = [[[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]; 2];
+        let mut s_star_i = [[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
 
-        s_star_i[0][x_star_0 as usize] =
+        s_star_i[x_star_0 as usize] =
             receiver_ot_seed.otp_dec_keys[j * SOFT_SPOKEN_K];
 
         let mut y_star = x_star_0 as usize ^ 1;
 
         for i in 1..SOFT_SPOKEN_K {
-            let mut s_star_i_plus_1 =
-                [[[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q]; 2];
+            let mut s_star_i_plus_1 = [[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
 
             for y in 0..(1 << i) {
-                let choice_index = (y == y_star) as usize;
+                let choice = y.ct_ne(&y_star);
+
+                let mut temp_0 = [0u8; LAMBDA_C_BYTES];
+                let mut temp_1 = [0u8; LAMBDA_C_BYTES];
 
                 let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
                 t.append_message(b"session-id", session_id);
-                t.append_message(
-                    &ALL_BUT_ONE_PPRF_LABEL,
-                    &s_star_i[choice_index][y],
-                );
+                t.append_message(&ALL_BUT_ONE_PPRF_LABEL, &s_star_i[y]);
+                t.challenge_bytes(b"", &mut temp_0);
+                t.challenge_bytes(b"", &mut temp_1);
 
-                t.challenge_bytes(
-                    b"",
-                    &mut s_star_i_plus_1[choice_index][2 * y],
-                );
-                t.challenge_bytes(
-                    b"",
-                    &mut s_star_i_plus_1[choice_index][2 * y + 1],
-                );
+                (0..LAMBDA_C_BYTES).for_each(|b_i| {
+                    s_star_i_plus_1[2 * y][b_i]
+                        .conditional_assign(&temp_0[b_i], choice);
+                    s_star_i_plus_1[2 * y + 1][b_i]
+                        .conditional_assign(&temp_1[b_i], choice);
+                });
             }
 
             let x_star_i: u8 = 1 ^ receiver_ot_seed
@@ -164,15 +163,15 @@ pub fn eval_pprf(
             // TODO: fix clippy
             #[allow(clippy::needless_range_loop)]
             for b_i in 0..LAMBDA_C_BYTES {
-                s_star_i_plus_1[0][2 * y_star + ct_x][b_i] =
+                s_star_i_plus_1[2 * y_star + ct_x][b_i] =
                     out.t[i - 1][ct_x][b_i] ^ big_f_i_star[b_i];
 
                 for y in 0..2usize.pow(i as u32) {
-                    // assume conversion of bool to usize is constant time
-                    let choice = (y == y_star) as usize;
-
-                    s_star_i_plus_1[choice][2 * (y_star) + ct_x][b_i] ^=
-                        s_star_i_plus_1[choice][2 * y + ct_x][b_i];
+                    let choice = y.ct_ne(&y_star);
+                    let temp_byte = s_star_i_plus_1[2 * y_star + ct_x][b_i]
+                        ^ s_star_i_plus_1[2 * y + ct_x][b_i];
+                    s_star_i_plus_1[2 * y_star + ct_x][b_i]
+                        .conditional_assign(&temp_byte, choice);
                 }
             }
 
@@ -182,38 +181,39 @@ pub fn eval_pprf(
         }
 
         // Verify
-        let mut s_tilda_star =
-            [[[0u8; LAMBDA_C_BYTES * 2]; SOFT_SPOKEN_Q]; 2];
+        let mut s_tilda_star = [[0u8; LAMBDA_C_BYTES * 2]; SOFT_SPOKEN_Q];
         let s_tilda_expected = &out.s_tilda;
 
         let mut s_tilda_hash = Transcript::new(&ALL_BUT_ONE_LABEL);
         s_tilda_hash.append_message(b"session-id", session_id);
 
-        let mut s_tilda_star_y_star =
-            [out.t_tilda, [0u8; LAMBDA_C_BYTES * 2]];
+        let mut s_tilda_star_y_star = out.t_tilda;
 
         for y in 0..SOFT_SPOKEN_Q {
-            let choice_index = (y == y_star) as usize;
+            let choice = y.ct_ne(&y_star);
+            let mut temp = [0u8; LAMBDA_C_BYTES * 2];
 
             let mut tt = Transcript::new(&ALL_BUT_ONE_LABEL);
             tt.append_message(b"session-id", session_id);
-            tt.append_message(
-                &ALL_BUT_ONE_PPRF_PROOF_LABEL,
-                &s_star_i[choice_index][y],
-            );
-
-            tt.challenge_bytes(b"", &mut s_tilda_star[choice_index][y]);
+            tt.append_message(&ALL_BUT_ONE_PPRF_PROOF_LABEL, &s_star_i[y]);
+            tt.challenge_bytes(b"", &mut temp);
 
             (0..LAMBDA_C_BYTES * 2).for_each(|b_i| {
-                s_tilda_star_y_star[choice_index][b_i] ^=
-                    s_tilda_star[choice_index][y][b_i];
+                s_tilda_star[y][b_i].conditional_assign(&temp[b_i], choice);
+            });
+
+            (0..LAMBDA_C_BYTES * 2).for_each(|b_i| {
+                let temp_byte =
+                    s_tilda_star_y_star[b_i] ^ s_tilda_star[y][b_i];
+                s_tilda_star_y_star[b_i]
+                    .conditional_assign(&temp_byte, choice);
             })
         }
 
-        s_tilda_star[0][y_star] = s_tilda_star_y_star[0];
+        s_tilda_star[y_star] = s_tilda_star_y_star;
 
         (0..SOFT_SPOKEN_Q).for_each(|y| {
-            s_tilda_hash.append_message(b"", &s_tilda_star[0][y]);
+            s_tilda_hash.append_message(b"", &s_tilda_star[y]);
         });
 
         let mut s_tilda_digest = [0u8; LAMBDA_C_BYTES * 2];
@@ -227,7 +227,7 @@ pub fn eval_pprf(
         }
 
         all_but_one_receiver_seed.random_choices[j] = y_star as u8;
-        all_but_one_receiver_seed.otp_dec_keys[j] = s_star_i[0];
+        all_but_one_receiver_seed.otp_dec_keys[j] = s_star_i;
     }
 
     Ok(())
