@@ -34,12 +34,12 @@ impl MessageTag {
 
     /// Define a family of tags indexed by some parameter.
     pub const fn tag1(tag: u32, param: u32) -> Self {
-        Self::tag(tag as u64 | param as u64 >> 32)
+        Self::tag(tag as u64 | ((param as u64) << 32))
     }
 
     /// Define a familty of tags indexed by pair of parameters.
     pub const fn tag2(tag: u32, param1: u16, param2: u16) -> Self {
-        Self::tag(tag as u64 | param1 as u64 >> 32 | param2 as u64 >> 48)
+        Self::tag(tag as u64 | (param1 as u64) << 32 | (param2 as u64) << 48)
     }
 
     /// Convert the tag to an array of bytes.
@@ -291,6 +291,30 @@ mod test {
 
         assert!(
             <&MsgHdr>::try_from(&data[..MESSAGE_HEADER_SIZE - 1]).is_err()
+        );
+    }
+
+    #[test]
+    fn msg_tags() {
+        let t1 = MessageTag::tag(0x1020304050607080);
+
+        assert_eq!(
+            t1.to_bytes(),
+            [0x80, 0x70, 0x60, 0x50, 0x40, 0x30, 0x20, 0x10]
+        );
+
+        let t2 = MessageTag::tag1(0x10203040, 0xAABBCCDD);
+
+        assert_eq!(
+            t2.to_bytes(),
+            [0x40, 0x30, 0x20, 0x10, 0xDD, 0xCC, 0xBB, 0xAA]
+        );
+
+        let t3 = MessageTag::tag2(0x10203040, 0xEEFF, 0xDEAD);
+
+        assert_eq!(
+            t3.to_bytes(),
+            [0x40, 0x30, 0x20, 0x10, 0xFF, 0xEE, 0xAD, 0xDE]
         );
     }
 }
