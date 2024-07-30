@@ -5,6 +5,7 @@ members = [
   "crates/sl-oblivious",
   "crates/sl-paillier",
   "crates/sl-mpc-traits",
+  "crates/sl-verifiable-enc",
 ]
 
 [profile.bench]
