@@ -1,3 +1,5 @@
+// Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
+// This software is licensed under the Silence Laboratories License Agreement.
 #[doc = include_str!("../README.md")]
 use ff::{Field, PrimeField};
 use group::{Group, GroupEncoding};
