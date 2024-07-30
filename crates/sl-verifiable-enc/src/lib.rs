@@ -1,3 +1,4 @@
+#[doc = include_str!("../README.md")]
 use ff::{Field, PrimeField};
 use group::{Group, GroupEncoding};
 use num_bigint_dig::ModInverse;
