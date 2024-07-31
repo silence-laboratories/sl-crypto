@@ -35,6 +35,8 @@ pub enum RsaError {
     InvalidSizeParam,
     #[error("(de)Serialization error")]
     SerdeError(String),
+    #[error("Invalid Security Parameter, cannot be more than 256")]
+    InvalidSecurityParam,
 }
 
 pub struct ProofData<G: Group + GroupEncoding> {
@@ -70,6 +72,10 @@ where
     {
         let seed = rng.gen::<[u8; 32]>();
         let security_param = security_param.unwrap_or(SECURITY_PARAM);
+        // Security parameter must be at least 120 and at most 256
+        if !(120..=256).contains(&security_param) {
+            return Err(RsaError::InvalidSizeParam);
+        }
         let mut proofs = Vec::with_capacity(security_param);
         let q_point = G::generator() * x;
         let mut r_list = Vec::with_capacity(security_param);
