@@ -17,6 +17,9 @@ use thiserror::Error;
 
 pub const SECURITY_PARAM: usize = 120;
 
+//Re-Exports
+pub use rsa;
+
 // Intentionally not giving too much information about the error
 #[derive(Debug, Error)]
 pub enum RsaError {
