@@ -70,10 +70,10 @@ where
     {
         let seed = rng.gen::<[u8; 32]>();
         let security_param = security_param.unwrap_or(SECURITY_PARAM);
-        let mut proofs = Vec::with_capacity(SECURITY_PARAM);
+        let mut proofs = Vec::with_capacity(security_param);
         let q_point = G::generator() * x;
-        let mut r_list = Vec::with_capacity(SECURITY_PARAM);
-        let mut x_plus_r_list = Vec::with_capacity(SECURITY_PARAM);
+        let mut r_list = Vec::with_capacity(security_param);
+        let mut x_plus_r_list = Vec::with_capacity(security_param);
 
         for _ in 0..security_param {
             let r = G::Scalar::random(&mut *rng);
@@ -98,7 +98,7 @@ where
             });
         }
         let challenge = Self::challenge(&q_point, label, &proofs);
-        let mut open_scalars = Vec::with_capacity(SECURITY_PARAM);
+        let mut open_scalars = Vec::with_capacity(security_param);
         for i in 0..security_param {
             let choice_bit = challenge.extract_bit(i);
             let selected = G::Scalar::conditional_select(
@@ -241,7 +241,7 @@ where
         bytes.extend_from_slice(&self.seed);
         // Adding the sizes
         // Security parameter, g_r size, enc_x_r size (will be same as enc_r size) and scalar size
-        bytes.extend_from_slice(&(SECURITY_PARAM as u16).to_be_bytes());
+        bytes.extend_from_slice(&(self.security_param as u16).to_be_bytes());
         bytes.extend_from_slice(
             &(self.proofs[0].g_r.as_ref().len() as u16).to_be_bytes(),
         );
