@@ -1,5 +1,6 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
+use core::mem::size_of;
 #[doc = include_str!("../README.md")]
 use ff::{Field, PrimeField};
 use group::{Group, GroupEncoding};
@@ -45,7 +46,7 @@ pub struct ProofData<G: Group + GroupEncoding> {
     enc_r: Vec<u8>,
 }
 
-pub struct VerifiableRsaEncryption<G, const SIZE: usize>
+pub struct VerifiableRsaEncryption<G>
 where
     G: Group + GroupEncoding + ConstantTimeEq,
     G::Scalar: ConditionallySelectable,
@@ -56,7 +57,7 @@ where
     security_param: usize,
 }
 
-impl<G, const SIZE: usize> VerifiableRsaEncryption<G, SIZE>
+impl<G> VerifiableRsaEncryption<G>
 where
     G: Group + GroupEncoding + ConstantTimeEq,
 {
@@ -66,10 +67,7 @@ where
         label: &[u8],
         security_param: Option<usize>,
         rng: &mut R,
-    ) -> Result<Self, RsaError>
-    where
-        <G::Scalar as PrimeField>::Repr: From<[u8; SIZE]>,
-    {
+    ) -> Result<Self, RsaError> {
         let seed = rng.gen::<[u8; 32]>();
         let security_param = security_param.unwrap_or(SECURITY_PARAM);
         // Security parameter must be at least 120 and at most 256
@@ -178,34 +176,32 @@ where
         q_point: &G,
         rsa_privkey: &RsaPrivateKey,
         label: &[u8],
-    ) -> Result<G::Scalar, RsaError>
-    where
-        <G::Scalar as PrimeField>::Repr: From<[u8; SIZE]>,
-    {
+    ) -> Result<G::Scalar, RsaError> {
         if self.proofs.len() != self.security_param {
             return Err(RsaError::VerificationFailed);
         }
 
+        let scalar_size =
+            core::mem::size_of::<<G::Scalar as PrimeField>::Repr>();
         for proof in &self.proofs {
             let enc_r = &proof.enc_r;
             let enc_x_r = &proof.enc_x_r;
 
             let r = rsa_decrypt_with_label(enc_r, label, rsa_privkey)?;
-            // If r is not 32 bytes, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
-            if r.len() != SIZE {
+
+            // If r is not the right size, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
+            if r.len() != scalar_size {
                 continue;
             }
 
-            let r: [u8; SIZE] = r.try_into().unwrap();
+            let mut encoding = <G::Scalar as PrimeField>::Repr::default();
+            encoding.as_mut().copy_from_slice(&r);
 
             // Here we assume that the scalar is 32 bytes and reduced modulo the field order. If not we consider the enc invalide and continue.
             // Some not-so-readable code to have a generic way to convert a byte array to a scalar.
 
             // If r is not a valid scalar, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
-            let r_opt = G::Scalar::from_repr(
-                <G::Scalar as PrimeField>::Repr::from(r),
-            )
-            .into();
+            let r_opt = G::Scalar::from_repr(encoding).into();
             let r: G::Scalar = if let Some(r) = r_opt {
                 r
             } else {
@@ -215,17 +211,14 @@ where
             let x_plus_r =
                 rsa_decrypt_with_label(enc_x_r, label, rsa_privkey)?;
             // If x + r is not a valid scalar, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
-            if x_plus_r.len() != SIZE {
+            if x_plus_r.len() != scalar_size {
                 continue;
             }
-
-            let x_plus_r: [u8; SIZE] = x_plus_r.try_into().unwrap();
+            let mut encoding = <G::Scalar as PrimeField>::Repr::default();
+            encoding.as_mut().copy_from_slice(&x_plus_r);
 
             // If x + r is not a valid scalar, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
-            let x_plus_r_opt = G::Scalar::from_repr(
-                <G::Scalar as PrimeField>::Repr::from(x_plus_r),
-            )
-            .into();
+            let x_plus_r_opt = G::Scalar::from_repr(encoding).into();
             let x_plus_r: G::Scalar = if let Some(x_plus_r) = x_plus_r_opt {
                 x_plus_r
             } else {
@@ -254,8 +247,10 @@ where
         bytes.extend_from_slice(
             &(self.proofs[0].enc_x_r.len() as u16).to_be_bytes(),
         );
-        bytes.extend_from_slice(&(SIZE as u16).to_be_bytes());
-
+        bytes.extend_from_slice(
+            &(size_of::<<G::Scalar as PrimeField>::Repr>() as u16)
+                .to_be_bytes(),
+        );
         for proof in &self.proofs {
             bytes.extend_from_slice(proof.g_r.as_ref());
             bytes.extend_from_slice(proof.enc_x_r.as_ref());
@@ -268,13 +263,7 @@ where
         bytes
     }
 
-    pub fn from_bytes<const G_SIZE: usize>(
-        data: &[u8],
-    ) -> Result<Self, RsaError>
-    where
-        G::Repr: From<[u8; G_SIZE]>,
-        <G::Scalar as PrimeField>::Repr: From<[u8; SIZE]>,
-    {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, RsaError> {
         let res = || {
             if data.len() < 32 + 8 {
                 // 32 (seed) + 8 (4 * u16 sizes)
@@ -302,8 +291,14 @@ where
                 u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
             offset += 2;
 
-            if scalar_size != SIZE {
+            if scalar_size
+                != core::mem::size_of::<<G::Scalar as PrimeField>::Repr>()
+            {
                 return Err("Inconsistent scalar size");
+            }
+
+            if g_r_size != core::mem::size_of::<G::Repr>() {
+                return Err("Inconsistent g_r size");
             }
 
             // Calculate number of proofs and open scalars
@@ -332,13 +327,11 @@ where
                     );
                 }
 
-                let g_r = G::Repr::from(
-                    data[offset..offset + g_r_size]
-                        .try_into()
-                        .map_err(|_| "Invalid g_r length")?,
-                );
-                offset += g_r_size;
+                let mut g_r = G::Repr::default();
+                g_r.as_mut()
+                    .copy_from_slice(&data[offset..offset + g_r_size]);
 
+                offset += g_r_size;
                 let enc_x_r = data[offset..offset + enc_size].to_vec();
                 offset += enc_size;
 
@@ -354,6 +347,7 @@ where
 
             // Read open scalars
             let mut open_scalars = Vec::with_capacity(num_proofs);
+            let scalar_size = size_of::<<G::Scalar as PrimeField>::Repr>();
             for _ in 0..num_proofs {
                 if offset + scalar_size > data.len() {
                     return Err(
@@ -361,15 +355,12 @@ where
                     );
                 }
 
-                let scalar = G::Scalar::from_repr(
-                    <G::Scalar as PrimeField>::Repr::from(
-                        data[offset..offset + scalar_size]
-                            .try_into()
-                            .map_err(|_| "Invalid scalar length")?,
-                    ),
-                );
-
-                let scalar = Option::from(scalar).ok_or("Invalid scalar")?;
+                let mut encoding = <G::Scalar as PrimeField>::Repr::default();
+                encoding
+                    .as_mut()
+                    .copy_from_slice(&data[offset..offset + scalar_size]);
+                let scalar = Option::from(G::Scalar::from_repr(encoding))
+                    .ok_or("Invalid scalar")?;
                 offset += scalar_size;
                 open_scalars.push(scalar);
             }
@@ -517,7 +508,7 @@ mod tests {
         )?;
         let bytes = verifiable_rsa.to_bytes();
 
-        let deserialized: VerifiableRsaEncryption<EdwardsPoint, 32> =
+        let deserialized: VerifiableRsaEncryption<EdwardsPoint> =
             VerifiableRsaEncryption::from_bytes(&bytes).unwrap();
 
         deserialized.verify(&public_key, &rsa_public_key, label)?;
@@ -540,7 +531,7 @@ mod tests {
             .expect("Failed to generate RSA private key");
         let rsa_public_key = rsa_private_key.to_public_key();
         let label = b"test-label";
-        let verifiable_rsa: VerifiableRsaEncryption<ProjectivePoint, 32> =
+        let verifiable_rsa: VerifiableRsaEncryption<ProjectivePoint> =
             VerifiableRsaEncryption::encrypt_with_proof(
                 &private_key,
                 &rsa_public_key,
@@ -571,7 +562,7 @@ mod tests {
             .expect("Failed to generate RSA private key");
         let rsa_public_key = rsa_private_key.to_public_key();
         let label = b"test-label";
-        let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint, 32> =
+        let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint> =
             VerifiableRsaEncryption::encrypt_with_proof(
                 &private_key,
                 &rsa_public_key,
@@ -603,7 +594,7 @@ mod tests {
             .expect("Failed to generate RSA private key");
         let rsa_public_key = rsa_private_key.to_public_key();
         let label = b"test-label";
-        let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint, 32> =
+        let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint> =
             VerifiableRsaEncryption::encrypt_with_proof(
                 &private_key,
                 &rsa_public_key,
