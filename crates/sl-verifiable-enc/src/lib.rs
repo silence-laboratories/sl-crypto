@@ -181,28 +181,14 @@ where
             return Err(RsaError::VerificationFailed);
         }
 
-        let scalar_size =
-            core::mem::size_of::<<G::Scalar as PrimeField>::Repr>();
         for proof in &self.proofs {
             let enc_r = &proof.enc_r;
             let enc_x_r = &proof.enc_x_r;
 
             let r = rsa_decrypt_with_label(enc_r, label, rsa_privkey)?;
 
-            // If r is not the right size, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
-            if r.len() != scalar_size {
-                continue;
-            }
-
-            let mut encoding = <G::Scalar as PrimeField>::Repr::default();
-            encoding.as_mut().copy_from_slice(&r);
-
-            // Here we assume that the scalar is 32 bytes and reduced modulo the field order. If not we consider the enc invalide and continue.
-            // Some not-so-readable code to have a generic way to convert a byte array to a scalar.
-
             // If r is not a valid scalar, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
-            let r_opt = G::Scalar::from_repr(encoding).into();
-            let r: G::Scalar = if let Some(r) = r_opt {
+            let r = if let Some(r) = decode_scalar::<G::Scalar>(&r) {
                 r
             } else {
                 continue;
@@ -210,16 +196,10 @@ where
 
             let x_plus_r =
                 rsa_decrypt_with_label(enc_x_r, label, rsa_privkey)?;
-            // If x + r is not a valid scalar, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
-            if x_plus_r.len() != scalar_size {
-                continue;
-            }
-            let mut encoding = <G::Scalar as PrimeField>::Repr::default();
-            encoding.as_mut().copy_from_slice(&x_plus_r);
 
-            // If x + r is not a valid scalar, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
-            let x_plus_r_opt = G::Scalar::from_repr(encoding).into();
-            let x_plus_r: G::Scalar = if let Some(x_plus_r) = x_plus_r_opt {
+            let x_plus_r = if let Some(x_plus_r) =
+                decode_scalar::<G::Scalar>(&x_plus_r)
+            {
                 x_plus_r
             } else {
                 continue;
@@ -354,13 +334,9 @@ where
                         "Unexpected end of data while reading scalars",
                     );
                 }
-
-                let mut encoding = <G::Scalar as PrimeField>::Repr::default();
-                encoding
-                    .as_mut()
-                    .copy_from_slice(&data[offset..offset + scalar_size]);
-                let scalar = Option::from(G::Scalar::from_repr(encoding))
-                    .ok_or("Invalid scalar")?;
+                let scalar =
+                    decode_scalar(&data[offset..offset + scalar_size])
+                        .ok_or("Invalid scalar")?;
                 offset += scalar_size;
                 open_scalars.push(scalar);
             }
@@ -448,6 +424,15 @@ pub trait ExtractBit: Index<usize, Output = u8> {
     }
 }
 impl<const N: usize> ExtractBit for [u8; N] {}
+
+fn decode_scalar<S: PrimeField>(bytes: &[u8]) -> Option<S> {
+    if bytes.len() != size_of::<S::Repr>() {
+        return None;
+    }
+    let mut encoding = <S as PrimeField>::Repr::default();
+    encoding.as_mut().copy_from_slice(bytes);
+    S::from_repr(encoding).into()
+}
 
 #[cfg(test)]
 mod tests {
