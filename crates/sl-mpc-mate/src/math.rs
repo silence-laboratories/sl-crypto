@@ -109,6 +109,21 @@ where
             })
             .sum()
     }
+
+    /// Evaluate the polynomial at the given point.
+    /// Arithmetic is done modulo the curve order
+    /// # Arguments
+    /// `x`: point at which to evaluate the polynomial.
+    pub fn evaluate_at(&self, x: &G::Scalar) -> G::Scalar {
+        self.coeffs
+            .iter()
+            .enumerate()
+            .map(|(i, coeff)| {
+                let result = x.pow_vartime([i as u64]);
+                result * coeff
+            })
+            .sum()
+    }
 }
 
 /// A polynomial with coefficients of type `ProjectivePoint`.
