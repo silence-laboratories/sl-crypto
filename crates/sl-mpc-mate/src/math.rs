@@ -243,18 +243,18 @@ pub fn feldman_verify<C: CurveArithmetic>(
 /// `n_i` (order of derivative)
 /// `n` (degree of polynomial - 1)
 /// `p` prime order of field
-pub fn polynomial_coeff_multipliers<G: CurveArithmetic>(
-    x_i: &NonZeroScalar<G>,
+pub fn polynomial_coeff_multipliers<C: CurveArithmetic>(
+    x_i: &NonZeroScalar<C>,
     n_i: usize,
     n: usize,
-) -> Vec<G::Scalar>
+) -> Vec<C::Scalar>
 where
-    G: CurveArithmetic<Uint = U256>,
+    C: CurveArithmetic<Uint = U256>,
 {
-    let mut v = vec![G::Scalar::ZERO; n];
+    let mut v = vec![C::Scalar::ZERO; n];
 
     v.iter_mut().enumerate().skip(n_i).for_each(|(idx, vi)| {
-        let num = G::Scalar::reduce(factorial_range(idx - n_i, idx));
+        let num = C::Scalar::reduce(factorial_range(idx - n_i, idx));
         let exponent = [(idx - n_i) as u64];
         let result = x_i.pow_vartime(exponent);
         *vi = num * result;
@@ -264,20 +264,20 @@ where
 }
 
 /// Get the birkhoff coefficients
-pub fn birkhoff_coeffs<G>(
-    params: &[(NonZeroScalar<G>, usize)],
-) -> Vec<G::Scalar>
+pub fn birkhoff_coeffs<C>(
+    params: &[(NonZeroScalar<C>, usize)],
+) -> Vec<C::Scalar>
 where
-    G: CurveArithmetic<Uint = U256>,
+    C: CurveArithmetic<Uint = U256>,
 {
     let n = params.len();
 
-    let matrix: Vec<Vec<G::Scalar>> = params
+    let matrix: Vec<Vec<C::Scalar>> = params
         .iter()
         .map(|(x_i, n_i)| polynomial_coeff_multipliers(x_i, *n_i, n))
         .collect();
 
-    let mut matrix_inv = matrix_inverse::<G>(matrix, n);
+    let mut matrix_inv = matrix_inverse::<C>(matrix, n);
 
     matrix_inv.swap_remove(0)
 }
