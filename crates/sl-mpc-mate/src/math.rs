@@ -1,6 +1,7 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
+use std::fmt::Debug;
 use std::ops::Deref;
 
 use elliptic_curve::ops::Reduce;
@@ -14,12 +15,26 @@ use crate::matrix::matrix_inverse;
 
 /// A polynomial with coefficients of type `Scalar`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(PartialEq, Eq)]
 pub struct Polynomial<G>
 where
     G: Group,
     G::Scalar: ser::Serializable,
 {
     coeffs: Vec<G::Scalar>,
+}
+
+#[cfg(test)]
+impl<G> Debug for Polynomial<G>
+where
+    G: Group,
+    G::Scalar: ser::Serializable,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entry(&format!("Polynomial length {}", self.coeffs.len()))
+            .finish()
+    }
 }
 
 impl<G> Polynomial<G>
@@ -275,7 +290,7 @@ mod ser {
 
 #[cfg(feature = "serde")]
 mod ser {
-    use elliptic_curve::group::{prime::PrimeCurveAffine, Curve};
+    use std::mem::size_of;
 
     use super::*;
 
@@ -286,10 +301,9 @@ mod ser {
 
     impl<T: serde::Serialize + serde::de::DeserializeOwned> Serializable for T {}
 
-    impl<G: CurveArithmetic> serde::Serialize for GroupPolynomial<G>
+    impl<G> serde::Serialize for GroupPolynomial<G>
     where
-        G: GroupEncoding,
-        G::AffinePoint: Serializable,
+        G: Group + GroupEncoding,
     {
         fn serialize<S>(
             &self,
@@ -298,31 +312,76 @@ mod ser {
         where
             S: serde::ser::Serializer,
         {
-            // Serialize as Vec<G::AffinePoint>
-            self.coeffs
-                .iter()
-                .map(|p| p.to_affine())
-                .collect::<Vec<_>>()
-                .serialize(serializer)
+            use serde::ser::SerializeSeq;
+
+            let mut seq =
+                serializer.serialize_seq(Some(self.coeffs.len()))?;
+            for coeff in &self.coeffs {
+                seq.serialize_element(&coeff.to_bytes().as_ref())?;
+            }
+            seq.end()
         }
     }
 
     impl<'de, G> serde::Deserialize<'de> for GroupPolynomial<G>
     where
-        G: CurveArithmetic,
-        G: GroupEncoding,
-        G::AffinePoint: PrimeCurveAffine<Curve = G> + Serializable,
+        G: Group + GroupEncoding,
     {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: serde::de::Deserializer<'de>,
         {
-            let coeffs = <Vec<G::AffinePoint>>::deserialize(deserializer)?
-                .into_iter()
-                .map(|a| a.to_curve())
-                .collect::<Vec<_>>();
+            let data = <Vec<Vec<u8>>>::deserialize(deserializer)?;
+            let mut coeffs = Vec::with_capacity(data.len());
+
+            for coeff_data in &data {
+                if coeff_data.len() != size_of::<G::Repr>() {
+                    return Err(serde::de::Error::custom(
+                        "Invalid group element",
+                    ));
+                }
+                let mut repr = G::Repr::default();
+                repr.as_mut().copy_from_slice(coeff_data);
+                let opt = G::from_bytes(&repr);
+
+                let point = if opt.is_some().into() {
+                    opt.unwrap()
+                } else {
+                    return Err(serde::de::Error::custom(
+                        "Invalid group element",
+                    ));
+                };
+                coeffs.push(point);
+            }
 
             Ok(Self { coeffs })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serde() {
+        use super::*;
+        use k256::ProjectivePoint;
+
+        let mut rng = rand::thread_rng();
+        let poly1 = Polynomial::<ProjectivePoint>::random(&mut rng, 5);
+        let bytes = bincode::serialize(&poly1).unwrap();
+        let poly2: Polynomial<ProjectivePoint> =
+            bincode::deserialize(&bytes).unwrap();
+
+        let g_poly1 = poly1.commit();
+
+        let bytes = bincode::serialize(&g_poly1).unwrap();
+
+        let g_poly2: GroupPolynomial<ProjectivePoint> =
+            bincode::deserialize(&bytes).unwrap();
+
+        assert_eq!(poly1, poly2);
+        assert_eq!(g_poly1, g_poly2);
     }
 }
