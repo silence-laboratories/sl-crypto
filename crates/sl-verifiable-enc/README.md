@@ -2,11 +2,12 @@
 
 This library provides a generic implementation of verifiable RSA encryption. It allows for the encryption of scalar values from various elliptic curves while providing proofs of correct encryption. This is particularly useful in cryptographic protocols where you need to prove that an encrypted value corresponds to a public key without revealing the private key.
 
+We use the verifiable encryption scheme from https://eprint.iacr.org/1999/008  
+
 ### Features
 
 - Generic over elliptic curves
 - Uses RSA to be HSM-friendly 
-
 
 
 ## Usage
@@ -96,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Security Considerations
 
 - The library uses constant-time operations where possible to mitigate timing attacks.
-- The default security parameter is set to 120, which can be adjusted if needed.
+- The default security parameter is set to 128, which can be adjusted if needed.
 - Always use cryptographically secure random number generators in production environments.
 
 ## License

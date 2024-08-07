@@ -1,5 +1,10 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
+//
+
+//! # Verifiable RSA Encryption
+//! This crate provides a simple implementation of verifiable RSA encryption. The implementation is based on the paper [Verifiable RSA Encryption](https://eprint.iacr.org/1999/008)
+
 use core::mem::size_of;
 #[doc = include_str!("../README.md")]
 use ff::{Field, PrimeField};
@@ -16,7 +21,7 @@ use std::ops::Index;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use thiserror::Error;
 
-pub const SECURITY_PARAM: usize = 120;
+pub const SECURITY_PARAM: usize = 128;
 
 //Re-Exports
 pub use rsa;
@@ -70,8 +75,8 @@ where
     ) -> Result<Self, RsaError> {
         let seed = rng.gen::<[u8; 32]>();
         let security_param = security_param.unwrap_or(SECURITY_PARAM);
-        // Security parameter must be at least 120 and at most 256
-        if !(120..=256).contains(&security_param) {
+        // Security parameter must be at least 128 and at most 256
+        if !(SECURITY_PARAM..=256).contains(&security_param) {
             return Err(RsaError::InvalidSizeParam);
         }
         let mut proofs = Vec::with_capacity(security_param);
@@ -286,8 +291,8 @@ where
             let remaining_data = data.len() - offset;
             let num_proofs = remaining_data / (proof_size + scalar_size);
 
-            if security_param < 120 {
-                return Err("Security param must at least be 120");
+            if security_param < SECURITY_PARAM {
+                return Err("Security param must at least be 128");
             }
 
             if num_proofs != security_param {
