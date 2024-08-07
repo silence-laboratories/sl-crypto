@@ -2,6 +2,7 @@
 // This software is licensed under the Silence Laboratories License Agreement.
 
 use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 use elliptic_curve::ops::Reduce;
@@ -22,6 +23,19 @@ where
     G::Scalar: ser::Serializable,
 {
     coeffs: Vec<G::Scalar>,
+}
+
+impl<G> std::hash::Hash for Polynomial<G>
+where
+    G: Group,
+    G::Scalar: ser::Serializable,
+    G::Scalar: Hash,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for coef in &self.coeffs {
+            coef.hash(state);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -135,6 +149,17 @@ where
     pub coeffs: Vec<G>,
 }
 
+impl<G> Deref for GroupPolynomial<G>
+where
+    G: Group + GroupEncoding,
+{
+    type Target = [G];
+
+    fn deref(&self) -> &Self::Target {
+        &self.coeffs
+    }
+}
+
 impl<G> GroupPolynomial<G>
 where
     G: Group + GroupEncoding,
@@ -186,6 +211,20 @@ where
 
     pub fn get(&self, idx: usize) -> Option<&G> {
         self.coeffs.get(idx)
+    }
+
+    pub fn evaluate_at(&self, x: &G::Scalar) -> G
+    where
+        G: Group,
+    {
+        self.coeffs
+            .iter()
+            .enumerate()
+            .map(|(i, coeff)| {
+                let result = x.pow_vartime([i as u64]);
+                *coeff * result
+            })
+            .sum()
     }
 }
 
