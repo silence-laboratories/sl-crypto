@@ -160,6 +160,15 @@ where
     }
 }
 
+impl<G> AsRef<[G]> for GroupPolynomial<G>
+where
+    G: Group + GroupEncoding,
+{
+    fn as_ref(&self) -> &[G] {
+        &self.coeffs
+    }
+}
+
 impl<G> GroupPolynomial<G>
 where
     G: Group + GroupEncoding,
@@ -183,10 +192,13 @@ where
     /// Add another polynomial's coefficients element wise to this one inplace.
     /// If the other polynomial has more coefficients than this one, the extra
     /// coefficients are ignored.
-    pub fn add_mut(&mut self, other: &Self) {
+    pub fn add_mut<T>(&mut self, other: T)
+    where
+        T: AsRef<[G]>,
+    {
         self.coeffs
             .iter_mut()
-            .zip(&other.coeffs)
+            .zip(other.as_ref())
             .for_each(|(a, b)| {
                 *a += b;
             });
