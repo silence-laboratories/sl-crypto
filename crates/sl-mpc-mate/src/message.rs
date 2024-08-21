@@ -4,16 +4,23 @@
 use std::{fmt, ops::Deref, time::Duration};
 
 use sha2::{Digest, Sha256};
+use zeroize::Zeroize;
 
 pub const MESSAGE_ID_SIZE: usize = 32;
-pub const MESSAGE_HEADER_SIZE: usize = MESSAGE_ID_SIZE + 4;
+pub const MESSAGE_HEADER_SIZE: usize = MESSAGE_ID_SIZE + 2 + 2;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Zeroize)]
 pub struct InstanceId([u8; 32]);
+
+impl InstanceId {
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
 
 impl From<[u8; 32]> for InstanceId {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(bytes)
+        Self::new(bytes)
     }
 }
 
@@ -41,7 +48,17 @@ impl MessageTag {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Hash, PartialOrd, Eq)]
+#[derive(
+    PartialEq,
+    Clone,
+    Copy,
+    Hash,
+    PartialOrd,
+    Eq,
+    bytemuck::AnyBitPattern,
+    bytemuck::NoUninit,
+)]
+#[repr(C)]
 pub struct MsgId([u8; MESSAGE_ID_SIZE]);
 
 impl Deref for MsgId {
@@ -79,7 +96,8 @@ impl fmt::LowerHex for MsgId {
 impl MsgId {
     pub const ZERO_ID: MsgId = MsgId([0; MESSAGE_ID_SIZE]);
 
-    /// Create ID for a P2P message.
+    /// Create message ID for given instance id, sender, receiver and
+    /// message tag.
     pub fn new(
         instance: &InstanceId,
         sender: &[u8],
@@ -97,13 +115,13 @@ impl MsgId {
         )
     }
 
-    /// Create ID for a broadcast message, without a designated receiver.
+    /// Create message ID for a broadcast message, without a designated receiver.
     pub fn broadcast(
         instance: &InstanceId,
-        sender_pk: &[u8],
+        sender: &[u8],
         tag: MessageTag,
     ) -> Self {
-        Self::new(instance, sender_pk, None, tag)
+        Self::new(instance, sender, None, tag)
     }
 
     /// Return as slice of bytes
@@ -118,70 +136,135 @@ impl From<[u8; MESSAGE_ID_SIZE]> for MsgId {
     }
 }
 
+// Try to convert a byte slice into a reference to MsgId. It will
+// succeed if passed slice is at least MESSAGE_ID_SIZE bytes.
+impl<'a> TryFrom<&'a [u8]> for &'a MsgId {
+    type Error = ();
+
+    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+        value
+            .first_chunk::<MESSAGE_ID_SIZE>()
+            .and_then(|id| bytemuck::try_cast_ref(id).ok())
+            .ok_or(())
+    }
+}
+
+// The same as above but return MsgId value.
+impl<'a> TryFrom<&'a [u8]> for MsgId {
+    type Error = ();
+
+    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+        let msg_id: &MsgId = value.try_into()?;
+        Ok(*msg_id)
+    }
+}
+
+// It is always possible to get MsgId from &MsgHdr
+impl<'a> From<&'a MsgHdr> for MsgId {
+    fn from(value: &MsgHdr) -> Self {
+        *value.id()
+    }
+}
+
 #[derive(Debug, Eq, Copy, Clone, PartialEq)]
 pub enum Kind {
     Ask,
     Pub,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[repr(C)]
 pub struct MsgHdr {
-    pub id: MsgId,
-    pub ttl: Duration,
-    pub kind: Kind,
+    data: [u8; MESSAGE_HEADER_SIZE],
 }
 
 impl fmt::Debug for MsgHdr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "MsgHdr(id: {:X}, ttl: {}, kind: {:?})",
-            self.id,
-            self.ttl.as_secs(),
-            self.kind
+            "MsgHdr(id: {:X}, flags: {:04X}, ttl: {})",
+            self.id(),
+            self.flags(),
+            self.ttl().as_secs(),
         )
     }
 }
 
-// FIXME convert to TryFrom<&[u8]> ?
-impl MsgHdr {
-    pub fn from(msg: &[u8]) -> Option<Self> {
-        if msg.len() >= MESSAGE_HEADER_SIZE {
-            let hdr = &msg[..MESSAGE_HEADER_SIZE];
+// Try convert a byte slice into a reference to MsgHdr. It will
+// succeed is given slice is at least MESSAGE_HEADER_SIZE bytes.
+impl<'a> TryFrom<&'a [u8]> for &'a MsgHdr {
+    type Error = ();
 
-            let ttl = Duration::new(
-                u32::from_le_bytes(hdr[MESSAGE_ID_SIZE..].try_into().unwrap())
-                    as u64,
-                0,
-            );
-
-            Some(Self {
-                id: MsgId(hdr[..MESSAGE_ID_SIZE].try_into().unwrap()),
-                ttl,
-                kind: if msg.len() == MESSAGE_HEADER_SIZE {
-                    Kind::Ask
-                } else {
-                    Kind::Pub
-                },
-            })
-        } else {
-            None
-        }
-    }
-
-    pub fn id_eq(&self, id: &MsgId) -> bool {
-        self.id.eq(id)
+    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+        value
+            .first_chunk::<MESSAGE_HEADER_SIZE>()
+            .and_then(|hdr| bytemuck::try_cast_ref(hdr).ok())
+            .ok_or(())
     }
 }
 
-pub fn allocate_message(id: &MsgId, ttl: u32, payload: &[u8]) -> Vec<u8> {
-    let mut buffer = vec![0u8; MESSAGE_HEADER_SIZE + payload.len()];
+// The same above but tries to convert into MsgHdr value.
+impl<'a> TryFrom<&'a [u8]> for MsgHdr {
+    type Error = ();
 
-    buffer[..MESSAGE_ID_SIZE].copy_from_slice(&id.0);
-    buffer[MESSAGE_ID_SIZE..MESSAGE_ID_SIZE + 4]
-        .copy_from_slice(&ttl.to_le_bytes());
+    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+        let hdr: &MsgHdr = value.try_into()?;
+        Ok(*hdr)
+    }
+}
 
-    buffer[MESSAGE_HEADER_SIZE..].copy_from_slice(payload);
+impl MsgHdr {
+    /// Decode message id field.
+    pub fn id(&self) -> &MsgId {
+        self.data[..MESSAGE_ID_SIZE].try_into().unwrap()
+    }
+
+    /// Decode flags field.
+    pub fn flags(&self) -> u16 {
+        u16::from_le_bytes(
+            self.data[MESSAGE_ID_SIZE..][2..].try_into().unwrap(),
+        )
+    }
+
+    /// Decode TTL field.
+    pub fn ttl(&self) -> Duration {
+        let secs: u16 = u16::from_le_bytes(
+            self.data[MESSAGE_ID_SIZE..][..2].try_into().unwrap(),
+        );
+
+        Duration::from_secs(secs as u64)
+    }
+
+    /// Encode header parts into given buffer.
+    pub fn encode(
+        hdr: &mut [u8; MESSAGE_HEADER_SIZE],
+        id: &MsgId,
+        ttl: u32,
+        flags: u16,
+    ) {
+        let data: u32 = (ttl & 0xffff) | (flags as u32) << 16;
+
+        hdr[..MESSAGE_ID_SIZE].copy_from_slice(&id.0);
+        hdr[MESSAGE_ID_SIZE..].copy_from_slice(&data.to_le_bytes());
+    }
+}
+
+/// Allocate message and initalize it from given parts.
+///
+/// This is mostly debug/test support function.
+pub fn allocate_message(
+    id: &MsgId,
+    ttl: u32,
+    flags: u16,
+    payload: &[u8],
+) -> Vec<u8> {
+    let mut buffer = Vec::with_capacity(MESSAGE_HEADER_SIZE + payload.len());
+
+    buffer.resize(MESSAGE_HEADER_SIZE, 0);
+
+    MsgHdr::encode(buffer.as_mut_slice().try_into().unwrap(), id, ttl, flags);
+
+    buffer.extend_from_slice(payload);
 
     buffer
 }
@@ -190,6 +273,24 @@ pub struct AskMsg;
 
 impl AskMsg {
     pub fn allocate(id: &MsgId, ttl: u32) -> Vec<u8> {
-        allocate_message(id, ttl, &[])
+        allocate_message(id, ttl, 0, &[])
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn msg_hdr() {
+        let data = [0u8; MESSAGE_HEADER_SIZE + 1];
+
+        assert!(<&MsgHdr>::try_from(&data[..]).is_ok());
+
+        assert!(<&MsgHdr>::try_from(&data[..MESSAGE_HEADER_SIZE]).is_ok());
+
+        assert!(
+            <&MsgHdr>::try_from(&data[..MESSAGE_HEADER_SIZE - 1]).is_err()
+        );
     }
 }
