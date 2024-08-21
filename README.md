@@ -33,3 +33,12 @@ coord::SimpleMessageRelay
 ## sl-oblivious
 
 Base code for DKLs23
+
+## sl-verifiable-enc
+
+Verifiable encryption library
+
+Refer to it's [readme](/crates/sl-verifiable-enc/README.md) for usage
+
+
+
