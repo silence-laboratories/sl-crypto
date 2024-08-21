@@ -1,6 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
+use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 use elliptic_curve::ops::Reduce;
@@ -14,21 +16,48 @@ use crate::matrix::matrix_inverse;
 
 /// A polynomial with coefficients of type `Scalar`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Polynomial<C>
+#[derive(PartialEq, Eq)]
+pub struct Polynomial<G>
 where
-    C: CurveArithmetic,
-    C::Scalar: ser::Serializable,
+    G: Group,
+    G::Scalar: ser::Serializable,
 {
-    coeffs: Vec<C::Scalar>,
+    coeffs: Vec<G::Scalar>,
 }
 
-impl<C: CurveArithmetic<Uint = U256>> Polynomial<C>
+impl<G> std::hash::Hash for Polynomial<G>
 where
-    C: CurveArithmetic,
-    C::Scalar: ser::Serializable,
+    G: Group,
+    G::Scalar: ser::Serializable,
+    G::Scalar: Hash,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for coef in &self.coeffs {
+            coef.hash(state);
+        }
+    }
+}
+
+#[cfg(test)]
+impl<G> Debug for Polynomial<G>
+where
+    G: Group,
+    G::Scalar: ser::Serializable,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entry(&format!("Polynomial length {}", self.coeffs.len()))
+            .finish()
+    }
+}
+
+impl<G> Polynomial<G>
+where
+    G: Group,
+    G::Scalar: ser::Serializable,
 {
     /// Create a new polynomial with the given coefficients.
-    pub fn new(coeffs: Vec<C::Scalar>) -> Self {
+    pub fn new(coeffs: Vec<G::Scalar>) -> Self {
         Self { coeffs }
     }
 
@@ -36,35 +65,35 @@ where
     pub fn random(rng: &mut impl CryptoRngCore, degree: usize) -> Self {
         Self {
             coeffs: (0..=degree)
-                .map(|_| C::Scalar::random(&mut *rng))
+                .map(|_| G::Scalar::random(&mut *rng))
                 .collect(),
         }
     }
 
     /// Set constant to Scalar::ZERO
     pub fn reset_contant(&mut self) {
-        self.coeffs[0] = C::Scalar::ZERO;
+        self.coeffs[0] = G::Scalar::ZERO;
     }
 
     /// Set constant
-    pub fn set_constant(&mut self, scalar: C::Scalar) {
+    pub fn set_constant(&mut self, scalar: G::Scalar) {
         self.coeffs[0] = scalar;
     }
 
     /// Evaluate the polynomial at 0 (the constant term).
-    pub fn get_constant(&self) -> &C::Scalar {
+    pub fn get_constant(&self) -> &G::Scalar {
         &self.coeffs[0]
     }
 
     /// Commit to this polynomial by multiplying each coefficient by the generator.
-    pub fn commit(&self) -> GroupPolynomial<C>
+    pub fn commit(&self) -> GroupPolynomial<G>
     where
-        C::ProjectivePoint: GroupEncoding,
+        G: GroupEncoding,
     {
         GroupPolynomial::new(
             self.coeffs
                 .iter()
-                .map(|coeff| C::ProjectivePoint::generator() * coeff)
+                .map(|coeff| G::generator() * coeff)
                 .collect(),
         )
     }
@@ -75,7 +104,10 @@ where
     ///
     /// `x`: point at which to compute the derivative.
     /// Arithmetic is done modulo the curve order
-    pub fn derivative_at(&self, n: usize, x: &C::Scalar) -> C::Scalar {
+    pub fn derivative_at(&self, n: usize, x: &G::Scalar) -> G::Scalar
+    where
+        G::Scalar: Reduce<U256>,
+    {
         self.coeffs
             .iter()
             .enumerate()
@@ -83,11 +115,26 @@ where
             .map(|(i, coeff)| {
                 // TODO build static table of factorials ??
                 //      U256::wrapping_mul if const fn
-                let num: C::Uint = factorial_range(i - n, i); //
-                let scalar_num = C::Scalar::reduce(num);
+                let num: U256 = factorial_range(i - n, i); //
+                let scalar_num = G::Scalar::reduce(num);
                 let result = x.pow_vartime([(i - n) as u64]);
 
                 scalar_num * coeff * result
+            })
+            .sum()
+    }
+
+    /// Evaluate the polynomial at the given point.
+    /// Arithmetic is done modulo the curve order
+    /// # Arguments
+    /// `x`: point at which to evaluate the polynomial.
+    pub fn evaluate_at(&self, x: &G::Scalar) -> G::Scalar {
+        self.coeffs
+            .iter()
+            .enumerate()
+            .map(|(i, coeff)| {
+                let result = x.pow_vartime([i as u64]);
+                result * coeff
             })
             .sum()
     }
@@ -95,76 +142,110 @@ where
 
 /// A polynomial with coefficients of type `ProjectivePoint`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct GroupPolynomial<C>
+pub struct GroupPolynomial<G>
 where
-    C: CurveArithmetic,
-    C::ProjectivePoint: GroupEncoding,
+    G: Group + GroupEncoding,
 {
-    pub coeffs: Vec<C::ProjectivePoint>,
+    pub coeffs: Vec<G>,
 }
 
-impl<C: CurveArithmetic<Uint = U256>> GroupPolynomial<C>
+impl<G> Deref for GroupPolynomial<G>
 where
-    C::ProjectivePoint: GroupEncoding,
+    G: Group + GroupEncoding,
+{
+    type Target = [G];
+
+    fn deref(&self) -> &Self::Target {
+        &self.coeffs
+    }
+}
+
+impl<G> AsRef<[G]> for GroupPolynomial<G>
+where
+    G: Group + GroupEncoding,
+{
+    fn as_ref(&self) -> &[G] {
+        &self.coeffs
+    }
+}
+
+impl<G> GroupPolynomial<G>
+where
+    G: Group + GroupEncoding,
 {
     /// Create a new polynomial with the given coefficients.
-    pub fn new(coeffs: Vec<C::ProjectivePoint>) -> Self {
+    pub fn new(coeffs: Vec<G>) -> Self {
         Self { coeffs }
     }
 
     pub fn identity(size: usize) -> Self {
         Self {
-            coeffs: vec![C::ProjectivePoint::identity(); size],
+            coeffs: vec![G::identity(); size],
         }
     }
 
     /// Evaluate the polynomial at 0 (the constant term).
-    pub fn get_constant(&self) -> C::ProjectivePoint {
+    pub fn get_constant(&self) -> G {
         self.coeffs[0]
     }
 
     /// Add another polynomial's coefficients element wise to this one inplace.
     /// If the other polynomial has more coefficients than this one, the extra
     /// coefficients are ignored.
-    pub fn add_mut(&mut self, other: &Self) {
+    pub fn add_mut<T>(&mut self, other: T)
+    where
+        T: AsRef<[G]>,
+    {
         self.coeffs
             .iter_mut()
-            .zip(&other.coeffs)
+            .zip(other.as_ref())
             .for_each(|(a, b)| {
                 *a += b;
             });
     }
 
     /// Get the coeffs of the polynomial derivative
-    pub fn derivative_coeffs(
-        &self,
-        n: usize,
-    ) -> impl Iterator<Item = C::ProjectivePoint> + '_
+    pub fn derivative_coeffs(&self, n: usize) -> impl Iterator<Item = G> + '_
     where
-        C: CurveArithmetic<Uint = U256>,
+        G: Group,
+        G::Scalar: Reduce<U256>,
     {
         let (_, sub_v) = self.coeffs.split_at(n);
 
         sub_v.iter().enumerate().map(move |(position, u_i)| {
-            *u_i * C::Scalar::reduce(factorial_range(position, position + n))
+            *u_i * G::Scalar::reduce(factorial_range(position, position + n))
         })
     }
 
-    pub fn points(&self) -> impl Iterator<Item = &'_ C::ProjectivePoint> {
+    pub fn points(&self) -> impl Iterator<Item = &'_ G> {
         self.coeffs.iter()
     }
 
-    pub fn get(&self, idx: usize) -> Option<&C::ProjectivePoint> {
+    pub fn get(&self, idx: usize) -> Option<&G> {
         self.coeffs.get(idx)
+    }
+
+    pub fn evaluate_at(&self, x: &G::Scalar) -> G
+    where
+        G: Group,
+    {
+        self.coeffs
+            .iter()
+            .enumerate()
+            .map(|(i, coeff)| {
+                let result = x.pow_vartime([i as u64]);
+                *coeff * result
+            })
+            .sum()
     }
 }
 
-impl<C> Deref for Polynomial<C>
+impl<G> Deref for Polynomial<G>
 where
-    C: CurveArithmetic,
-    C::Scalar: ser::Serializable,
+    G: Group,
+    G::Scalar: ser::Serializable,
 {
-    type Target = [<C as CurveArithmetic>::Scalar];
+    type Target = [G::Scalar];
 
     fn deref(&self) -> &Self::Target {
         &self.coeffs
@@ -275,7 +356,7 @@ mod ser {
 
 #[cfg(feature = "serde")]
 mod ser {
-    use elliptic_curve::group::{prime::PrimeCurveAffine, Curve};
+    use std::mem::size_of;
 
     use super::*;
 
@@ -286,10 +367,9 @@ mod ser {
 
     impl<T: serde::Serialize + serde::de::DeserializeOwned> Serializable for T {}
 
-    impl<C: CurveArithmetic> serde::Serialize for GroupPolynomial<C>
+    impl<G> serde::Serialize for GroupPolynomial<G>
     where
-        C::ProjectivePoint: GroupEncoding,
-        C::AffinePoint: Serializable,
+        G: Group + GroupEncoding,
     {
         fn serialize<S>(
             &self,
@@ -298,32 +378,76 @@ mod ser {
         where
             S: serde::ser::Serializer,
         {
-            // Serialize as Vec<C::AffinePoint>
-            self.coeffs
-                .iter()
-                .map(|p| p.to_affine())
-                .collect::<Vec<_>>()
-                .serialize(serializer)
+            use serde::ser::SerializeSeq;
+
+            let mut seq =
+                serializer.serialize_seq(Some(self.coeffs.len()))?;
+            for coeff in &self.coeffs {
+                seq.serialize_element(&coeff.to_bytes().as_ref())?;
+            }
+            seq.end()
         }
     }
 
-    impl<'de, C> serde::Deserialize<'de> for GroupPolynomial<C>
+    impl<'de, G> serde::Deserialize<'de> for GroupPolynomial<G>
     where
-        C: CurveArithmetic,
-        C::ProjectivePoint: GroupEncoding,
-        C::AffinePoint:
-            PrimeCurveAffine<Curve = C::ProjectivePoint> + Serializable,
+        G: Group + GroupEncoding,
     {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: serde::de::Deserializer<'de>,
         {
-            let coeffs = <Vec<C::AffinePoint>>::deserialize(deserializer)?
-                .into_iter()
-                .map(|a| a.to_curve())
-                .collect::<Vec<_>>();
+            let data = <Vec<Vec<u8>>>::deserialize(deserializer)?;
+            let mut coeffs = Vec::with_capacity(data.len());
+
+            for coeff_data in &data {
+                if coeff_data.len() != size_of::<G::Repr>() {
+                    return Err(serde::de::Error::custom(
+                        "Invalid group element",
+                    ));
+                }
+                let mut repr = G::Repr::default();
+                repr.as_mut().copy_from_slice(coeff_data);
+                let opt = G::from_bytes(&repr);
+
+                let point = if opt.is_some().into() {
+                    opt.unwrap()
+                } else {
+                    return Err(serde::de::Error::custom(
+                        "Invalid group element",
+                    ));
+                };
+                coeffs.push(point);
+            }
 
             Ok(Self { coeffs })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serde() {
+        use super::*;
+        use k256::ProjectivePoint;
+
+        let mut rng = rand::thread_rng();
+        let poly1 = Polynomial::<ProjectivePoint>::random(&mut rng, 5);
+        let bytes = bincode::serialize(&poly1).unwrap();
+        let poly2: Polynomial<ProjectivePoint> =
+            bincode::deserialize(&bytes).unwrap();
+
+        let g_poly1 = poly1.commit();
+
+        let bytes = bincode::serialize(&g_poly1).unwrap();
+
+        let g_poly2: GroupPolynomial<ProjectivePoint> =
+            bincode::deserialize(&bytes).unwrap();
+
+        assert_eq!(poly1, poly2);
+        assert_eq!(g_poly1, g_poly2);
     }
 }
