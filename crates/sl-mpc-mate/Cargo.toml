@@ -26,8 +26,12 @@ bs58 = "0.4.0"
 futures-util = { version = "0.3.0", features = ["sink"] }
 rayon = { version = "1", optional = true }
 serde = { version = "1", optional = true }
-bytemuck = { version = "1.14.1", features = [ "derive", "min_const_generics", "extern_crate_alloc" ] }
-zeroize = { version = "1.6", features = [ "derive" ] }
+bytemuck = { version = "1.11.0", features = [
+  "derive",
+  "min_const_generics",
+  "extern_crate_alloc",
+] }
+zeroize = { version = "1.6", features = ["derive"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "sync", "macros"] }
