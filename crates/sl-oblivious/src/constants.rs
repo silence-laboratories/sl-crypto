@@ -44,3 +44,6 @@ pub const RANDOM_VOLE_THETA_LABEL: Label = Label::new(VERSION, 12);
 
 /// LABEL for RandomVOLE mu
 pub const RANDOM_VOLE_MU_LABEL: Label = Label::new(VERSION, 13);
+
+/// LABEL for baseOT in RandomVOLE OT variant
+pub const RANDOM_VOLE_BASE_OT: Label = Label::new(VERSION, 14);
