@@ -187,7 +187,7 @@ impl EndemicOTSender {
 /// 1 out of 2 Endemic OT Fig.8 https://eprint.iacr.org/2019/706.pdf
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EndemicOTReceiver {
-    packed_choice_bits: [u8; LAMBDA_C_BYTES],
+    pub(crate) packed_choice_bits: [u8; LAMBDA_C_BYTES],
     #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     t_a_list: [Scalar; LAMBDA_C],
 }
