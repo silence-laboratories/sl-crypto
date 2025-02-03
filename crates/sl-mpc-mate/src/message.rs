@@ -160,7 +160,7 @@ impl<'a> TryFrom<&'a [u8]> for MsgId {
 }
 
 // It is always possible to get MsgId from &MsgHdr
-impl<'a> From<&'a MsgHdr> for MsgId {
+impl From<&MsgHdr> for MsgId {
     fn from(value: &MsgHdr) -> Self {
         *value.id()
     }
