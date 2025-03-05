@@ -13,7 +13,7 @@
 This protocol refers to the protocol described in Fig.10 \cite{keller2015actively} with changes in the
 reduction of communication by a factor of k due to an increase in computation by a factor of $2^{k-1} / k$.
 
-The protocol uses an arbitrary stretch pseudorandom generator, $\mathsf{PRG}$, and a hash functions 
+The protocol uses an arbitrary stretch pseudorandom generator $\mathsf{PRG}$, and a hash functions
 $\mathsf{H}_1: \{0,1\}^* \rightarrow \{0,1\}^{s}$, $\mathsf{H}_2: \{0,1\}^* \rightarrow \{0,1\}^{\kappa}$, modeled as a random oracle. \\
 $s = 128$, $k = 4$.
 
@@ -25,11 +25,11 @@ $s = 128$, $k = 4$.
         \item S receives $\bm{k}_{\Delta_i}^i$, for $i = 1, \dots, \kappa$.
 
         \item R and S run protocols described in Fig.13 and Fig.14 \cite{roy2022softspokenot}
-        
+
         to convert their $\kappa \times \left(\begin{array}{c} 2 \\ 1 \end{array} \right)$-OT to all-but-one $(\kappa / k) \times \left(\begin{array}{c} 2^k \\ 2^k - 1 \end{array} \right)$-OT.
         In $\left(\begin{array}{c} 2^k \\ 2^k - 1 \end{array} \right)$-OT a random function $F: \mathbb{F}_{2^k} \rightarrow \mathbb{F}_2^{l}$ is known to R,
     while S has a random point $\Delta$ and the restriction $F^{*}$ of $F$ to $\mathbb{F}_{2^k} \setminus  \{\Delta\}$.
-        
+
     \end{enumerate}
 
 \paragraph{Extend:}
