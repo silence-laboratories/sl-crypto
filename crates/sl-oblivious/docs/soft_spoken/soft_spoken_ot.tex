@@ -37,34 +37,34 @@ $s = 128$, $k = 4$.
   \begin{enumerate}
      \item According to Fig.7 \cite{roy2022softspokenot}, R computes: \\
         \begin{displaymath}
-            r_x^{i} = \mathsf{PRG}(F^{i}(x)) \in \mathbb{F}_2^{l'} \quad \textrm{for} \,\, x \in F_{2^k},
+            r_x^{i} = \mathsf{PRG}(F^{i}(x)) \in \mathbb{F}_2^{l'} \quad \textrm{for} \,\, x \in \mathbb{F}_{2^k},
         \end{displaymath}
         \begin{displaymath}
-            u^i = \sum_{x \in F_{2^k}} r_x^{i}, \quad \textrm{and} \quad v^i = -\sum_{x \in F_{2^k}} r_x^{i} \cdot x \quad \textrm{for} \,\, i \in 1, \dots, \kappa / k.
+            u^i = \sum_{x \in \mathbb{F}_{2^k}} r_x^{i}, \quad \textrm{and} \quad v^i = -\sum_{x \in \mathbb{F}_{2^k}} r_x^{i} \cdot x \quad \textrm{for} \,\, i \in 1, \dots, \kappa / k.
         \end{displaymath}
 
     \item S computes: \\
         \begin{displaymath}
-            r_x^{i} = \mathsf{PRG}(F^{*i}(x)) \in \mathbb{F}_2^{l'} \quad \textrm{for} \,\, x \in F_{2^k} \setminus \{\Delta\},
+            r_x^{i} = \mathsf{PRG}(F^{*i}(x)) \in \mathbb{F}_2^{l'} \quad \textrm{for} \,\, x \in \mathbb{F}_{2^k} \setminus \{\Delta\},
         \end{displaymath}
         \begin{displaymath}
-            w^i = \sum_{x \in F_{2^k} \setminus \{\Delta\}} r_x^{i} \cdot (\Delta^i - x) \quad \textrm{for} \,\, i \in 1, ..., \kappa / k.
+            w^i = \sum_{x \in \mathbb{F}_{2^k} \setminus \{\Delta\}} r_x^{i} \cdot (\Delta^i - x) \quad \textrm{for} \,\, i \in 1, ..., \kappa / k.
         \end{displaymath}
-      
+
     \item R inputs the choice bits $x_1, \dots, x_l \in \mathbb{F}_2$. Let $l' = l + s$, and assume that $s|l$. R picks random $x_{l+1}, \dots, x_{l+s} \in \mathbb{F}_2$ and sets $\mathbf{x} = (x_1, ..., x_{l'})$. \\
-    
+
     R computes:
     \begin{displaymath}
         u^i = u^i + \mathbf{x} \quad \textrm{for} \,\, i \in 1, \dots, \kappa / k \,,
     \end{displaymath}
     \begin{displaymath}
         \chi_j = \mathsf{H}_1(j || u) \quad \textrm{for} \,\, j \in 1, \dots, m.
-    \end{displaymath} 
-    
+    \end{displaymath}
+
     \emph{Consistency check:} Let $m = l/s$. We divide $l'$ OTs into $m+1$ blocks of $s$ bits,
         writing $\mathbf{x} = (\hat{x}_1, \dots, \hat{x}_{m+1}) \in \mathbb{F}_{2^s}^{m+1}$,
         and similarly
-        $v^i = (\hat{v}^i_1, \dots, \hat{v}^i_{m+1}) \in \mathbb{F}_{2^s}^{m+1}$. Then R computes the following values over $F_{2^s}$: 
+        $v^i = (\hat{v}^i_1, \dots, \hat{v}^i_{m+1}) \in \mathbb{F}_{2^s}^{m+1}$. Then R computes the following values over $\mathbb{F}_{2^s}$:
     \begin{displaymath}
         x = \sum_{j=1}^m \hat{x}_j \cdot \chi_j + \hat{x}_{m+1}, \quad 
         t^i = \sum_{j=1}^m \hat{v}^i_j \cdot \chi_j + \hat{v}^i_{m+1} \quad \textrm{for} \,\, i \in 1, \dots, \kappa / k
