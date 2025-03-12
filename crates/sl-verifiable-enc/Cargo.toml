@@ -1,6 +1,6 @@
 [package]
 name = "sl-verifiable-enc"
-license = "SLL"
+license-file = "../../LICENSE"
 version = "0.1.0"
 edition = "2021"
 
