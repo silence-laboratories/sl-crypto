@@ -127,3 +127,6 @@ pub mod utils {
 pub mod params;
 
 pub mod label;
+
+/// Random Vector OLE (base OT variant)
+pub mod rvole_ot_variant;

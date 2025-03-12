@@ -1,16 +1,17 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::fmt::Debug;
-use std::hash::{Hash, Hasher};
-use std::ops::Deref;
-
-use elliptic_curve::ops::Reduce;
+use std::{
+    fmt::Debug,
+    hash::{Hash, Hasher},
+    ops::{Deref, DerefMut},
+};
 
 use elliptic_curve::{
-    bigint::U256, group::GroupEncoding, rand_core::CryptoRngCore,
-    CurveArithmetic, Field, Group, NonZeroScalar,
+    group::GroupEncoding, CurveArithmetic, Field, Group, NonZeroScalar,
+    PrimeField,
 };
+use rand_core::CryptoRngCore;
 
 use crate::matrix::matrix_inverse;
 
@@ -25,16 +26,13 @@ where
     coeffs: Vec<G::Scalar>,
 }
 
-impl<G> std::hash::Hash for Polynomial<G>
+impl<G> Hash for Polynomial<G>
 where
     G: Group,
-    G::Scalar: ser::Serializable,
-    G::Scalar: Hash,
+    G::Scalar: Hash + ser::Serializable,
 {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for coef in &self.coeffs {
-            coef.hash(state);
-        }
+        self.coeffs.hash(state);
     }
 }
 
@@ -75,6 +73,11 @@ where
         self.coeffs[0] = G::Scalar::ZERO;
     }
 
+    /// Set constant to Scalar::ZERO
+    pub fn reset_constant(&mut self) {
+        self.coeffs[0] = G::Scalar::ZERO;
+    }
+
     /// Set constant
     pub fn set_constant(&mut self, scalar: G::Scalar) {
         self.coeffs[0] = scalar;
@@ -104,19 +107,13 @@ where
     ///
     /// `x`: point at which to compute the derivative.
     /// Arithmetic is done modulo the curve order
-    pub fn derivative_at(&self, n: usize, x: &G::Scalar) -> G::Scalar
-    where
-        G::Scalar: Reduce<U256>,
-    {
+    pub fn derivative_at(&self, n: usize, x: &G::Scalar) -> G::Scalar {
         self.coeffs
             .iter()
             .enumerate()
             .skip(n)
             .map(|(i, coeff)| {
-                // TODO build static table of factorials ??
-                //      U256::wrapping_mul if const fn
-                let num: U256 = factorial_range(i - n, i); //
-                let scalar_num = G::Scalar::reduce(num);
+                let scalar_num: G::Scalar = factorial_range(i - n, i);
                 let result = x.pow_vartime([(i - n) as u64]);
 
                 scalar_num * coeff * result
@@ -149,6 +146,12 @@ where
     pub coeffs: Vec<G>,
 }
 
+impl<G: Group + GroupEncoding> From<GroupPolynomial<G>> for Vec<G> {
+    fn from(p: GroupPolynomial<G>) -> Vec<G> {
+        p.coeffs
+    }
+}
+
 impl<G> Deref for GroupPolynomial<G>
 where
     G: Group + GroupEncoding,
@@ -157,6 +160,15 @@ where
 
     fn deref(&self) -> &Self::Target {
         &self.coeffs
+    }
+}
+
+impl<G> DerefMut for GroupPolynomial<G>
+where
+    G: Group + GroupEncoding,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.coeffs
     }
 }
 
@@ -208,13 +220,13 @@ where
     pub fn derivative_coeffs(&self, n: usize) -> impl Iterator<Item = G> + '_
     where
         G: Group,
-        G::Scalar: Reduce<U256>,
     {
-        let (_, sub_v) = self.coeffs.split_at(n);
-
-        sub_v.iter().enumerate().map(move |(position, u_i)| {
-            *u_i * G::Scalar::reduce(factorial_range(position, position + n))
-        })
+        self.coeffs[n..]
+            .iter()
+            .enumerate()
+            .map(move |(position, &u_i)| {
+                u_i * factorial_range::<G::Scalar>(position, position + n)
+            })
     }
 
     pub fn points(&self) -> impl Iterator<Item = &'_ G> {
@@ -229,14 +241,13 @@ where
     where
         G: Group,
     {
-        self.coeffs
-            .iter()
-            .enumerate()
-            .map(|(i, coeff)| {
-                let result = x.pow_vartime([i as u64]);
-                *coeff * result
-            })
-            .sum()
+        let init = (G::identity(), G::Scalar::ONE);
+
+        let (p, _) = self.coeffs.iter().fold(init, |(s, x_pow_i), &coeff| {
+            (s + coeff * x_pow_i, x_pow_i * x)
+        });
+
+        p
     }
 }
 
@@ -252,29 +263,36 @@ where
     }
 }
 
-/// Computes the factorial of a number, n <= 57 (the largest factorial that fits in 256 bits)
-/// This is okay for our purposes because we expect threshold values to be less than 57
-/// (i.e. we don't expect to have more than 57 participants)
-pub fn factorial(n: usize) -> U256 {
-    if n > 57 {
-        panic!("Factorial of {} is too large to fit in 256 bits", n);
-    }
-
-    (1..=n).fold(U256::from(1_u64), |acc, x| {
-        acc.wrapping_mul(&U256::from(x as u64))
-    })
+/// Computes the factorial of a number.
+pub fn factorial<S: PrimeField>(n: usize) -> S {
+    factorial_range(0, n)
 }
 
-/// Computes the factorial of a range of numbers (start, end], where end <= 57
-pub fn factorial_range(start: usize, end: usize) -> U256 {
-    // TODO: Confirm max possible sizes for start and end
-    if end > 57 {
-        panic!("Factorial of {} is too large to fit in 256 bits", end);
+const fn small_factorial<const N: usize>() -> [u64; N] {
+    let mut a = [1u64; N];
+
+    let mut j = 1;
+
+    while j < N {
+        a[j] = j as u64 * a[j - 1];
+        j += 1;
     }
 
-    (start + 1..=end).fold(U256::from(1_u64), |acc, x| {
-        acc.wrapping_mul(&U256::from(x as u64))
-    })
+    a
+}
+
+// FACT[20] == 20! and fits into u64
+static FACT: [u64; 21] = small_factorial();
+
+/// Computes the factorial of a range of numbers (start, end]
+pub fn factorial_range<S: PrimeField>(start: usize, end: usize) -> S {
+    debug_assert!(start <= end);
+
+    if end < FACT.len() {
+        return S::from(FACT[end] / FACT[start]);
+    }
+
+    (start + 1..=end).fold(S::from(1_u64), |acc, x| acc * S::from(x as u64))
 }
 
 /// Feldman verification
@@ -284,16 +302,13 @@ pub fn feldman_verify<C: CurveArithmetic>(
     f_i_value: &C::Scalar,
     g: &C::ProjectivePoint,
 ) -> bool {
-    let point: C::ProjectivePoint = u_i_k
-        .enumerate()
-        .map(|(i, coeff)| {
-            // x_i^i mod p
-            let val = x_i.pow([i as u64]);
+    let x_i = x_i as &C::Scalar;
+    let one = C::Scalar::ONE;
+    let s = C::ProjectivePoint::identity();
 
-            // x_i^i * coeff mod p
-            coeff * val
-        })
-        .sum();
+    // sum( coeff_i * (x_i^i mod p) )
+    let (point, _) = u_i_k
+        .fold((s, one), |(sum, val), coeff| (sum + coeff * val, val * x_i));
 
     if point.is_identity().into() {
         return false;
@@ -304,29 +319,40 @@ pub fn feldman_verify<C: CurveArithmetic>(
     point == expected_point
 }
 
+pub fn polynomial_coeff_multipliers_iter<C>(
+    x_i: &NonZeroScalar<C>,
+    n_i: usize,
+    n: usize,
+) -> impl Iterator<Item = C::Scalar> + '_
+where
+    C: CurveArithmetic,
+{
+    (0..n).map(move |idx| {
+        if idx < n_i {
+            C::Scalar::ZERO
+        } else {
+            let num: C::Scalar = factorial_range(idx - n_i, idx);
+            let exponent = [(idx - n_i) as u64];
+            let result = x_i.pow_vartime(exponent);
+
+            num * result
+        }
+    })
+}
+
 /// Get the multipliers for the coefficients of the polynomial,
-/// given the x_i (point of evaluation),
+/// given the `x_i` (point of evaluation),
 /// `n_i` (order of derivative)
 /// `n` (degree of polynomial - 1)
-/// `p` prime order of field
-pub fn polynomial_coeff_multipliers<C: CurveArithmetic>(
+pub fn polynomial_coeff_multipliers<C>(
     x_i: &NonZeroScalar<C>,
     n_i: usize,
     n: usize,
 ) -> Vec<C::Scalar>
 where
-    C: CurveArithmetic<Uint = U256>,
+    C: CurveArithmetic,
 {
-    let mut v = vec![C::Scalar::ZERO; n];
-
-    v.iter_mut().enumerate().skip(n_i).for_each(|(idx, vi)| {
-        let num = C::Scalar::reduce(factorial_range(idx - n_i, idx));
-        let exponent = [(idx - n_i) as u64];
-        let result = x_i.pow_vartime(exponent);
-        *vi = num * result;
-    });
-
-    v
+    polynomial_coeff_multipliers_iter(x_i, n_i, n).collect()
 }
 
 /// Get the birkhoff coefficients
@@ -334,7 +360,7 @@ pub fn birkhoff_coeffs<C>(
     params: &[(NonZeroScalar<C>, usize)],
 ) -> Vec<C::Scalar>
 where
-    C: CurveArithmetic<Uint = U256>,
+    C: CurveArithmetic,
 {
     let n = params.len();
 
@@ -343,9 +369,7 @@ where
         .map(|(x_i, n_i)| polynomial_coeff_multipliers(x_i, *n_i, n))
         .collect();
 
-    let mut matrix_inv = matrix_inverse::<C>(matrix, n);
-
-    matrix_inv.swap_remove(0)
+    matrix_inverse::<C>(matrix, n).swap_remove(0)
 }
 
 #[cfg(not(feature = "serde"))]
@@ -427,6 +451,10 @@ mod ser {
 
 #[cfg(test)]
 mod tests {
+    use elliptic_curve::{scalar::FromUintUnchecked, Curve};
+    use k256::{ProjectivePoint, Scalar, Secp256k1};
+
+    use super::*;
 
     #[test]
     #[cfg(feature = "serde")]
@@ -449,5 +477,88 @@ mod tests {
 
         assert_eq!(poly1, poly2);
         assert_eq!(g_poly1, g_poly2);
+    }
+
+    #[test]
+    fn fact() {
+        // static FACT: [u64; 21] = small_factorial();
+
+        assert_eq!(FACT[19], 121645100408832000);
+        assert_eq!(FACT[20], 2432902008176640000); // biggest number fitting into u64
+    }
+
+    #[test]
+    fn test_derivative_large() {
+        // order of the curve
+        let order = Secp256k1::ORDER;
+        // f(x) = 1 + 2x + (p-1)x^2
+        // p is the curve order
+        let u_i_k = vec![
+            Scalar::from(1_u64),
+            Scalar::from(2_u64),
+            Scalar::from_uint_unchecked(order.wrapping_sub(&1u64.into())),
+        ];
+
+        // f'(x) = 2 + 2(p-1)x
+        // f'(2) = (4p-2) mod p => p - 2
+        let poly = Polynomial::<ProjectivePoint>::new(u_i_k);
+        let n = 1;
+
+        let result = poly.derivative_at(n, &Scalar::from(2_u64));
+
+        assert_eq!(
+            result,
+            Scalar::from_uint_unchecked(order.wrapping_sub(&2u64.into()))
+        );
+    }
+
+    #[test]
+    fn test_derivative_normal() {
+        // f(x) = 1 + 2x + 3x^2 + 4x^3
+        let u_i_k = vec![
+            Scalar::from(1_u64),
+            Scalar::from(2_u64),
+            Scalar::from(3_u64),
+            Scalar::from(4_u64),
+        ];
+
+        let poly = Polynomial::<ProjectivePoint>::new(u_i_k);
+
+        // f''(x) = 6 + 24x
+        let n = 2;
+        // f''(2) = 6 + 24(2) = 54
+        let result = poly.derivative_at(n, &Scalar::from(2_u64));
+
+        assert_eq!(result, Scalar::from(54_u64));
+    }
+
+    #[test]
+    fn test_derivative_coeffs() {
+        // f(x) = 1 + 2x + 3x^2 + 4x^3
+        let g = ProjectivePoint::GENERATOR;
+        let u_i_k = vec![
+            (g * Scalar::from(1_u64)),
+            (g * Scalar::from(2_u64)),
+            (g * Scalar::from(3_u64)),
+            (g * Scalar::from(4_u64)),
+        ];
+
+        let poly = GroupPolynomial::<ProjectivePoint>::new(u_i_k);
+
+        // f''(x) = 6 + 24x
+        let n = 2;
+        let coeffs = poly.derivative_coeffs(n).collect::<Vec<_>>();
+
+        assert_eq!(coeffs.len(), 2);
+        assert_eq!(coeffs[0], g * Scalar::from(6_u64));
+        assert_eq!(coeffs[1], g * Scalar::from(24_u64));
+
+        // f'(x) = 2 + 6x + 12x^2
+        let coeffs = poly.derivative_coeffs(1).collect::<Vec<_>>();
+
+        assert_eq!(coeffs.len(), 3);
+        assert_eq!(coeffs[0], g * Scalar::from(2_u64));
+        assert_eq!(coeffs[1], g * Scalar::from(6_u64));
+        assert_eq!(coeffs[2], g * Scalar::from(12_u64));
     }
 }

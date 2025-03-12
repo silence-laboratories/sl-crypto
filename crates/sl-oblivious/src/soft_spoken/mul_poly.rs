@@ -3,7 +3,7 @@
 
 ///     Multiplies `a` and `b` in the finite field of order 2^128
 ///     modulo the irreducible polynomial f(x) = 1 + x + x^2 + x^7 + x^128
-
+///
 ///     https://link.springer.com/book/10.1007/b97644
 ///     multiplication part: Algorithm 2.34, "Right-to-left comb method for polynomial multiplication"
 ///     reduction part: variant of the idea of Figure 2.9

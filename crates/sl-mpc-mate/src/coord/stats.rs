@@ -51,13 +51,15 @@ impl<R: Relay> Stream for RelayStats<R> {
     type Item = <R as Stream>::Item;
 
     fn poll_next(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        match self.relay.poll_next_unpin(cx) {
+        let this = self.get_mut();
+
+        match this.relay.poll_next_unpin(cx) {
             Poll::Ready(Some(msg)) => {
-                let waiting = self.waiting.take();
-                let mut stats = self.stats.lock().unwrap();
+                let waiting = this.waiting.take();
+                let mut stats = this.stats.lock().unwrap();
 
                 stats.recv_size += msg.len();
                 stats.recv_count += 1;
@@ -66,8 +68,8 @@ impl<R: Relay> Stream for RelayStats<R> {
                     .map(|start| start.elapsed())
                     .unwrap_or(Duration::new(0, 0));
 
-                if let Some(hdr) = MsgHdr::from(&msg) {
-                    stats.wait_times.push((hdr.id, wait_time));
+                if let Ok(hdr) = <&MsgHdr>::try_from(msg.as_slice()) {
+                    stats.wait_times.push((*hdr.id(), wait_time));
                 }
 
                 stats.wait_time += wait_time;
@@ -78,8 +80,9 @@ impl<R: Relay> Stream for RelayStats<R> {
             Poll::Ready(None) => Poll::Ready(None),
 
             Poll::Pending => {
-                if self.waiting.is_none() {
-                    self.waiting = Some(Instant::now());
+                if this.waiting.is_none() {
+                    // mark the beginning of message waiting
+                    this.waiting = Some(Instant::now());
                 }
 
                 Poll::Pending
@@ -92,40 +95,40 @@ impl<R: Relay> Sink<Vec<u8>> for RelayStats<R> {
     type Error = <R as Sink<Vec<u8>>>::Error;
 
     fn poll_ready(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.relay.poll_ready_unpin(cx)
+        self.get_mut().relay.poll_ready_unpin(cx)
     }
 
     fn start_send(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         item: Vec<u8>,
     ) -> Result<(), Self::Error> {
-        let mut stats = self.stats.lock().unwrap();
+        let _ = self.stats.lock().map(|mut stats| {
+            stats.send_size += item.len();
+            stats.send_count += 1;
+        });
 
-        stats.send_size += item.len();
-        stats.send_count += 1;
-
-        drop(stats);
-
-        self.relay.start_send_unpin(item)
+        self.get_mut().relay.start_send_unpin(item)
     }
 
     fn poll_flush(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.relay.poll_flush_unpin(cx)
+        self.get_mut().relay.poll_flush_unpin(cx)
     }
 
     fn poll_close(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.relay.poll_close_unpin(cx)
+        self.get_mut().relay.poll_close_unpin(cx)
     }
 }
+
+impl<R: Relay> Relay for RelayStats<R> {}
 
 impl<R: Relay> Deref for RelayStats<R> {
     type Target = R;

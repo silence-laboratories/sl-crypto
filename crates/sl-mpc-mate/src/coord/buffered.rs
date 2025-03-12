@@ -37,39 +37,36 @@ impl<R: Relay> BufferedMsgRelay<R> {
     ) -> Option<Vec<u8>> {
         // first, look into the input buffer
         if let Some(idx) = self.in_buf.iter().position(|msg| {
-            MsgHdr::from(msg).filter(|hdr| predicate(&hdr.id)).is_some()
+            <&MsgHdr>::try_from(msg.as_slice())
+                .ok()
+                .filter(|hdr| predicate(hdr.id()))
+                .is_some()
         }) {
-            // good catch, remove from the buffer and return
+            // there is a buffered message matching the predicate.
             return Some(self.in_buf.swap_remove(idx));
         }
 
+        // flush output message messages.
+        self.relay.flush().await.ok()?;
+
         loop {
-            // well, we have to poll_next() something suitable.
             let msg = self.relay.next().await?;
 
-            let id = if let Some(hdr) = MsgHdr::from(&msg) {
-                hdr.id
-            } else {
-                // FIXME here we drop an invalid message. How to handle?
-                continue;
-            };
-
-            if predicate(&id) {
-                // good, got it, return
-                return Some(msg);
-            } else {
-                // push into the buffer and try again
-                self.in_buf.push(msg);
+            if let Ok(hdr) = <&MsgHdr>::try_from(msg.as_slice()) {
+                if predicate(hdr.id()) {
+                    // good, return it
+                    return Some(msg);
+                } else {
+                    // push into the buffer and try again
+                    self.in_buf.push(msg);
+                }
             }
         }
     }
 
     /// Function to receive message based on certain ID
     pub async fn recv(&mut self, id: &MsgId, ttl: u32) -> Option<Vec<u8>> {
-        let msg = AskMsg::allocate(id, ttl);
-
-        self.relay.send(msg).await.ok()?;
-
+        self.relay.ask(id, ttl).await.ok()?;
         self.wait_for(|msg| msg.eq(id)).await
     }
 
@@ -88,13 +85,14 @@ impl<R: Relay> Stream for BufferedMsgRelay<R> {
     type Item = R::Item;
 
     fn poll_next(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        if let Some(msg) = self.in_buf.pop() {
+        let this = self.get_mut();
+        if let Some(msg) = this.in_buf.pop() {
             Poll::Ready(Some(msg))
         } else {
-            self.relay.poll_next_unpin(cx)
+            this.relay.poll_next_unpin(cx)
         }
     }
 }
@@ -103,33 +101,35 @@ impl<R: Relay> Sink<Vec<u8>> for BufferedMsgRelay<R> {
     type Error = R::Error;
 
     fn poll_ready(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.relay.poll_ready_unpin(cx)
+        self.get_mut().relay.poll_ready_unpin(cx)
     }
 
     fn start_send(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         item: Vec<u8>,
     ) -> Result<(), Self::Error> {
-        self.relay.start_send_unpin(item)
+        self.get_mut().relay.start_send_unpin(item)
     }
 
     fn poll_flush(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.relay.poll_flush_unpin(cx)
+        self.get_mut().relay.poll_flush_unpin(cx)
     }
 
     fn poll_close(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.relay.poll_close_unpin(cx)
+        self.get_mut().relay.poll_close_unpin(cx)
     }
 }
+
+impl<R: Relay> Relay for BufferedMsgRelay<R> {}
 
 impl<R: Relay> Deref for BufferedMsgRelay<R> {
     type Target = R;

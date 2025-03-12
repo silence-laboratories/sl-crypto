@@ -4,6 +4,7 @@
 use std::ops::{MulAssign, Sub};
 
 use elliptic_curve::{CurveArithmetic, Field};
+#[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
 // Compute minor of a matrix.
@@ -33,12 +34,14 @@ fn transpose<C: CurveArithmetic>(
     let len = v[0].len();
 
     for n in 0..len - 1 {
-        for m in n + 1..len {
-            let nm = &mut v[n][m] as *mut C::Scalar;
-            let mn = &mut v[m][n] as *mut C::Scalar;
+        // n < len-1 => n+1 < len
+        let (up, down) = v.split_at_mut(n + 1);
 
-            // SAFETY: n != m, so nm and mn always points to separate locations
-            unsafe { core::ptr::swap_nonoverlapping(nm, mn, 1) }
+        for m in n + 1..len {
+            let nm = &mut up[n][m]; // == &mut v[n][m]
+            let mn = &mut down[m - (n + 1)][n]; // == &mut v[m][n]
+
+            core::mem::swap(nm, mn);
         }
     }
 
@@ -114,12 +117,19 @@ pub fn matrix_inverse<C: CurveArithmetic>(
         return vec![vec![a11, a12], vec![a21, a22]];
     }
 
-    let cofactors = matrix
-        .par_iter()
-        .enumerate()
+    #[cfg(feature = "rayon")]
+    let iter = matrix.par_iter();
+    #[cfg(not(feature = "rayon"))]
+    let iter = matrix.iter();
+
+    let cofactors = iter.enumerate()
         .map(|(r, row)| {
-            row.par_iter()
-                .enumerate()
+            #[cfg(feature = "rayon")]
+            let iter = row.par_iter();
+            #[cfg(not(feature = "rayon"))]
+            let iter = row.iter();
+
+            iter.enumerate()
                 .map(|(c, _)| {
                     let minor = matrix_minor::<C>(&matrix, r, c);
                     let minor_rows = minor.len();

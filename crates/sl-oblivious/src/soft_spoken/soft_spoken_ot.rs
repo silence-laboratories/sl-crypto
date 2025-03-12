@@ -110,7 +110,6 @@ impl ReceiverExtendedOutput {
     }
 }
 
-///
 pub struct SoftSpokenOTReceiver;
 
 impl SoftSpokenOTReceiver {
