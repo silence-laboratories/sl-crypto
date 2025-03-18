@@ -2,6 +2,7 @@
 name = "sl-mpc-traits"
 version = "0.1.0"
 edition = "2021"
+license-file = "../../LICENSE"
 
 [dependencies]
 bincode = { version = "1", optional = true }
