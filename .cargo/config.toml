@@ -1,37 +1,8 @@
-# Registries Entry
-# -------------------
-#
-# Maps a registry name to an index url
-# so Cargo knows where to fetch data
-# from for dependencies from that registry.
-#
-# ```toml
-# # in Cargo.toml
-# [dependencies]
-# wallet-provider-service-sdk = { version = "0.1.2", registry = "silencelaboratories" }
-# ```
-#
 [registries]
 silencelaboratories = { index = "ssh://git@ssh.shipyard.rs/silencelaboratories/crate-index.git" }
 
+[net]
+git-fetch-with-cli = true
 
-# Git Fetch With Cli
-# -------------------------------------
-#
-# This setting is **strongly** recommended,
-# although not absolutely required. It
-# instructs cargo to use git (the command-line
-# program) to perform clone/pull instead of
-# the libgit2 library. Git handles a
-# much broader range of authentication contexts
-# gracefully vs. libgit2.
-#
- [net]
- git-fetch-with-cli = true
-
-
-# Cargo credential providers
-# -------------------------------------
-#
 [registry]
 global-credential-providers = ["cargo:token", "cargo:macos-keychain", "cargo:wincred"]
