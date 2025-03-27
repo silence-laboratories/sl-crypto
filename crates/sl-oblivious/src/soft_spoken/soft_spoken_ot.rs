@@ -13,7 +13,6 @@ use std::array;
 
 use elliptic_curve::{rand_core::CryptoRngCore, subtle::ConstantTimeEq};
 use merlin::Transcript;
-use rand::Rng;
 
 use crate::{
     constants::{
@@ -282,9 +281,6 @@ impl SoftSpokenOTSender {
         seed_ot_results: &ReceiverOTSeed,
         message: &Round1Output,
     ) -> Result<Box<SenderExtendedOutput>, SoftSpokenOTError> {
-        // let mut r_x = [[[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
-        //     SOFT_SPOKEN_Q];
-
         let mut r_x = bytemuck::allocation::zeroed_box::<
             [[[u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
                 SOFT_SPOKEN_Q],
@@ -444,7 +440,8 @@ impl SoftSpokenOTSender {
     }
 }
 
-pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
+#[cfg(test)]
+pub(crate) fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
     rng: &mut R,
 ) -> (SenderOTSeed, ReceiverOTSeed) {
     let mut sender_ot_seed = SenderOTSeed::default();
@@ -452,7 +449,7 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
 
     for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
         let ot_sender_messages: [[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q] =
-            array::from_fn(|_| rng.gen());
+            array::from_fn(|_| rand::random());
 
         sender_ot_seed.otp_enc_keys[i] = ot_sender_messages;
         receiver_ot_seed.otp_dec_keys[i] = ot_sender_messages;
