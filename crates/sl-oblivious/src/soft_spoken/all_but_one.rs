@@ -1,6 +1,7 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
+use bytemuck::{AnyBitPattern, NoUninit, Pod, Zeroable};
 use elliptic_curve::subtle::{ConditionallySelectable, ConstantTimeEq};
 use merlin::Transcript;
 
@@ -12,7 +13,7 @@ use crate::{
     utils::ExtractBit,
 };
 
-#[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 pub struct PPRF {
     t: [[[u8; LAMBDA_C_BYTES]; 2]; SOFT_SPOKEN_K - 1],
@@ -30,7 +31,7 @@ impl Default for PPRF {
     }
 }
 
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct PPRFOutput([PPRF; LAMBDA_C / SOFT_SPOKEN_K]);
 
@@ -117,15 +118,14 @@ pub fn eval_pprf(
     all_but_one_receiver_seed: &mut ReceiverOTSeed,
 ) -> Result<(), &'static str> {
     for (j, out) in output.iter().enumerate() {
-        let x_star_0: u8 =
-            receiver_ot_seed.choice_bits.extract_bit(j * SOFT_SPOKEN_K) as u8;
+        let x_star_0 =
+            receiver_ot_seed.choice_bits.extract_bit(j * SOFT_SPOKEN_K);
 
         let mut s_star_i = [[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
 
-        s_star_i[x_star_0 as usize] =
-            receiver_ot_seed.otp_dec_keys[j * SOFT_SPOKEN_K];
+        s_star_i[x_star_0] = receiver_ot_seed.otp_dec_keys[j * SOFT_SPOKEN_K];
 
-        let mut y_star = x_star_0 as usize ^ 1;
+        let mut y_star = x_star_0 ^ 1;
 
         for i in 1..SOFT_SPOKEN_K {
             let mut s_star_i_plus_1 = [[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
@@ -150,15 +150,14 @@ pub fn eval_pprf(
                 });
             }
 
-            let x_star_i: u8 = 1 ^ receiver_ot_seed
+            let x_star_i = 1 ^ receiver_ot_seed
                 .choice_bits
-                .extract_bit(j * SOFT_SPOKEN_K + i)
-                as u8;
+                .extract_bit(j * SOFT_SPOKEN_K + i);
 
             let big_f_i_star =
                 &receiver_ot_seed.otp_dec_keys[j * SOFT_SPOKEN_K + i];
 
-            let ct_x = x_star_i as usize ^ 1;
+            let ct_x = x_star_i ^ 1;
 
             // TODO: fix clippy
             #[allow(clippy::needless_range_loop)]
@@ -177,7 +176,7 @@ pub fn eval_pprf(
 
             s_star_i = s_star_i_plus_1;
 
-            y_star = y_star * 2 + x_star_i as usize;
+            y_star = y_star * 2 + x_star_i;
         }
 
         // Verify
@@ -258,7 +257,7 @@ mod test {
         let one_time_pad_enc_keys = std::array::from_fn(|i| {
             let choice = random_choices.extract_bit(i);
 
-            if !choice {
+            if choice == 0 {
                 sender_ot_seed.otp_enc_keys[i].rho_0
             } else {
                 sender_ot_seed.otp_enc_keys[i].rho_1

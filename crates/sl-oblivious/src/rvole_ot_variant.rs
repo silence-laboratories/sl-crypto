@@ -13,8 +13,7 @@
 
 use std::array;
 
-use merlin::Transcript;
-
+use bytemuck::{allocation::zeroed_box, AnyBitPattern, NoUninit};
 use k256::{
     elliptic_curve::{
         bigint::Encoding,
@@ -24,14 +23,15 @@ use k256::{
     },
     Scalar, U256,
 };
+use merlin::Transcript;
 
-use crate::endemic_ot::{
-    EndemicOTMsg1, EndemicOTMsg2, EndemicOTReceiver, EndemicOTSender,
-};
 use crate::{
     constants::{
         RANDOM_VOLE_GADGET_VECTOR_LABEL, RANDOM_VOLE_MU_LABEL,
         RANDOM_VOLE_THETA_LABEL,
+    },
+    endemic_ot::{
+        EndemicOTMsg1, EndemicOTMsg2, EndemicOTReceiver, EndemicOTSender,
     },
     params::consts::*,
     utils::ExtractBit,
@@ -60,9 +60,7 @@ fn generate_gadget_vec(session_id: &[u8]) -> impl Iterator<Item = Scalar> {
 }
 
 /// Message 1 output in RVOLE protocol
-#[derive(
-    Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit, Default,
-)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit, Default)]
 #[repr(C)]
 pub struct RVOLEMsg1 {
     ot_msg1_a: EndemicOTMsg1,
@@ -70,7 +68,7 @@ pub struct RVOLEMsg1 {
 }
 
 /// Message 2 output in RVOLE protocol
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct RVOLEMsg2 {
     ot_msg2_a: EndemicOTMsg2,
@@ -98,15 +96,11 @@ impl Default for RVOLEMsg2 {
     }
 }
 
-///
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
-#[repr(C)]
 pub struct RVOLEReceiver {
     session_id: [u8; 32],
     beta: [u8; XI_BYTES],
 }
 
-///
 impl RVOLEReceiver {
     /// Create a new RVOLE receiver
     pub fn new<R: CryptoRngCore>(
@@ -126,26 +120,26 @@ impl RVOLEReceiver {
         t.challenge_bytes(b"session-id-a", &mut session_id_a);
         t.challenge_bytes(b"session-id-b", &mut session_id_b);
 
-        let receiver_a = EndemicOTReceiver::new(
+        let receiver_a = Box::new(EndemicOTReceiver::new(
             &session_id_a,
             &mut rvole_output_1.ot_msg1_a,
             rng,
-        );
+        ));
 
-        let receiver_b = EndemicOTReceiver::new(
+        let receiver_b = Box::new(EndemicOTReceiver::new(
             &session_id_b,
             &mut rvole_output_1.ot_msg1_b,
             rng,
-        );
+        ));
 
-        let beta_a = receiver_a.packed_choice_bits;
-        let beta_b = receiver_b.packed_choice_bits;
+        let beta_a = receiver_a.packed_choice_bits.as_slice();
+        let beta_b = receiver_b.packed_choice_bits.as_slice();
 
         assert_eq!(beta_a.len() + beta_b.len(), XI_BYTES);
 
-        let mut beta: [u8; XI_BYTES] = [0u8; XI_BYTES];
-        beta[0..XI_BYTES / 2].copy_from_slice(&beta_a);
-        beta[XI_BYTES / 2..XI_BYTES].copy_from_slice(&beta_b);
+        let mut beta = [0u8; XI_BYTES];
+        beta[0..XI_BYTES / 2].copy_from_slice(beta_a);
+        beta[XI_BYTES / 2..XI_BYTES].copy_from_slice(beta_b);
 
         // b = <g, /beta>
         let b = generate_gadget_vec(&session_id).enumerate().fold(
@@ -162,22 +156,18 @@ impl RVOLEReceiver {
             },
         );
 
-        let mut next = bytemuck::allocation::zeroed_box::<RVOLEReceiver>();
+        let next = Box::new(RVOLEReceiver { session_id, beta });
 
-        next.session_id = session_id;
-        next.beta = beta;
-
-        (next, Box::new(receiver_a), Box::new(receiver_b), b)
+        (next, receiver_a, receiver_b, b)
     }
 }
 
 impl RVOLEReceiver {
-    ///
     pub fn process(
         &self,
         rvole_output_2: &RVOLEMsg2,
-        receiver_a: Box<EndemicOTReceiver>,
-        receiver_b: Box<EndemicOTReceiver>,
+        receiver_a: &EndemicOTReceiver,
+        receiver_b: &EndemicOTReceiver,
     ) -> Result<[Scalar; L_BATCH], &'static str> {
         let receiver_output_a =
             receiver_a.process(&rvole_output_2.ot_msg2_a)?;
@@ -190,9 +180,7 @@ impl RVOLEReceiver {
             XI
         );
 
-        let mut v_x = bytemuck::allocation::zeroed_box::<
-            [[[u8; KAPPA_BYTES]; OT_WIDTH]; XI],
-        >();
+        let mut v_x = zeroed_box::<[[[u8; KAPPA_BYTES]; OT_WIDTH]; XI]>();
 
         for j in 0..XI / 2 {
             let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
@@ -206,6 +194,7 @@ impl RVOLEReceiver {
                 t.challenge_bytes(b"", k);
             }
         }
+
         for j in XI / 2..XI {
             let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
             t.append_message(b"session-id", &self.session_id);
@@ -247,6 +236,7 @@ impl RVOLEReceiver {
 
         for j in 0..XI {
             let j_bit = self.beta.extract_bit(j);
+
             for i in 0..L_BATCH {
                 let option_0 = Scalar::reduce(U256::from_be_bytes(v_x[j][i]));
                 let option_1 = option_0 + rvole_output_2.get_a_tilde(j, i);
@@ -257,6 +247,7 @@ impl RVOLEReceiver {
                 );
                 d_dot[j][i] = chosen
             }
+
             for k in 0..RHO {
                 let option_0 =
                     Scalar::reduce(U256::from_be_bytes(v_x[j][L_BATCH + k]));
@@ -318,11 +309,9 @@ impl RVOLEReceiver {
     }
 }
 
-///
 pub struct RVOLESender;
 
 impl RVOLESender {
-    ///
     pub fn process<R: CryptoRngCore>(
         session_id: &[u8],
         a: &[Scalar; L_BATCH],
@@ -345,6 +334,7 @@ impl RVOLESender {
         ) else {
             return Err("Base OT error");
         };
+
         let Ok(sender_ot_output_b) = EndemicOTSender::process(
             &session_id_b,
             &rvole_output_1.ot_msg1_b,
@@ -354,15 +344,17 @@ impl RVOLESender {
             return Err("Base OT error");
         };
 
-        assert_eq!(
+        debug_assert_eq!(
             sender_ot_output_a.otp_enc_keys.len()
                 + sender_ot_output_b.otp_enc_keys.len(),
             XI
         );
 
         let mut sender_extended_output = SenderExtendedOutput::new();
+
         let v_0 = &mut sender_extended_output.v_0;
         let v_1 = &mut sender_extended_output.v_1;
+
         for j in 0..XI / 2 {
             let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
             t.append_message(b"session-id", session_id);
@@ -386,25 +378,30 @@ impl RVOLESender {
                 t.challenge_bytes(b"", k);
             }
         }
+
         for j in XI / 2..XI {
             let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
+
             t.append_message(b"session-id", session_id);
             t.append_u64(b"index", j as u64);
             t.append_message(
                 &SOFT_SPOKEN_RANDOMIZE_LABEL,
                 &sender_ot_output_b.otp_enc_keys[j - XI / 2].rho_0,
             );
+
             for k in &mut v_0[j] {
                 t.challenge_bytes(b"", k);
             }
 
             let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
+
             t.append_message(b"session-id", session_id);
             t.append_u64(b"index", j as u64);
             t.append_message(
                 &SOFT_SPOKEN_RANDOMIZE_LABEL,
                 &sender_ot_output_b.otp_enc_keys[j - XI / 2].rho_1,
             );
+
             for k in &mut v_1[j] {
                 t.challenge_bytes(b"", k);
             }
@@ -456,6 +453,7 @@ impl RVOLESender {
         }
 
         let mut theta = [[Scalar::ZERO; L_BATCH]; RHO];
+
         #[allow(clippy::needless_range_loop)]
         for k in 0..RHO {
             for i in 0..L_BATCH {
@@ -530,7 +528,7 @@ mod tests {
         .unwrap();
 
         let receiver_shares = receiver
-            .process(&round2_output, ot_receiver_a, ot_receiver_b)
+            .process(&round2_output, &ot_receiver_a, &ot_receiver_b)
             .unwrap();
 
         let sum_0 = receiver_shares[0] + sender_shares[0];
