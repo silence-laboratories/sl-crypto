@@ -225,13 +225,12 @@ impl RVOLEReceiver {
             return Err("Consistency check failed");
         }
 
-        let mut d = [Scalar::ZERO; L_BATCH];
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..L_BATCH {
-            for (j, gv) in generate_gadget_vec(&self.session_id).enumerate() {
-                d[i] += gv * d_dot[j][i];
-            }
-        }
+        let d: [Scalar; L_BATCH] = std::array::from_fn(|i| {
+            generate_gadget_vec(&self.session_id)
+                .enumerate()
+                .map(|(j, gv)| gv * d_dot[j][i])
+                .sum()
+        });
 
         Ok(d)
     }
@@ -314,12 +313,12 @@ impl RVOLESender {
         }
 
         for (k, eta) in output.eta.iter_mut().enumerate() {
-            let mut s = Scalar::reduce(U256::from_be_bytes(*eta));
-            s += theta[k]
-                .iter()
-                .zip(a)
-                .map(|(t_k_i, a_i)| t_k_i * a_i)
-                .sum::<Scalar>();
+            let s = Scalar::reduce(U256::from_be_bytes(*eta))
+                + theta[k]
+                    .iter()
+                    .zip(a)
+                    .map(|(t_k_i, a_i)| t_k_i * a_i)
+                    .sum::<Scalar>();
             *eta = s.to_bytes().into();
         }
 

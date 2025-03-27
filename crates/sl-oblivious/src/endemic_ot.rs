@@ -88,18 +88,17 @@ fn h_function(
         t.challenge_bytes(b"compressed-point", &mut compressed_point);
         compressed_point[0] &= 0x01;
         compressed_point[0] ^= 0x02;
-        let point = match decode_point(&compressed_point) {
+        match decode_point(&compressed_point) {
             None => continue,
-            Some(v) => v,
+            Some(v) => return v,
         };
-        return point;
     }
 }
 
 /// create LAMBDA_C_BYTES ot seed
 fn h_function_2(
     batch_index: usize,
-    pk: &ProjectivePoint,
+    pk: ProjectivePoint,
 ) -> [u8; LAMBDA_C_BYTES] {
     let mut t = Transcript::new(&ENDEMIC_OT_LABEL);
 
@@ -148,6 +147,7 @@ impl EndemicOTSender {
                 }
                 Some(v) => v,
             };
+
             let r_1_point = match decode_point(r_1) {
                 None => {
                     error = true;
@@ -169,8 +169,8 @@ impl EndemicOTSender {
 
             msg2.m_b_list[idx] = [encode_point(&m_b_0), encode_point(&m_b_1)];
 
-            let rho_0 = h_function_2(idx, &(m_a_0 * t_b_0));
-            let rho_1 = h_function_2(idx, &(m_a_1 * t_b_1));
+            let rho_0 = h_function_2(idx, m_a_0 * t_b_0);
+            let rho_1 = h_function_2(idx, m_a_1 * t_b_1);
 
             OneTimePadEncryptionKeys { rho_0, rho_1 }
         });
@@ -244,19 +244,21 @@ impl EndemicOTReceiver {
         let rho_w_vec: [[u8; LAMBDA_C_BYTES]; LAMBDA_C] =
             array::from_fn(|idx| {
                 let m_b_values = &msg2.m_b_list[idx];
-                let random_choice_bit =
-                    self.packed_choice_bits.extract_bit(idx);
 
-                let m_b_value = m_b_values[random_choice_bit as usize];
-                let m_b_value = match decode_point(&m_b_value) {
+                let random_choice_bit =
+                    self.packed_choice_bits.extract_bit(idx) as usize;
+
+                let m_b_value = &m_b_values[random_choice_bit];
+                let m_b_value = match decode_point(m_b_value) {
                     None => {
                         error = true;
                         ProjectivePoint::IDENTITY
                     }
                     Some(v) => v,
                 };
+
                 let res = m_b_value * self.t_a_list[idx];
-                h_function_2(idx, &res)
+                h_function_2(idx, res)
             });
 
         if error {

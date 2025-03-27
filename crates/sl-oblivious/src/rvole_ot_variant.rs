@@ -126,26 +126,26 @@ impl RVOLEReceiver {
         t.challenge_bytes(b"session-id-a", &mut session_id_a);
         t.challenge_bytes(b"session-id-b", &mut session_id_b);
 
-        let receiver_a = EndemicOTReceiver::new(
+        let receiver_a = Box::new(EndemicOTReceiver::new(
             &session_id_a,
             &mut rvole_output_1.ot_msg1_a,
             rng,
-        );
+        ));
 
-        let receiver_b = EndemicOTReceiver::new(
+        let receiver_b = Box::new(EndemicOTReceiver::new(
             &session_id_b,
             &mut rvole_output_1.ot_msg1_b,
             rng,
-        );
+        ));
 
-        let beta_a = receiver_a.packed_choice_bits;
-        let beta_b = receiver_b.packed_choice_bits;
+        let beta_a = receiver_a.packed_choice_bits.as_slice();
+        let beta_b = receiver_b.packed_choice_bits.as_slice();
 
         assert_eq!(beta_a.len() + beta_b.len(), XI_BYTES);
 
-        let mut beta: [u8; XI_BYTES] = [0u8; XI_BYTES];
-        beta[0..XI_BYTES / 2].copy_from_slice(&beta_a);
-        beta[XI_BYTES / 2..XI_BYTES].copy_from_slice(&beta_b);
+        let mut beta = [0u8; XI_BYTES];
+        beta[0..XI_BYTES / 2].copy_from_slice(beta_a);
+        beta[XI_BYTES / 2..XI_BYTES].copy_from_slice(beta_b);
 
         // b = <g, /beta>
         let b = generate_gadget_vec(&session_id).enumerate().fold(
@@ -167,7 +167,7 @@ impl RVOLEReceiver {
         next.session_id = session_id;
         next.beta = beta;
 
-        (next, Box::new(receiver_a), Box::new(receiver_b), b)
+        (next, receiver_a, receiver_b, b)
     }
 }
 
