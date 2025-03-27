@@ -1,18 +1,21 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use elliptic_curve::{Field, Group};
 use std::array;
 use std::hint::black_box;
+use std::ops::Neg;
 
+use bytemuck::{AnyBitPattern, NoUninit};
+use elliptic_curve::{
+    group::GroupEncoding, ops::MulByGenerator, Field, Group,
+};
+use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
 use rand::prelude::*;
 
 use crate::{
     constants::ENDEMIC_OT_LABEL, params::consts::*, utils::ExtractBit,
 };
-use k256::{elliptic_curve::group::GroupEncoding, ProjectivePoint, Scalar};
-use std::ops::Neg;
 
 const POINT_BYTES_SIZE: usize = 33;
 
@@ -20,7 +23,7 @@ const POINT_BYTES_SIZE: usize = 33;
 pub type PointBytes = [u8; POINT_BYTES_SIZE];
 
 /// EndemicOT Message 1
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct EndemicOTMsg1 {
     // values r_0 and r_1 from OTReceiver to OTSender
@@ -36,7 +39,7 @@ impl Default for EndemicOTMsg1 {
 }
 
 /// EndemicOT Message 2
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct EndemicOTMsg2 {
     // values m_b_0 and m_b_1 from OTSender to OTReceiver
@@ -88,18 +91,17 @@ fn h_function(
         t.challenge_bytes(b"compressed-point", &mut compressed_point);
         compressed_point[0] &= 0x01;
         compressed_point[0] ^= 0x02;
-        let point = match decode_point(&compressed_point) {
+        match decode_point(&compressed_point) {
             None => continue,
-            Some(v) => v,
+            Some(v) => return v,
         };
-        return point;
     }
 }
 
 /// create LAMBDA_C_BYTES ot seed
 fn h_function_2(
     batch_index: usize,
-    pk: &ProjectivePoint,
+    pk: ProjectivePoint,
 ) -> [u8; LAMBDA_C_BYTES] {
     let mut t = Transcript::new(&ENDEMIC_OT_LABEL);
 
@@ -120,6 +122,7 @@ fn encode_point(p: &ProjectivePoint) -> PointBytes {
 /// Decode ProjectivePoint
 fn decode_point(bytes: &PointBytes) -> Option<ProjectivePoint> {
     let mut repr = <ProjectivePoint as GroupEncoding>::Repr::default();
+
     AsMut::<[u8]>::as_mut(&mut repr).copy_from_slice(bytes);
 
     ProjectivePoint::from_bytes(&repr).into()
@@ -138,6 +141,7 @@ impl EndemicOTSender {
         rng: &mut R,
     ) -> Result<SenderOutput, &'static str> {
         let mut error = false;
+
         let otp_enc_keys = array::from_fn(|idx| {
             let [r_0, r_1] = &msg1.r_list[idx];
 
@@ -148,6 +152,7 @@ impl EndemicOTSender {
                 }
                 Some(v) => v,
             };
+
             let r_1_point = match decode_point(r_1) {
                 None => {
                     error = true;
@@ -164,13 +169,13 @@ impl EndemicOTSender {
             let t_b_0 = Scalar::random(&mut *rng);
             let t_b_1 = Scalar::random(&mut *rng);
 
-            let m_b_0 = ProjectivePoint::GENERATOR * t_b_0;
-            let m_b_1 = ProjectivePoint::GENERATOR * t_b_1;
+            let m_b_0 = ProjectivePoint::mul_by_generator(&t_b_0);
+            let m_b_1 = ProjectivePoint::mul_by_generator(&t_b_1);
 
             msg2.m_b_list[idx] = [encode_point(&m_b_0), encode_point(&m_b_1)];
 
-            let rho_0 = h_function_2(idx, &(m_a_0 * t_b_0));
-            let rho_1 = h_function_2(idx, &(m_a_1 * t_b_1));
+            let rho_0 = h_function_2(idx, m_a_0 * t_b_0);
+            let rho_1 = h_function_2(idx, m_a_1 * t_b_1);
 
             OneTimePadEncryptionKeys { rho_0, rho_1 }
         });
@@ -210,7 +215,7 @@ impl EndemicOTReceiver {
             .enumerate()
             .for_each(|(idx, r_values)| {
                 let random_choice_bit =
-                    next_state.packed_choice_bits.extract_bit(idx) as usize;
+                    next_state.packed_choice_bits.extract_bit(idx);
 
                 let t_a = &next_state.t_a_list[idx];
 
@@ -219,7 +224,7 @@ impl EndemicOTReceiver {
                     h_function(random_choice_bit, idx, session_id, &r_other);
 
                 let r_choice =
-                    ProjectivePoint::GENERATOR * t_a + h_choice.neg();
+                    ProjectivePoint::mul_by_generator(t_a) + h_choice.neg();
 
                 // dummy calculation for constant time
                 black_box(h_function(
@@ -237,26 +242,28 @@ impl EndemicOTReceiver {
     }
 
     pub fn process(
-        self,
+        &self,
         msg2: &EndemicOTMsg2,
     ) -> Result<ReceiverOutput, &'static str> {
         let mut error = false;
         let rho_w_vec: [[u8; LAMBDA_C_BYTES]; LAMBDA_C] =
             array::from_fn(|idx| {
                 let m_b_values = &msg2.m_b_list[idx];
+
                 let random_choice_bit =
                     self.packed_choice_bits.extract_bit(idx);
 
-                let m_b_value = m_b_values[random_choice_bit as usize];
-                let m_b_value = match decode_point(&m_b_value) {
+                let m_b_value = &m_b_values[random_choice_bit];
+                let m_b_value = match decode_point(m_b_value) {
                     None => {
                         error = true;
                         ProjectivePoint::IDENTITY
                     }
                     Some(v) => v,
                 };
+
                 let res = m_b_value * self.t_a_list[idx];
-                h_function_2(idx, &res)
+                h_function_2(idx, res)
             });
 
         if error {
@@ -270,9 +277,8 @@ impl EndemicOTReceiver {
     }
 }
 
-// FIXME: required only for testing
 impl ReceiverOutput {
-    /// Create a new `ReceiverOutput`.
+    #[cfg(test)]
     pub fn new(
         choice_bits: [u8; LAMBDA_C_BYTES],
         otp_dec_keys: [[u8; LAMBDA_C_BYTES]; LAMBDA_C],
@@ -299,6 +305,7 @@ mod test {
             EndemicOTReceiver::new(&session_id, &mut msg1, &mut rng);
 
         let mut msg2 = EndemicOTMsg2::default();
+
         let sender_output =
             EndemicOTSender::process(&session_id, &msg1, &mut msg2, &mut rng)
                 .unwrap();
@@ -312,7 +319,7 @@ mod test {
 
             let bit = receiver_output.choice_bits.extract_bit(i);
 
-            if bit {
+            if bit != 0 {
                 assert_eq!(&sender_pad.rho_1, rec_pad);
             } else {
                 assert_eq!(&sender_pad.rho_0, rec_pad);

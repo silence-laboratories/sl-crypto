@@ -1,12 +1,12 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-///     Multiplies `a` and `b` in the finite field of order 2^128
-///     modulo the irreducible polynomial f(x) = 1 + x + x^2 + x^7 + x^128
+/// Multiplies `a` and `b` in the finite field of order 2^128
+/// modulo the irreducible polynomial f(x) = 1 + x + x^2 + x^7 + x^128
 ///
-///     https://link.springer.com/book/10.1007/b97644
-///     multiplication part: Algorithm 2.34, "Right-to-left comb method for polynomial multiplication"
-///     reduction part: variant of the idea of Figure 2.9
+/// https://link.springer.com/book/10.1007/b97644
+/// multiplication part: Algorithm 2.34, "Right-to-left comb method for polynomial multiplication"
+/// reduction part: variant of the idea of Figure 2.9
 pub fn binary_field_multiply_gf_2_128(
     a: &[u8; 16],
     b_data: &[u8; 16],
@@ -21,17 +21,19 @@ pub fn binary_field_multiply_gf_2_128(
 
     for k in 0..W {
         for j in 0..T {
-            //let mask = if (a[j] >> k) & 0x01 == 1 { 0xFF } else { 0x00 };
-            let mask = -((a[j] >> k & 0x01) as i8) as u8;
+            // let mask = if (a[j] >> k) & 0x01 == 1 { 0xFF } else { 0x00 };
+            let mask = -(((a[j] >> k) & 0x01) as i8) as u8;
             for i in 0..T + 1 {
                 c[j + i] ^= b[i] & mask;
             }
         }
+
         for i in (1..=T).rev() {
             b[i] = (b[i] << 1) | (b[i - 1] >> 7);
         }
         b[0] <<= 1
     }
+
     for i in (T..=2 * T - 1).rev() {
         c[i - 16] ^= c[i];
         c[i - 16] ^= c[i] << 1;

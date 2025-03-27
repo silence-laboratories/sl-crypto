@@ -12,8 +12,7 @@
 
 use std::array;
 
-use merlin::Transcript;
-
+use bytemuck::{allocation::zeroed_box, AnyBitPattern, NoUninit, Zeroable};
 use k256::{
     elliptic_curve::{
         bigint::Encoding,
@@ -23,6 +22,7 @@ use k256::{
     },
     Scalar, U256,
 };
+use merlin::Transcript;
 
 use crate::{
     constants::{
@@ -54,7 +54,7 @@ fn generate_gadget_vec(session_id: &[u8]) -> impl Iterator<Item = Scalar> {
 }
 
 /// Message output in RVOLE protocol
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct RVOLEOutput {
     a_tilde: [[[u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
@@ -78,8 +78,7 @@ impl Default for RVOLEOutput {
     }
 }
 
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
-#[repr(C)]
+#[derive(Zeroable)]
 pub struct RVOLEReceiver {
     session_id: [u8; 32],
     beta: [u8; L_BYTES],
@@ -112,7 +111,7 @@ impl RVOLEReceiver {
             },
         );
 
-        let mut next = bytemuck::allocation::zeroed_box::<RVOLEReceiver>();
+        let mut next = zeroed_box::<RVOLEReceiver>();
 
         next.session_id = session_id;
         next.beta = beta;
@@ -225,13 +224,12 @@ impl RVOLEReceiver {
             return Err("Consistency check failed");
         }
 
-        let mut d = [Scalar::ZERO; L_BATCH];
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..L_BATCH {
-            for (j, gv) in generate_gadget_vec(&self.session_id).enumerate() {
-                d[i] += gv * d_dot[j][i];
-            }
-        }
+        let d: [Scalar; L_BATCH] = std::array::from_fn(|i| {
+            generate_gadget_vec(&self.session_id)
+                .enumerate()
+                .map(|(j, gv)| gv * d_dot[j][i])
+                .sum()
+        });
 
         Ok(d)
     }
@@ -314,12 +312,12 @@ impl RVOLESender {
         }
 
         for (k, eta) in output.eta.iter_mut().enumerate() {
-            let mut s = Scalar::reduce(U256::from_be_bytes(*eta));
-            s += theta[k]
-                .iter()
-                .zip(a)
-                .map(|(t_k_i, a_i)| t_k_i * a_i)
-                .sum::<Scalar>();
+            let s = Scalar::reduce(U256::from_be_bytes(*eta))
+                + theta[k]
+                    .iter()
+                    .zip(a)
+                    .map(|(t_k_i, a_i)| t_k_i * a_i)
+                    .sum::<Scalar>();
             *eta = s.to_bytes().into();
         }
 
@@ -360,6 +358,7 @@ mod tests {
         let session_id: [u8; 32] = rng.gen();
 
         let mut round1_output = Round1Output::default();
+
         let (receiver, beta) = RVOLEReceiver::new(
             session_id,
             &sender_ot_seed,

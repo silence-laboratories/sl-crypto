@@ -1,19 +1,20 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-///
-///  SoftSpokenOT protocol https://eprint.iacr.org/2022/192.pdf
-///  Instantiation of SoftSpokenOT based on Fig.10 https://eprint.iacr.org/2015/546.pdf
-///  Extends LAMBDA_C all-but-one-ot (each LAMBDA_C-bit) to L 1 out of 2 base OTs (each KAPPA-bit) with OT_WIDTH=3
-///  Satisfies Functionality 5.1 https://eprint.iacr.org/2023/765.pdf ,
-///     where X = Z^{OT_WIDTH}_{q} and l_OT = L
-///  Fiat-Shamir transform applied according to Section 5.1 of https://eprint.iacr.org/2023/765.pdf
-///
+//!
+//!  SoftSpokenOT protocol https://eprint.iacr.org/2022/192.pdf
+//!  Instantiation of SoftSpokenOT based on Fig.10 https://eprint.iacr.org/2015/546.pdf
+//!  Extends LAMBDA_C all-but-one-ot (each LAMBDA_C-bit) to L 1 out of 2 base OTs (each KAPPA-bit) with OT_WIDTH=3
+//!  Satisfies Functionality 5.1 https://eprint.iacr.org/2023/765.pdf ,
+//!     where X = Z^{OT_WIDTH}_{q} and l_OT = L
+//!  Fiat-Shamir transform applied according to Section 5.1 of https://eprint.iacr.org/2023/765.pdf
+//!
+
 use std::array;
 
+use bytemuck::{allocation::zeroed_box, AnyBitPattern, NoUninit, Zeroable};
 use elliptic_curve::{rand_core::CryptoRngCore, subtle::ConstantTimeEq};
 use merlin::Transcript;
-use rand::Rng;
 
 use crate::{
     constants::{
@@ -21,13 +22,13 @@ use crate::{
         SOFT_SPOKEN_MATRIX_HASH_LABEL, SOFT_SPOKEN_RANDOMIZE_LABEL,
     },
     params::consts::*,
-    soft_spoken::types::SoftSpokenOTError,
+    soft_spoken::{
+        mul_poly::binary_field_multiply_gf_2_128, types::SoftSpokenOTError,
+    },
     utils::{bit_to_bit_mask, ExtractBit},
 };
 
-use super::mul_poly::binary_field_multiply_gf_2_128;
-
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct SenderOTSeed {
     pub otp_enc_keys:
@@ -43,7 +44,7 @@ impl Default for SenderOTSeed {
     }
 }
 
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct ReceiverOTSeed {
     pub random_choices: [u8; LAMBDA_C_DIV_SOFT_SPOKEN_K], // FIXME: define range of random_choices[i]
@@ -61,7 +62,7 @@ impl Default for ReceiverOTSeed {
     }
 }
 
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct Round1Output {
     u: [[u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K],
@@ -80,8 +81,7 @@ impl Default for Round1Output {
 }
 
 /// The extended output of the OT sender.
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
-#[repr(C)]
+#[derive(Zeroable)]
 pub struct SenderExtendedOutput {
     pub v_0: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
     pub v_1: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
@@ -89,22 +89,20 @@ pub struct SenderExtendedOutput {
 
 impl SenderExtendedOutput {
     pub fn new() -> Box<Self> {
-        bytemuck::allocation::zeroed_box::<Self>()
+        zeroed_box::<Self>()
     }
 }
 
 /// The extended output of the OT receiver.
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
-#[repr(C)]
+#[derive(Zeroable)]
 pub struct ReceiverExtendedOutput {
     pub choices: [u8; L_BYTES], // L bits
     pub v_x: [[[u8; KAPPA_BYTES]; OT_WIDTH]; L],
 }
 
-#[cfg(test)]
 impl ReceiverExtendedOutput {
-    pub(crate) fn new(choices: &[u8; L_BYTES]) -> Box<Self> {
-        let mut this = bytemuck::allocation::zeroed_box::<Self>();
+    pub fn new(choices: &[u8; L_BYTES]) -> Box<Self> {
+        let mut this = zeroed_box::<Self>();
         this.choices = *choices;
         this
     }
@@ -113,6 +111,7 @@ impl ReceiverExtendedOutput {
 pub struct SoftSpokenOTReceiver;
 
 impl SoftSpokenOTReceiver {
+    #[track_caller]
     pub fn process<R: CryptoRngCore>(
         session_id: &[u8],
         seed_ot_results: &SenderOTSeed,
@@ -246,6 +245,7 @@ impl SoftSpokenOTReceiver {
     }
 }
 
+#[track_caller]
 fn transpose_bool_matrix(
     input: &[[u8; L_PRIME_BYTES]; LAMBDA_C],
 ) -> [[u8; LAMBDA_C_BYTES]; L_PRIME] {
@@ -259,12 +259,11 @@ fn transpose_bool_matrix(
                     let column_bit_index =
                         (column_byte << 3) + column_bit_byte;
 
-                    let bit_at_input_row_bit_column_bit =
-                        input[row_bit_index][column_byte] >> column_bit_byte
-                            & 0x01;
+                    let bit = (input[row_bit_index][column_byte]
+                        >> column_bit_byte)
+                        & 1;
 
-                    let shifted_bit =
-                        bit_at_input_row_bit_column_bit << row_bit_byte;
+                    let shifted_bit = bit << row_bit_byte;
 
                     output[column_bit_index][row_byte] |= shifted_bit;
                 }
@@ -277,15 +276,13 @@ fn transpose_bool_matrix(
 pub struct SoftSpokenOTSender;
 
 impl SoftSpokenOTSender {
+    #[track_caller]
     pub fn process(
         session_id: &[u8],
         seed_ot_results: &ReceiverOTSeed,
         message: &Round1Output,
     ) -> Result<Box<SenderExtendedOutput>, SoftSpokenOTError> {
-        // let mut r_x = [[[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
-        //     SOFT_SPOKEN_Q];
-
-        let mut r_x = bytemuck::allocation::zeroed_box::<
+        let mut r_x = zeroed_box::<
             [[[u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
                 SOFT_SPOKEN_Q],
         >();
@@ -404,7 +401,7 @@ impl SoftSpokenOTSender {
                 });
 
             if q_row.ct_ne(&t_i_plus_delta_i_times_x).into() {
-                return Err(SoftSpokenOTError::AbortProtocolAndBanReceiver);
+                return Err(SoftSpokenOTError);
             }
         }
 
@@ -447,6 +444,8 @@ impl SoftSpokenOTSender {
 pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
     rng: &mut R,
 ) -> (SenderOTSeed, ReceiverOTSeed) {
+    use rand::Rng;
+
     let mut sender_ot_seed = SenderOTSeed::default();
     let mut receiver_ot_seed = ReceiverOTSeed::default();
 
@@ -463,8 +462,7 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
 
     for i in 0..(LAMBDA_C_DIV_SOFT_SPOKEN_K) {
         let choice = receiver_ot_seed.random_choices[i];
-        receiver_ot_seed.otp_dec_keys[i][choice as usize] =
-            [0u8; LAMBDA_C_BYTES];
+        receiver_ot_seed.otp_dec_keys[i][choice as usize].fill(0);
     }
 
     (sender_ot_seed, receiver_ot_seed)
@@ -477,11 +475,8 @@ mod tests {
     use crate::{
         params::consts::*,
         soft_spoken::{
-            generate_all_but_one_seed_ot,
-            ReceiverExtendedOutput,
-            Round1Output,
-            SoftSpokenOTReceiver,
-            SoftSpokenOTSender, // L, L_BYTES, OT_WIDTH,
+            generate_all_but_one_seed_ot, ReceiverExtendedOutput,
+            Round1Output, SoftSpokenOTReceiver, SoftSpokenOTSender,
         },
         utils::ExtractBit,
     };
@@ -528,9 +523,10 @@ mod tests {
 
             for k in 0..OT_WIDTH {
                 let receiver_value = receiver_extended_output.v_x[i][k];
-                let sender_value = match bit {
-                    true => sender_extended_output.v_1[i][k],
-                    false => sender_extended_output.v_0[i][k],
+                let sender_value = if bit == 1 {
+                    sender_extended_output.v_1[i][k]
+                } else {
+                    sender_extended_output.v_0[i][k]
                 };
                 assert_eq!(&sender_value, &receiver_value);
             }

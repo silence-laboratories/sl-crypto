@@ -105,12 +105,13 @@ pub mod utils {
     /// Simple trait to extract a bit from a byte array.
     pub trait ExtractBit: Index<usize, Output = u8> {
         /// Extract a bit at given index (in little endian order) from a byte array.
-        fn extract_bit(&self, idx: usize) -> bool {
+        #[inline(always)]
+        fn extract_bit(&self, idx: usize) -> usize {
             let byte_idx = idx >> 3;
             let bit_idx = idx & 0x7;
             let byte = self[byte_idx];
-            let mask = 1 << bit_idx;
-            (byte & mask) != 0
+
+            ((byte >> bit_idx) & 1) as usize
         }
     }
 
