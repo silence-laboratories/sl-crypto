@@ -87,8 +87,8 @@ fn soft_spoken_bench(c: &mut Criterion) {
 
     c.bench_function("SoftSpokenOTReceiver::process", |b| {
         let mut round1 = Round1Output::default();
-        let mut receiver_extended_output =
-            ReceiverExtendedOutput::new(&choices);
+        let mut receiver_extended_output = ReceiverExtendedOutput::default();
+        receiver_extended_output.choices = choices;
 
         b.iter(|| {
             SoftSpokenOTReceiver::process(
@@ -102,7 +102,8 @@ fn soft_spoken_bench(c: &mut Criterion) {
     });
 
     let mut round1 = Round1Output::default();
-    let mut receiver_extended_output = ReceiverExtendedOutput::new(&choices);
+    let mut receiver_extended_output = ReceiverExtendedOutput::default();
+    receiver_extended_output.choices = choices;
 
     SoftSpokenOTReceiver::process(
         &session_id,

@@ -6,12 +6,13 @@ edition = "2021"
 publish = false
 
 [dependencies]
+sha3 = "0.10"
 merlin = "3.0.0"
 elliptic-curve = { version ="0.13" }
 k256 = { version = "0.13", default-features = false, features = [ "arithmetic", "precomputed-tables", "std" ]}
 rand = "0.8"
 zeroize = "1.6.1"
-bytemuck = { version = "1.22", features = [ "derive", "min_const_generics", "extern_crate_alloc" ] }
+bytemuck = { version = "1.22", features = [ "derive", "min_const_generics", "extern_crate_alloc", "const_zeroed" ] }
 
 rayon = { version = "1", optional = true }
 serde = { version = "1", optional = true }
