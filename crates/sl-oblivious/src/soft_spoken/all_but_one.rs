@@ -3,7 +3,10 @@
 
 use bytemuck::{AnyBitPattern, NoUninit, Pod, Zeroable};
 use elliptic_curve::subtle::{ConditionallySelectable, ConstantTimeEq};
-use merlin::Transcript;
+use sha3::{
+    digest::{ExtendableOutput, Update, XofReader},
+    Shake256 as Shake,
+};
 
 use crate::{
     constants::*,
@@ -21,24 +24,22 @@ pub struct PPRF {
     t_tilda: [u8; LAMBDA_C_BYTES * 2],
 }
 
-impl Default for PPRF {
-    fn default() -> Self {
-        Self {
-            t: Default::default(),
-            s_tilda: [0u8; LAMBDA_C_BYTES * 2],
-            t_tilda: [0u8; LAMBDA_C_BYTES * 2],
-        }
-    }
-}
-
 #[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct PPRFOutput([PPRF; LAMBDA_C / SOFT_SPOKEN_K]);
 
 impl Default for PPRFOutput {
     fn default() -> Self {
-        Self([PPRF::default(); LAMBDA_C / SOFT_SPOKEN_K])
+        bytemuck::zeroed()
     }
+}
+
+fn init_shake(input: &[&[u8]]) -> Shake {
+    let mut d = Shake::default();
+    for i in input {
+        d.update(i)
+    }
+    d
 }
 
 /// Implements BuildPPRF and ProvePPRF functionality of
@@ -61,12 +62,17 @@ pub fn build_pprf(
             let mut s_i_plus_1 = [[0u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q];
 
             for y in 0..(1 << i) {
-                let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
-                t.append_message(b"session-id", session_id);
-                t.append_message(&ALL_BUT_ONE_PPRF_LABEL, &s_i[y]);
+                let mut bytes = init_shake(&[
+                    &ALL_BUT_ONE_LABEL,
+                    b"session-id",
+                    session_id,
+                    &ALL_BUT_ONE_PPRF_LABEL,
+                    &s_i[y],
+                ])
+                .finalize_xof();
 
-                t.challenge_bytes(b"", &mut s_i_plus_1[2 * y]);
-                t.challenge_bytes(b"", &mut s_i_plus_1[2 * y + 1]);
+                bytes.read(&mut s_i_plus_1[2 * y]);
+                bytes.read(&mut s_i_plus_1[2 * y + 1]);
             }
 
             let t_x_i = &mut out.t;
@@ -87,27 +93,31 @@ pub fn build_pprf(
         }
 
         // Prove
-        let mut s_tilda_hash = Transcript::new(&ALL_BUT_ONE_LABEL);
-        s_tilda_hash.append_message(b"session-id", session_id);
+        let mut s_tilda_hash =
+            init_shake(&[&ALL_BUT_ONE_LABEL, b"session-id", session_id]);
 
         for y in s_i.iter() {
             let mut s_tilda_y = [0u8; LAMBDA_C_BYTES * 2];
 
-            let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
-            t.append_message(b"session-id", session_id);
-            t.append_message(&ALL_BUT_ONE_PPRF_PROOF_LABEL, y);
-            t.challenge_bytes(b"", &mut s_tilda_y);
+            init_shake(&[
+                &ALL_BUT_ONE_LABEL,
+                b"session-id",
+                session_id,
+                &ALL_BUT_ONE_PPRF_PROOF_LABEL,
+                y,
+            ])
+            .finalize_xof_into(&mut s_tilda_y);
 
             out.t_tilda
                 .iter_mut()
                 .zip(&s_tilda_y)
                 .for_each(|(t, s)| *t ^= s);
 
-            s_tilda_hash.append_message(b"", &s_tilda_y);
+            s_tilda_hash.update(&s_tilda_y);
         }
 
-        s_tilda_hash
-            .challenge_bytes(&ALL_BUT_ONE_PPRF_HASH_LABEL, &mut out.s_tilda);
+        s_tilda_hash.update(&ALL_BUT_ONE_PPRF_HASH_LABEL);
+        s_tilda_hash.finalize_xof_into(&mut out.s_tilda);
     }
 }
 
@@ -136,11 +146,17 @@ pub fn eval_pprf(
                 let mut temp_0 = [0u8; LAMBDA_C_BYTES];
                 let mut temp_1 = [0u8; LAMBDA_C_BYTES];
 
-                let mut t = Transcript::new(&ALL_BUT_ONE_LABEL);
-                t.append_message(b"session-id", session_id);
-                t.append_message(&ALL_BUT_ONE_PPRF_LABEL, &s_star_i[y]);
-                t.challenge_bytes(b"", &mut temp_0);
-                t.challenge_bytes(b"", &mut temp_1);
+                let mut bytes = init_shake(&[
+                    &ALL_BUT_ONE_LABEL,
+                    b"session-id",
+                    session_id,
+                    &ALL_BUT_ONE_PPRF_LABEL,
+                    &s_star_i[y],
+                ])
+                .finalize_xof();
+
+                bytes.read(&mut temp_0);
+                bytes.read(&mut temp_1);
 
                 (0..LAMBDA_C_BYTES).for_each(|b_i| {
                     s_star_i_plus_1[2 * y][b_i]
@@ -165,7 +181,7 @@ pub fn eval_pprf(
                 s_star_i_plus_1[2 * y_star + ct_x][b_i] =
                     out.t[i - 1][ct_x][b_i] ^ big_f_i_star[b_i];
 
-                for y in 0..2usize.pow(i as u32) {
+                for y in 0..(1 << i) {
                     let choice = y.ct_ne(&y_star);
                     let temp_byte = s_star_i_plus_1[2 * y_star + ct_x][b_i]
                         ^ s_star_i_plus_1[2 * y + ct_x][b_i];
@@ -183,8 +199,8 @@ pub fn eval_pprf(
         let mut s_tilda_star = [[0u8; LAMBDA_C_BYTES * 2]; SOFT_SPOKEN_Q];
         let s_tilda_expected = &out.s_tilda;
 
-        let mut s_tilda_hash = Transcript::new(&ALL_BUT_ONE_LABEL);
-        s_tilda_hash.append_message(b"session-id", session_id);
+        let mut s_tilda_hash =
+            init_shake(&[&ALL_BUT_ONE_LABEL, b"session-id", session_id]);
 
         let mut s_tilda_star_y_star = out.t_tilda;
 
@@ -192,10 +208,14 @@ pub fn eval_pprf(
             let choice = y.ct_ne(&y_star);
             let mut temp = [0u8; LAMBDA_C_BYTES * 2];
 
-            let mut tt = Transcript::new(&ALL_BUT_ONE_LABEL);
-            tt.append_message(b"session-id", session_id);
-            tt.append_message(&ALL_BUT_ONE_PPRF_PROOF_LABEL, &s_star_i[y]);
-            tt.challenge_bytes(b"", &mut temp);
+            init_shake(&[
+                &ALL_BUT_ONE_LABEL,
+                b"session-id",
+                session_id,
+                &ALL_BUT_ONE_PPRF_PROOF_LABEL,
+                &s_star_i[y],
+            ])
+            .finalize_xof_into(&mut temp);
 
             (0..LAMBDA_C_BYTES * 2).for_each(|b_i| {
                 s_tilda_star[y][b_i].conditional_assign(&temp[b_i], choice);
@@ -212,14 +232,12 @@ pub fn eval_pprf(
         s_tilda_star[y_star] = s_tilda_star_y_star;
 
         (0..SOFT_SPOKEN_Q).for_each(|y| {
-            s_tilda_hash.append_message(b"", &s_tilda_star[y]);
+            s_tilda_hash.update(&s_tilda_star[y]);
         });
 
         let mut s_tilda_digest = [0u8; LAMBDA_C_BYTES * 2];
-        s_tilda_hash.challenge_bytes(
-            &ALL_BUT_ONE_PPRF_HASH_LABEL,
-            &mut s_tilda_digest,
-        );
+        s_tilda_hash.update(&ALL_BUT_ONE_PPRF_HASH_LABEL);
+        s_tilda_hash.finalize_xof_into(&mut s_tilda_digest);
 
         if s_tilda_digest.ct_ne(s_tilda_expected).into() {
             return Err("Invalid proof");
