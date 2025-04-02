@@ -10,14 +10,58 @@ use rand_chacha::ChaCha20Rng;
 
 use sl_oblivious::{
     endemic_ot::{
-        EndemicOTMsg1, EndemicOTMsg2, EndemicOTReceiver, EndemicOTSender,
+        generate_seed_ot_for_test, EndemicOTMsg1, EndemicOTMsg2,
+        EndemicOTReceiver, EndemicOTSender,
     },
     params::consts::L_BYTES,
     soft_spoken::{
-        generate_all_but_one_seed_ot, ReceiverExtendedOutput, Round1Output,
+        build_pprf, eval_pprf, generate_all_but_one_seed_ot, PPRFOutput,
+        ReceiverExtendedOutput, ReceiverOTSeed, Round1Output, SenderOTSeed,
         SoftSpokenOTReceiver, SoftSpokenOTSender,
     },
 };
+
+fn all_but_one_bench(c: &mut Criterion) {
+    let mut rng = ChaCha20Rng::from_seed([0x55; 32]);
+    let session_id: [u8; 32] = rng.gen();
+
+    let (sender_ot_seed, receiver_ot_seed) = generate_seed_ot_for_test();
+
+    c.bench_function("build_pprf", |b| {
+        let mut _all_but_one_sender_seed2 = SenderOTSeed::default();
+        let mut output_2 = PPRFOutput::default();
+        b.iter(|| {
+            build_pprf(
+                &session_id,
+                &sender_ot_seed,
+                &mut _all_but_one_sender_seed2,
+                &mut output_2,
+            );
+        });
+    });
+
+    c.bench_function("eval_pprf", |b| {
+        let mut _all_but_one_sender_seed2 = SenderOTSeed::default();
+        let mut output_2 = PPRFOutput::default();
+        build_pprf(
+            &session_id,
+            &sender_ot_seed,
+            &mut _all_but_one_sender_seed2,
+            &mut output_2,
+        );
+        let mut _all_but_one_receiver_seed2 = ReceiverOTSeed::default();
+
+        b.iter(|| {
+            eval_pprf(
+                &session_id,
+                &receiver_ot_seed,
+                &output_2,
+                &mut _all_but_one_receiver_seed2,
+            )
+            .unwrap();
+        });
+    });
+}
 
 fn endemic_ot_bench(c: &mut Criterion) {
     let mut rng = ChaCha20Rng::from_seed([0x55; 32]);
@@ -273,10 +317,12 @@ fn rvole_bench(c: &mut Criterion) {
 criterion_group!(soft_spoken, soft_spoken_bench);
 criterion_group!(rvole, rvole_bench);
 criterion_group!(endemic_ot, endemic_ot_bench);
+criterion_group!(pprf, all_but_one_bench);
 
 criterion_main!(
     rvole,
     // rvole_ot_variant,
     soft_spoken,
     endemic_ot,
+    pprf,
 );

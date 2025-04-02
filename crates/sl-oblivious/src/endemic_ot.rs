@@ -93,7 +93,7 @@ fn h_function(
         b"batch-index",
         &(batch_index as u16).to_be_bytes(),
         b"pk",
-        &pk.to_affine().to_bytes(),
+        pk.to_affine().to_bytes().as_slice(),
         b"compressed-point",
     ])
     .finalize_xof();
@@ -123,7 +123,7 @@ fn h_function_2(
         b"batch_index",
         &(batch_index as u16).to_be_bytes(),
         b"pk",
-        &pk.to_affine().to_bytes(),
+        pk.to_affine().to_bytes().as_slice(),
     ])
     .finalize_xof_into(&mut output);
 
@@ -293,17 +293,36 @@ impl EndemicOTReceiver {
     }
 }
 
-impl ReceiverOutput {
-    #[cfg(test)]
-    pub fn new(
-        choice_bits: [u8; LAMBDA_C_BYTES],
-        otp_dec_keys: [[u8; LAMBDA_C_BYTES]; LAMBDA_C],
-    ) -> Self {
-        Self {
-            choice_bits,
-            otp_dec_keys,
+pub fn generate_seed_ot_for_test() -> (SenderOutput, ReceiverOutput) {
+    let mut rng = thread_rng();
+
+    let sender_ot_seed = SenderOutput {
+        otp_enc_keys: std::array::from_fn(|_| {
+            let rho_0 = rng.gen();
+            let rho_1 = rng.gen();
+
+            OneTimePadEncryptionKeys { rho_0, rho_1 }
+        }),
+    };
+
+    let choice_bits: [u8; LAMBDA_C_BYTES] = rng.gen();
+
+    let otp_dec_keys = std::array::from_fn(|i| {
+        let choice = choice_bits.extract_bit(i);
+
+        if choice == 0 {
+            sender_ot_seed.otp_enc_keys[i].rho_0
+        } else {
+            sender_ot_seed.otp_enc_keys[i].rho_1
         }
-    }
+    });
+
+    let receiver_ot_seed = ReceiverOutput {
+        choice_bits,
+        otp_dec_keys,
+    };
+
+    (sender_ot_seed, receiver_ot_seed)
 }
 
 #[cfg(test)]
