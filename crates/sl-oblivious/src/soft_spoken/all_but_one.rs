@@ -236,39 +236,9 @@ pub fn eval_pprf(
 mod test {
     use super::*;
 
-    use rand::{thread_rng, Rng};
+    use rand::Rng;
 
-    use crate::endemic_ot::OneTimePadEncryptionKeys;
-
-    fn generate_seed_ot_for_test() -> (SenderOutput, ReceiverOutput) {
-        let mut rng = thread_rng();
-
-        let sender_ot_seed = SenderOutput {
-            otp_enc_keys: std::array::from_fn(|_| {
-                let rho_0 = rng.gen();
-                let rho_1 = rng.gen();
-
-                OneTimePadEncryptionKeys { rho_0, rho_1 }
-            }),
-        };
-
-        let random_choices: [u8; LAMBDA_C_BYTES] = rng.gen();
-
-        let one_time_pad_enc_keys = std::array::from_fn(|i| {
-            let choice = random_choices.extract_bit(i);
-
-            if choice == 0 {
-                sender_ot_seed.otp_enc_keys[i].rho_0
-            } else {
-                sender_ot_seed.otp_enc_keys[i].rho_1
-            }
-        });
-
-        let receiver_ot_seed =
-            ReceiverOutput::new(random_choices, one_time_pad_enc_keys);
-
-        (sender_ot_seed, receiver_ot_seed)
-    }
+    use crate::endemic_ot::generate_seed_ot_for_test;
 
     #[test]
     fn pprf() {
