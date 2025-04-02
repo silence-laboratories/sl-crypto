@@ -2,16 +2,17 @@
 // This software is licensed under the Silence Laboratories License Agreement.
 
 use std::array;
-use std::hint::black_box;
-use std::ops::Neg;
 
 use bytemuck::{AnyBitPattern, NoUninit};
 use elliptic_curve::{
     group::GroupEncoding, ops::MulByGenerator, Field, Group,
 };
 use k256::{ProjectivePoint, Scalar};
-use merlin::Transcript;
 use rand::prelude::*;
+use sha3::{
+    digest::{ExtendableOutput, Update, XofReader},
+    Shake256 as Shake,
+};
 
 use crate::{
     constants::ENDEMIC_OT_LABEL, params::consts::*, utils::ExtractBit,
@@ -32,9 +33,7 @@ pub struct EndemicOTMsg1 {
 
 impl Default for EndemicOTMsg1 {
     fn default() -> Self {
-        Self {
-            r_list: [[[0u8; POINT_BYTES_SIZE]; 2]; LAMBDA_C],
-        }
+        bytemuck::zeroed()
     }
 }
 
@@ -48,9 +47,7 @@ pub struct EndemicOTMsg2 {
 
 impl Default for EndemicOTMsg2 {
     fn default() -> Self {
-        Self {
-            m_b_list: [[[0u8; POINT_BYTES_SIZE]; 2]; LAMBDA_C],
-        }
+        bytemuck::zeroed()
     }
 }
 
@@ -72,60 +69,77 @@ pub struct ReceiverOutput {
     pub(crate) otp_dec_keys: [[u8; LAMBDA_C_BYTES]; LAMBDA_C],
 }
 
-/// RO for EndemicOT
+fn init_shake(input: &[&[u8]]) -> Shake {
+    let mut d = Shake::default();
+    for i in input {
+        d.update(i)
+    }
+    d
+}
+
+// RO for EndemicOT
 fn h_function(
     ro_index: usize,
     batch_index: usize,
     session_id: &[u8],
     pk: &ProjectivePoint,
 ) -> ProjectivePoint {
-    let mut t = Transcript::new(&ENDEMIC_OT_LABEL);
+    let mut bytes = init_shake(&[
+        &ENDEMIC_OT_LABEL,
+        b"session-id",
+        session_id,
+        b"ro-index",
+        &(ro_index as u16).to_be_bytes(),
+        b"batch-index",
+        &(batch_index as u16).to_be_bytes(),
+        b"pk",
+        &pk.to_affine().to_bytes(),
+        b"compressed-point",
+    ])
+    .finalize_xof();
 
-    t.append_message(b"session-id", session_id);
-    t.append_message(b"ro-index", &(ro_index as u16).to_be_bytes());
-    t.append_message(b"batch-index", &(batch_index as u16).to_be_bytes());
-    t.append_message(b"pk", &pk.to_affine().to_bytes());
-
+    let mut compressed_point: PointBytes = [0u8; POINT_BYTES_SIZE];
     loop {
-        let mut compressed_point: PointBytes = [0u8; POINT_BYTES_SIZE];
-        t.challenge_bytes(b"compressed-point", &mut compressed_point);
+        bytes.read(&mut compressed_point);
+        // the first byte is either 2 or 3
         compressed_point[0] &= 0x01;
         compressed_point[0] ^= 0x02;
-        match decode_point(&compressed_point) {
-            None => continue,
-            Some(v) => return v,
-        };
+
+        if let Some(p) = decode_point(&compressed_point) {
+            return p;
+        }
     }
 }
 
-/// create LAMBDA_C_BYTES ot seed
+// create LAMBDA_C_BYTES ot seed
 fn h_function_2(
     batch_index: usize,
     pk: ProjectivePoint,
 ) -> [u8; LAMBDA_C_BYTES] {
-    let mut t = Transcript::new(&ENDEMIC_OT_LABEL);
-
-    t.append_message(b"batch_index", &(batch_index as u16).to_be_bytes());
-    t.append_message(b"pk", &pk.to_affine().to_bytes());
-
     let mut output = [0u8; LAMBDA_C_BYTES];
-    t.challenge_bytes(b"ot-seed", &mut output);
+
+    init_shake(&[
+        &ENDEMIC_OT_LABEL,
+        b"batch_index",
+        &(batch_index as u16).to_be_bytes(),
+        b"pk",
+        &pk.to_affine().to_bytes(),
+    ])
+    .finalize_xof_into(&mut output);
 
     output
 }
 
-/// Encode ProjectivePoint
+// Encode ProjectivePoint
 fn encode_point(p: &ProjectivePoint) -> PointBytes {
-    p.to_affine().to_bytes()[..].try_into().unwrap()
+    p.to_bytes().into()
 }
 
-/// Decode ProjectivePoint
+// Decode ProjectivePoint
 fn decode_point(bytes: &PointBytes) -> Option<ProjectivePoint> {
-    let mut repr = <ProjectivePoint as GroupEncoding>::Repr::default();
+    let repr = bytes.try_into().unwrap();
 
-    AsMut::<[u8]>::as_mut(&mut repr).copy_from_slice(bytes);
-
-    ProjectivePoint::from_bytes(&repr).into()
+    ProjectivePoint::from_bytes(repr).into()
 }
 
 /// Sender of the Endemic OT protocol.
@@ -140,14 +154,14 @@ impl EndemicOTSender {
         msg2: &mut EndemicOTMsg2,
         rng: &mut R,
     ) -> Result<SenderOutput, &'static str> {
-        let mut error = false;
+        let mut error = 0;
 
         let otp_enc_keys = array::from_fn(|idx| {
             let [r_0, r_1] = &msg1.r_list[idx];
 
             let r_0_point = match decode_point(r_0) {
                 None => {
-                    error = true;
+                    error += 1;
                     ProjectivePoint::IDENTITY
                 }
                 Some(v) => v,
@@ -155,7 +169,7 @@ impl EndemicOTSender {
 
             let r_1_point = match decode_point(r_1) {
                 None => {
-                    error = true;
+                    error += 1;
                     ProjectivePoint::IDENTITY
                 }
                 Some(v) => v,
@@ -180,7 +194,7 @@ impl EndemicOTSender {
             OneTimePadEncryptionKeys { rho_0, rho_1 }
         });
 
-        if error {
+        if error != 0 {
             return Err("Decode error");
         }
 
@@ -205,29 +219,27 @@ impl EndemicOTReceiver {
         msg1: &mut EndemicOTMsg1,
         rng: &mut R,
     ) -> Self {
-        let next_state = Self {
-            packed_choice_bits: rng.gen(),
-            t_a_list: array::from_fn(|_| Scalar::random(&mut *rng)),
-        };
+        let packed_choice_bits: [u8; LAMBDA_C_BYTES] = rng.gen();
+        let t_a_list = array::from_fn(|_| Scalar::random(&mut *rng));
 
         msg1.r_list
             .iter_mut()
             .enumerate()
             .for_each(|(idx, r_values)| {
-                let random_choice_bit =
-                    next_state.packed_choice_bits.extract_bit(idx);
+                let random_choice_bit = packed_choice_bits.extract_bit(idx);
 
-                let t_a = &next_state.t_a_list[idx];
+                let t_a = &t_a_list[idx];
 
                 let r_other = ProjectivePoint::random(&mut *rng);
+
                 let h_choice =
                     h_function(random_choice_bit, idx, session_id, &r_other);
 
                 let r_choice =
-                    ProjectivePoint::mul_by_generator(t_a) + h_choice.neg();
+                    ProjectivePoint::mul_by_generator(t_a) - h_choice;
 
                 // dummy calculation for constant time
-                black_box(h_function(
+                std::hint::black_box(h_function(
                     random_choice_bit ^ 1,
                     idx,
                     session_id,
@@ -238,7 +250,10 @@ impl EndemicOTReceiver {
                 r_values[random_choice_bit ^ 1] = encode_point(&r_other);
             });
 
-        next_state
+        Self {
+            packed_choice_bits,
+            t_a_list,
+        }
     }
 
     pub fn process(
@@ -263,6 +278,7 @@ impl EndemicOTReceiver {
                 };
 
                 let res = m_b_value * self.t_a_list[idx];
+
                 h_function_2(idx, res)
             });
 
