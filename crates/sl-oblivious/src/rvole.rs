@@ -23,6 +23,10 @@ use k256::{
     Scalar, U256,
 };
 use merlin::Transcript;
+use sha3::{
+    digest::{ExtendableOutput, Update, XofReader},
+    Shake256 as Shake,
+};
 
 use crate::{
     constants::{
@@ -39,15 +43,25 @@ use crate::{
 
 const XI: usize = L; // by definition
 
+fn init_shake(input: &[&[u8]]) -> Shake {
+    let mut d = Shake::default();
+    for i in input {
+        d.update(i)
+    }
+    d
+}
+
 fn generate_gadget_vec(session_id: &[u8]) -> impl Iterator<Item = Scalar> {
-    let mut t = Transcript::new(&RANDOM_VOLE_GADGET_VECTOR_LABEL);
-    t.append_message(b"session-id", session_id);
+    let mut bytes = init_shake(&[
+        &RANDOM_VOLE_GADGET_VECTOR_LABEL,
+        b"session-id",
+        session_id,
+    ])
+    .finalize_xof();
 
-    (0..XI).map(move |i| {
-        t.append_u64(b"index", i as u64);
-
+    (0..XI).map(move |_i| {
         let mut repr = [0u8; KAPPA_BYTES];
-        t.challenge_bytes(b"next value", &mut repr);
+        bytes.read(&mut repr);
 
         Scalar::reduce(U256::from_be_bytes(repr))
     })
@@ -70,19 +84,14 @@ impl RVOLEOutput {
 
 impl Default for RVOLEOutput {
     fn default() -> Self {
-        RVOLEOutput {
-            a_tilde: [[[0u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
-            eta: [[0u8; KAPPA_BYTES]; RHO],
-            mu_hash: [0u8; 64],
-        }
+        bytemuck::zeroed()
     }
 }
 
 #[derive(Zeroable)]
 pub struct RVOLEReceiver {
     session_id: [u8; 32],
-    beta: [u8; L_BYTES],
-    receiver_extended_output: ReceiverExtendedOutput,
+    extended_output: ReceiverExtendedOutput,
 }
 
 impl RVOLEReceiver {
@@ -93,14 +102,16 @@ impl RVOLEReceiver {
         round1_output: &mut Round1Output,
         rng: &mut R,
     ) -> (Box<RVOLEReceiver>, Scalar) {
-        let mut beta = [0u8; L_BYTES];
-        rng.fill_bytes(&mut beta);
+        let mut next = zeroed_box::<RVOLEReceiver>();
+
+        next.session_id = session_id;
+        rng.fill_bytes(&mut next.extended_output.choices);
 
         // b = <g, /beta>
         let b = generate_gadget_vec(&session_id).enumerate().fold(
             Scalar::ZERO,
             |option_0, (i, gv)| {
-                let i_bit = beta.extract_bit(i);
+                let i_bit = next.extended_output.choices.extract_bit(i);
                 let option_1 = option_0 + gv;
 
                 Scalar::conditional_select(
@@ -111,17 +122,11 @@ impl RVOLEReceiver {
             },
         );
 
-        let mut next = zeroed_box::<RVOLEReceiver>();
-
-        next.session_id = session_id;
-        next.beta = beta;
-        next.receiver_extended_output.choices = beta;
-
         SoftSpokenOTReceiver::process(
             &session_id,
             seed_ot_results,
             round1_output,
-            &mut next.receiver_extended_output,
+            &mut next.extended_output,
             rng,
         );
 
@@ -153,6 +158,7 @@ impl RVOLEReceiver {
 
                 let mut digest = [0u8; KAPPA_BYTES];
                 t.challenge_bytes(b"theta", digest.as_mut());
+
                 theta[k][i] = Scalar::reduce(U256::from_be_bytes(digest));
             }
         }
@@ -161,10 +167,10 @@ impl RVOLEReceiver {
         let mut d_hat = [[Scalar::ZERO; RHO]; XI];
 
         for j in 0..XI {
-            let j_bit = self.beta.extract_bit(j);
+            let j_bit = self.extended_output.choices.extract_bit(j);
             for i in 0..L_BATCH {
                 let option_0 = Scalar::reduce(U256::from_be_bytes(
-                    self.receiver_extended_output.v_x[j][i],
+                    self.extended_output.v_x[j][i],
                 ));
                 let option_1 = option_0 + rvole_output.get_a_tilde(j, i);
                 let chosen = Scalar::conditional_select(
@@ -174,9 +180,10 @@ impl RVOLEReceiver {
                 );
                 d_dot[j][i] = chosen
             }
+
             for k in 0..RHO {
                 let option_0 = Scalar::reduce(U256::from_be_bytes(
-                    self.receiver_extended_output.v_x[j][L_BATCH + k],
+                    self.extended_output.v_x[j][L_BATCH + k],
                 ));
                 let option_1 =
                     option_0 + rvole_output.get_a_tilde(j, L_BATCH + k);
@@ -195,7 +202,7 @@ impl RVOLEReceiver {
 
         #[allow(clippy::needless_range_loop)]
         for j in 0..XI {
-            let j_bit = self.beta.extract_bit(j);
+            let j_bit = self.extended_output.choices.extract_bit(j);
 
             for k in 0..RHO {
                 let mut v = d_hat[j][k];
@@ -281,6 +288,7 @@ impl RVOLESender {
 
         for (j, a_tilde_j_ref) in output.a_tilde.iter_mut().enumerate() {
             t.append_u64(b"row of a tilde", j as u64);
+
             for i in 0..L_BATCH {
                 let v = alpha_0(j, i) - alpha_1(j, i) + a[i];
                 a_tilde_j_ref[i] = v.to_bytes().into();
