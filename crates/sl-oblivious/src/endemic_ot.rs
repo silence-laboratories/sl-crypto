@@ -4,10 +4,9 @@
 use std::array;
 
 use bytemuck::{AnyBitPattern, NoUninit};
-use elliptic_curve::{
-    group::GroupEncoding, ops::MulByGenerator, Field, Group,
+use curve25519_dalek::{
+    ristretto::CompressedRistretto, RistrettoPoint, Scalar,
 };
-use k256::{ProjectivePoint, Scalar};
 use rand::prelude::*;
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
@@ -18,7 +17,7 @@ use crate::{
     constants::ENDEMIC_OT_LABEL, params::consts::*, utils::ExtractBit,
 };
 
-const POINT_BYTES_SIZE: usize = 33;
+const POINT_BYTES_SIZE: usize = 32;
 
 /// External representation of a point on a curve
 pub type PointBytes = [u8; POINT_BYTES_SIZE];
@@ -82,8 +81,8 @@ fn h_function(
     ro_index: usize,
     batch_index: usize,
     session_id: &[u8],
-    pk: &ProjectivePoint,
-) -> ProjectivePoint {
+    pk: &RistrettoPoint,
+) -> RistrettoPoint {
     let mut bytes = init_shake(&[
         &ENDEMIC_OT_LABEL,
         b"session-id",
@@ -93,53 +92,42 @@ fn h_function(
         b"batch-index",
         &(batch_index as u16).to_be_bytes(),
         b"pk",
-        pk.to_affine().to_bytes().as_slice(),
-        b"compressed-point",
+        pk.compress().as_bytes(),
     ])
     .finalize_xof();
 
-    let mut compressed_point: PointBytes = [0u8; POINT_BYTES_SIZE];
-    loop {
-        bytes.read(&mut compressed_point);
-        // the first byte is either 2 or 3
-        compressed_point[0] &= 0x01;
-        compressed_point[0] ^= 0x02;
-
-        if let Some(p) = decode_point(&compressed_point) {
-            return p;
-        }
-    }
+    let mut s = [0u8; 64];
+    bytes.read(&mut s);
+    RistrettoPoint::from_uniform_bytes(&s)
 }
 
 // create LAMBDA_C_BYTES ot seed
 fn h_function_2(
     batch_index: usize,
-    pk: ProjectivePoint,
+    pk: &RistrettoPoint,
 ) -> [u8; LAMBDA_C_BYTES] {
-    let mut output = [0u8; LAMBDA_C_BYTES];
-
-    init_shake(&[
+    let mut bytes = init_shake(&[
         &ENDEMIC_OT_LABEL,
         b"batch_index",
         &(batch_index as u16).to_be_bytes(),
         b"pk",
-        pk.to_affine().to_bytes().as_slice(),
+        pk.compress().as_bytes(),
     ])
-    .finalize_xof_into(&mut output);
+    .finalize_xof();
 
-    output
+    let mut out = [0u8; LAMBDA_C_BYTES];
+    bytes.read(&mut out);
+
+    return out;
 }
 
-// Encode ProjectivePoint
-fn encode_point(p: &ProjectivePoint) -> PointBytes {
-    p.to_bytes().into()
+fn encode_point(p: &RistrettoPoint) -> PointBytes {
+    p.compress().to_bytes()
 }
 
-// Decode ProjectivePoint
-fn decode_point(bytes: &PointBytes) -> Option<ProjectivePoint> {
-    let repr = bytes.try_into().unwrap();
-
-    ProjectivePoint::from_bytes(repr).into()
+#[inline(always)]
+fn decode_point(bytes: &PointBytes) -> Option<RistrettoPoint> {
+    CompressedRistretto(*bytes).decompress()
 }
 
 /// Sender of the Endemic OT protocol.
@@ -159,37 +147,29 @@ impl EndemicOTSender {
         let otp_enc_keys = array::from_fn(|idx| {
             let [r_0, r_1] = &msg1.r_list[idx];
 
-            let r_0_point = match decode_point(r_0) {
-                None => {
-                    error += 1;
-                    ProjectivePoint::IDENTITY
-                }
-                Some(v) => v,
-            };
+            let r_0 = decode_point(r_0).unwrap_or_else(|| {
+                error += 1;
+                RistrettoPoint::default()
+            });
 
-            let r_1_point = match decode_point(r_1) {
-                None => {
-                    error += 1;
-                    ProjectivePoint::IDENTITY
-                }
-                Some(v) => v,
-            };
+            let r_1 = decode_point(r_1).unwrap_or_else(|| {
+                error += 1;
+                RistrettoPoint::default()
+            });
 
-            let m_a_0 =
-                r_0_point + h_function(0, idx, session_id, &r_1_point);
-            let m_a_1 =
-                r_1_point + h_function(1, idx, session_id, &r_0_point);
+            let m_a_0 = r_0 + h_function(0, idx, session_id, &r_1);
+            let m_a_1 = r_1 + h_function(1, idx, session_id, &r_0);
 
-            let t_b_0 = Scalar::random(&mut *rng);
-            let t_b_1 = Scalar::random(&mut *rng);
+            let t_b_0 = Scalar::random(rng);
+            let t_b_1 = Scalar::random(rng);
 
-            let m_b_0 = ProjectivePoint::mul_by_generator(&t_b_0);
-            let m_b_1 = ProjectivePoint::mul_by_generator(&t_b_1);
+            let m_b_0 = RistrettoPoint::mul_base(&t_b_0);
+            let m_b_1 = RistrettoPoint::mul_base(&t_b_1);
 
             msg2.m_b_list[idx] = [encode_point(&m_b_0), encode_point(&m_b_1)];
 
-            let rho_0 = h_function_2(idx, m_a_0 * t_b_0);
-            let rho_1 = h_function_2(idx, m_a_1 * t_b_1);
+            let rho_0 = h_function_2(idx, &(m_a_0 * t_b_0));
+            let rho_1 = h_function_2(idx, &(m_a_1 * t_b_1));
 
             OneTimePadEncryptionKeys { rho_0, rho_1 }
         });
@@ -220,34 +200,30 @@ impl EndemicOTReceiver {
         rng: &mut R,
     ) -> Self {
         let packed_choice_bits: [u8; LAMBDA_C_BYTES] = rng.gen();
-        let t_a_list = array::from_fn(|_| Scalar::random(&mut *rng));
+        let t_a_list = array::from_fn(|_| Scalar::random(rng));
 
         msg1.r_list
             .iter_mut()
             .enumerate()
             .for_each(|(idx, r_values)| {
-                let random_choice_bit = packed_choice_bits.extract_bit(idx);
+                let choice_bit = packed_choice_bits.extract_bit(idx);
 
+                // random scalar
                 let t_a = &t_a_list[idx];
 
-                let r_other = ProjectivePoint::random(&mut *rng);
+                let r_other = RistrettoPoint::random(rng);
 
                 let h_choice =
-                    h_function(random_choice_bit, idx, session_id, &r_other);
+                    h_function(choice_bit, idx, session_id, &r_other);
 
-                let r_choice =
-                    ProjectivePoint::mul_by_generator(t_a) - h_choice;
+                let r_choice = RistrettoPoint::mul_base(t_a) - h_choice;
 
-                // dummy calculation for constant time
-                std::hint::black_box(h_function(
-                    random_choice_bit ^ 1,
-                    idx,
-                    session_id,
-                    &r_choice,
-                ));
-
-                r_values[random_choice_bit] = encode_point(&r_choice);
-                r_values[random_choice_bit ^ 1] = encode_point(&r_other);
+                // It is crucial for the security of the protocol that
+                // the sender is not able to distinguish between two
+                // points. Otherwise, it would be able to guess the
+                // receiver's choice bit.
+                r_values[choice_bit] = encode_point(&r_choice);
+                r_values[choice_bit ^ 1] = encode_point(&r_other);
             });
 
         Self {
@@ -260,29 +236,23 @@ impl EndemicOTReceiver {
         &self,
         msg2: &EndemicOTMsg2,
     ) -> Result<ReceiverOutput, &'static str> {
-        let mut error = false;
+        let mut error = 0;
         let rho_w_vec: [[u8; LAMBDA_C_BYTES]; LAMBDA_C] =
             array::from_fn(|idx| {
-                let m_b_values = &msg2.m_b_list[idx];
+                let choice_bit = self.packed_choice_bits.extract_bit(idx);
 
-                let random_choice_bit =
-                    self.packed_choice_bits.extract_bit(idx);
-
-                let m_b_value = &m_b_values[random_choice_bit];
-                let m_b_value = match decode_point(m_b_value) {
-                    None => {
-                        error = true;
-                        ProjectivePoint::IDENTITY
-                    }
-                    Some(v) => v,
-                };
+                let m_b_value = decode_point(&msg2.m_b_list[idx][choice_bit])
+                    .unwrap_or_else(|| {
+                        error += 1;
+                        RistrettoPoint::default()
+                    });
 
                 let res = m_b_value * self.t_a_list[idx];
 
-                h_function_2(idx, res)
+                h_function_2(idx, &res)
             });
 
-        if error {
+        if error != 0 {
             return Err("Decode error");
         }
 
