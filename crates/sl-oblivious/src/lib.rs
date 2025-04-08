@@ -130,4 +130,5 @@ pub mod params;
 pub mod label;
 
 /// Random Vector OLE (base OT variant)
+#[cfg(not(feature = "small-lambda-c"))]
 pub mod rvole_ot_variant;
