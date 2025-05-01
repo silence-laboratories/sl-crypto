@@ -3,6 +3,7 @@ name = "sl-oblivious"
 version = "1.0.0-beta"
 license = "SLL"
 edition = "2021"
+description = "Oblivious Transfer protocols for DKLs23"
 publish = true
 
 [dependencies]
