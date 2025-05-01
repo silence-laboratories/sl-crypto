@@ -1,10 +1,10 @@
 [package]
 name = "sl-mpc-mate"
-version = "0.1.0"
+version = "1.0.0-beta"
 edition = "2021"
 license = "SLL"
 description = "Utilities for secure multi-party computation"
-publish = false
+publish = true
 
 [dependencies]
 tokio = { version = "1", features = ["rt", "sync", "time"], optional = true }

@@ -1,9 +1,9 @@
 [package]
 name = "sl-oblivious"
-version = "0.1.0"
+version = "1.0.0-beta"
 license = "SLL"
 edition = "2021"
-publish = false
+publish = true
 
 [dependencies]
 thiserror = "1"
