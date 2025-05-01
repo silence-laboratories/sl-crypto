@@ -2,7 +2,7 @@
 name = "sl-mpc-mate"
 version = "1.0.0-beta"
 edition = "2021"
-license-file ="../LICENSE"
+license-file ="../../LICENSE"
 description = "Utilities for secure multi-party computation"
 publish = true
 
