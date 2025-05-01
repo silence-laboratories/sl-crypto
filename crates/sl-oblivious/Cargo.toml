@@ -1,7 +1,7 @@
 [package]
 name = "sl-oblivious"
 version = "1.0.0-beta"
-license-file ="../../LICENSE"
+license-file ="LICENSE"
 edition = "2021"
 description = "Oblivious Transfer protocols for DKLs23"
 publish = true
