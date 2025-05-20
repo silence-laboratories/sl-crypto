@@ -1,0 +1,30 @@
+[package]
+name = "sl-messages"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aead = { version = "0.5.2" }
+bytemuck = { version = "1.22", features = [ "derive", "min_const_generics", "extern_crate_alloc" ] }
+bytes = "1.5"
+chacha20 = { version = "0.9" }
+chacha20poly1305 = { version = "0.10.1" }
+generic-array = { version = "0.14.7", features = [ "zeroize" ] }
+rand_core = "0.6"
+sha2 = { version = "0.10" }
+signature = { version = "2.2.0" }
+x25519-dalek = { version = "2.0.0", features = ["reusable_secrets", "zeroize"] }
+zeroize = { version = "1.6", features = [ "derive" ] }
+
+fastwebsockets = { version = "0.10", features = ["unstable-split"], optional = true }
+tokio = { version = "1.43", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.43", features = ["sync", "macros", "rt-multi-thread", "net"] }
+
+[features]
+default = [ "fast-ws", "mux" ]
+mux = [ "tokio/sync", "tokio/rt" ]
+fast-ws = [ "fastwebsockets", "tokio/macros", "tokio/sync", "tokio/rt" ]
+
+simple-relay = []
