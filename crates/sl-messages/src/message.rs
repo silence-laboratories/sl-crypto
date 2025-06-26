@@ -3,11 +3,14 @@
 
 use std::{fmt, ops::Deref, time::Duration};
 
+use bytemuck::{AnyBitPattern, NoUninit};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroize;
 
 pub const MESSAGE_ID_SIZE: usize = 32;
 pub const MESSAGE_HEADER_SIZE: usize = MESSAGE_ID_SIZE + 2 + 2;
+
+pub use bytes::{Bytes, BytesMut};
 
 #[derive(Debug, Copy, Clone, PartialEq, Zeroize)]
 pub struct InstanceId([u8; 32]);
@@ -39,7 +42,9 @@ impl MessageTag {
 
     /// Define a familty of tags indexed by pair of parameters.
     pub const fn tag2(tag: u32, param1: u16, param2: u16) -> Self {
-        Self::tag(tag as u64 | (param1 as u64) << 32 | (param2 as u64) << 48)
+        Self::tag(
+            tag as u64 | ((param1 as u64) << 32) | ((param2 as u64) << 48),
+        )
     }
 
     /// Convert the tag to an array of bytes.
@@ -49,14 +54,7 @@ impl MessageTag {
 }
 
 #[derive(
-    PartialEq,
-    Clone,
-    Copy,
-    Hash,
-    PartialOrd,
-    Eq,
-    bytemuck::AnyBitPattern,
-    bytemuck::NoUninit,
+    PartialEq, Clone, Copy, Hash, PartialOrd, Eq, AnyBitPattern, NoUninit,
 )]
 #[repr(C)]
 pub struct MsgId([u8; MESSAGE_ID_SIZE]);
@@ -166,13 +164,7 @@ impl From<&MsgHdr> for MsgId {
     }
 }
 
-#[derive(Debug, Eq, Copy, Clone, PartialEq)]
-pub enum Kind {
-    Ask,
-    Pub,
-}
-
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct MsgHdr {
     data: [u8; MESSAGE_HEADER_SIZE],
@@ -214,6 +206,10 @@ impl<'a> TryFrom<&'a [u8]> for MsgHdr {
 }
 
 impl MsgHdr {
+    pub const MAX_TTL: u64 = (0xffff - 255) * 10 + 250;
+    pub const ONE_RECEIVER: u16 = 0x8000;
+    pub const CUSTOM_FLAGS_MASK: u16 = 0x0fff;
+
     /// Decode message id field.
     pub fn id(&self) -> &MsgId {
         self.data[..MESSAGE_ID_SIZE].try_into().unwrap()
@@ -232,32 +228,48 @@ impl MsgHdr {
             self.data[MESSAGE_ID_SIZE..][..2].try_into().unwrap(),
         );
 
-        Duration::from_secs(secs as u64)
+        match secs {
+            0..256 => Duration::from_secs(secs as u64),
+            256.. => Duration::from_secs((secs - 255) as u64 * 10 + 250),
+        }
     }
 
     /// Encode header parts into given buffer.
     pub fn encode(
         hdr: &mut [u8; MESSAGE_HEADER_SIZE],
         id: &MsgId,
-        ttl: u32,
+        ttl: Duration,
         flags: u16,
     ) {
-        let data: u32 = (ttl & 0xffff) | (flags as u32) << 16;
+        let ttl = ttl.as_secs();
+        let ttl = match ttl {
+            0..256 => ttl as u16,
+            256..Self::MAX_TTL => {
+                let ttl = (ttl + 9) / 10 - 26;
+                let ttl = ttl + 256;
+
+                ttl as u16
+            }
+            _ => 0xffff,
+        };
+        let data: u32 = (ttl as u32) | ((flags as u32) << 16);
 
         hdr[..MESSAGE_ID_SIZE].copy_from_slice(&id.0);
         hdr[MESSAGE_ID_SIZE..].copy_from_slice(&data.to_le_bytes());
     }
+
+    pub fn is_one_receiver(&self) -> bool {
+        (self.flags() & Self::ONE_RECEIVER) != 0
+    }
 }
 
 /// Allocate message and initalize it from given parts.
-///
-/// This is mostly debug/test support function.
 pub fn allocate_message(
     id: &MsgId,
-    ttl: u32,
+    ttl: Duration,
     flags: u16,
     payload: &[u8],
-) -> Vec<u8> {
+) -> Bytes {
     let mut buffer = Vec::with_capacity(MESSAGE_HEADER_SIZE + payload.len());
 
     buffer.resize(MESSAGE_HEADER_SIZE, 0);
@@ -266,15 +278,7 @@ pub fn allocate_message(
 
     buffer.extend_from_slice(payload);
 
-    buffer
-}
-
-pub struct AskMsg;
-
-impl AskMsg {
-    pub fn allocate(id: &MsgId, ttl: u32) -> Vec<u8> {
-        allocate_message(id, ttl, 0, &[])
-    }
+    Bytes::from(buffer)
 }
 
 #[cfg(test)]
@@ -316,5 +320,31 @@ mod test {
             t3.to_bytes(),
             [0x40, 0x30, 0x20, 0x10, 0xFF, 0xEE, 0xAD, 0xDE]
         );
+    }
+
+    #[test]
+    fn ttl() {
+        let id = MsgId::from([1; 32]);
+
+        let mut hdr = [0; MESSAGE_HEADER_SIZE];
+
+        for (s, s2) in [
+            (1, 1),
+            (255, 255),
+            (256, 260),
+            (257, 260),
+            (260, 260),
+            (261, 270),
+            (270, 270),
+            (271, 280),
+            (655800, MsgHdr::MAX_TTL),
+        ] {
+            MsgHdr::encode(&mut hdr, &id, Duration::from_secs(s), 0);
+
+            eprintln!("{} {:?}", s, hdr);
+
+            let h1 = <&MsgHdr>::try_from(hdr.as_slice()).unwrap();
+            assert_eq!(h1.ttl(), Duration::from_secs(s2));
+        }
     }
 }

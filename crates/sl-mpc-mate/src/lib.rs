@@ -10,8 +10,6 @@ pub mod math;
 pub mod matrix;
 
 pub mod bip32;
-pub mod coord;
-pub mod message;
 
 /// Session ID
 pub type SessionId = ByteArray<32>;
