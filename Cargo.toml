@@ -7,6 +7,7 @@ members = [
   "crates/sl-mpc-traits",
   "crates/sl-verifiable-enc",
   "crates/sl-messages",
+   "crates/sl-shamir",
 ]
 
 [profile.bench]
