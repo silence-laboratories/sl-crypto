@@ -1,0 +1,13 @@
+
+[package]
+name = "sl-shamir"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8.5"
+zeroize = { version = "1.0", features = ["zeroize_derive"], optional = true }
+
+[features]
+default = ["zeroize"]
+zeroize = ["dep:zeroize"]
