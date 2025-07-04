@@ -7,14 +7,22 @@ pub mod consts {
 
     // Computational security parameter, fixed to /lambda_c = 256
     // 256 OT seeds each 256-bit
+    #[cfg(not(feature = "small-lambda-c"))]
     pub const LAMBDA_C: usize = 256;
+    #[cfg(not(feature = "small-lambda-c"))]
+    pub const RHO: usize = 1;
+
+    #[cfg(feature = "small-lambda-c")]
+    pub const LAMBDA_C: usize = 128;
+    #[cfg(feature = "small-lambda-c")]
+    pub const RHO: usize = 2;
 
     pub const LAMBDA_S: usize = 128;
 
     pub const S: usize = 128; // 16 bytes == 128 bits
 
     pub const L_BATCH: usize = 2;
-    pub const RHO: usize = 1;
+
     pub const SOFT_SPOKEN_K: usize = 4;
 
     // size of u8 array to hold LAMBDA_C bits.
