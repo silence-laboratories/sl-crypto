@@ -113,12 +113,12 @@ pub enum ShamirError {
     InvalidShare,
 }
 
-/// Split a secret into n shares with threshold k
+/// Split a `secret` into `share_count` shares with a threshold of `threshold`
 ///
 /// # Arguments
 /// * `secret` - The secret bytes to split
-/// * `threshold` - Minimum number of shares needed to reconstruct (k)
-/// * `share_count` - Total number of shares to generate (n)
+/// * `threshold` - Minimum number of shares needed to reconstruct the secret
+/// * `share_count` - Total number of shares to generate for the secret
 /// * `rng` - Cryptographically secure random number generator
 ///
 /// # Returns
@@ -173,8 +173,14 @@ pub fn split<R: CryptoRng + RngCore>(
 ///
 /// # Returns
 /// The reconstructed secret bytes
-pub fn recover(shares: &[Share]) -> Result<Vec<u8>, ShamirError> {
-    if shares.is_empty() {
+pub fn recover(
+    shares: &[Share],
+    threshold: u8,
+) -> Result<Vec<u8>, ShamirError> {
+    if threshold == 0 {
+        return Err(ShamirError::InvalidThreshold);
+    }
+    if shares.is_empty() || shares.len() < threshold as usize {
         return Err(ShamirError::InsufficientShares);
     }
 
@@ -256,11 +262,11 @@ mod tests {
         assert_eq!(shares.len(), share_count as usize);
 
         // Test reconstruction with exact threshold
-        let reconstructed = recover(&shares[0..threshold as usize]).unwrap();
+        let reconstructed = recover(&shares[0..threshold as usize], threshold).unwrap();
         assert_eq!(reconstructed, secret);
 
         // Test reconstruction with more shares
-        let reconstructed = recover(&shares).unwrap();
+        let reconstructed = recover(&shares, threshold).unwrap();
         assert_eq!(reconstructed, secret);
     }
 
@@ -274,11 +280,11 @@ mod tests {
         let shares = split(secret, threshold, share_count, &mut rng).unwrap();
 
         // Should work with threshold shares
-        let result = recover(&shares[0..threshold as usize]);
+        let result = recover(&shares[0..share_count as usize], threshold);
         assert!(result.is_ok());
 
         // Should fail with too few shares (threshold - 1)
-        let result = recover(&shares[0..threshold as usize - 1]);
+        let result = recover(&shares[0..threshold as usize - 1], threshold);
         // Note: This currently doesn't check the threshold in recover()
         // The mathematical property ensures it won't give the right answer with too few shares
         // but it won't explicitly error. Let's test that it gives a wrong result instead.
@@ -300,7 +306,7 @@ mod tests {
             let shares =
                 split(&secret, threshold, share_count, &mut rng).unwrap();
             let reconstructed =
-                recover(&shares[0..threshold as usize]).unwrap();
+                recover(&shares[0..threshold as usize], threshold).unwrap();
             assert_eq!(reconstructed, secret, "Failed for size {}", size);
         }
     }
@@ -343,7 +349,7 @@ mod tests {
             }, // Duplicate x
         ];
 
-        let result = recover(&shares);
+        let result = recover(&shares, 2);
         assert_eq!(result, Err(ShamirError::DuplicateShare));
     }
 
@@ -360,7 +366,7 @@ mod tests {
             },
         ];
 
-        let result = recover(&shares);
+        let result = recover(&shares, 2);
         assert_eq!(result, Err(ShamirError::InvalidShare));
     }
 
@@ -377,7 +383,7 @@ mod tests {
             }, // Different length
         ];
 
-        let result = recover(&shares);
+        let result = recover(&shares, 2);
         assert_eq!(result, Err(ShamirError::InvalidShare));
     }
 
@@ -405,7 +411,7 @@ mod tests {
 
         let shares =
             split(&secret, threshold, share_count, &mut rng).unwrap();
-        let reconstructed = recover(&shares[0..threshold as usize]).unwrap();
+        let reconstructed = recover(&shares[0..threshold as usize], threshold).unwrap();
         assert_eq!(reconstructed, secret);
     }
 
@@ -417,7 +423,7 @@ mod tests {
         let share_count = 5;
 
         let shares = split(secret, threshold, share_count, &mut rng).unwrap();
-        let reconstructed = recover(&shares[0..threshold as usize]).unwrap();
+        let reconstructed = recover(&shares[0..threshold as usize], threshold).unwrap();
         assert_eq!(reconstructed, secret);
     }
 
@@ -444,7 +450,7 @@ mod tests {
             .collect();
 
         let reconstructed =
-            recover(&serialized_shares[0..threshold as usize]).unwrap();
+            recover(&serialized_shares[0..threshold as usize], threshold).unwrap();
         assert_eq!(reconstructed, secret);
     }
 
