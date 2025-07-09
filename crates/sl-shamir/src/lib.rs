@@ -11,6 +11,8 @@ use rand::{CryptoRng, RngCore};
 #[cfg(feature = "zeroize")]
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+pub const SHARE_MAGIC_V1: u8 = 1;
+
 /// A polynomial over GF(256) with coefficients stored as [a0, a1, a2, ...]
 /// representing a0 + a1*x + a2*x^2 + ...
 #[cfg_attr(feature = "zeroize", derive(Zeroize, ZeroizeOnDrop))]
@@ -53,8 +55,51 @@ impl Polynomial {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "zeroize", derive(Zeroize, ZeroizeOnDrop))]
 pub struct Share {
-    pub x: u8,
-    pub y: Vec<u8>,
+    x: u8,
+    y: Vec<u8>,
+}
+
+impl Share {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(4 + self.y.len());
+        bytes.push(SHARE_MAGIC_V1); // Version identifier
+        bytes.push(self.x);
+        bytes.extend((self.y.len() as u16).to_le_bytes());
+        bytes.extend(&self.y);
+        bytes
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ShamirError> {
+        if bytes.len() < 4 {
+            return Err(ShamirError::InvalidShare);
+        }
+
+        // Check magic byte for version compatibility
+        let magic = bytes[0];
+        if magic != SHARE_MAGIC_V1 {
+            return Err(ShamirError::InvalidShare);
+        }
+
+        let x = bytes[1];
+        if x == 0 {
+            return Err(ShamirError::InvalidShare);
+        }
+
+        // Parse y length
+        let y_len = u16::from_le_bytes([bytes[2], bytes[3]]) as usize;
+
+        // Validate total length
+        if bytes.len() != 4 + y_len {
+            return Err(ShamirError::InvalidShare);
+        }
+
+        if y_len == 0 {
+            return Err(ShamirError::InvalidShare);
+        }
+
+        let y = bytes[4..4 + y_len].to_vec();
+        Ok(Share { x, y })
+    }
 }
 
 /// Error types for Shamir secret sharing
@@ -80,33 +125,37 @@ pub enum ShamirError {
 /// Vector of shares that can be used to reconstruct the secret
 pub fn split<R: CryptoRng + RngCore>(
     secret: &[u8],
-    threshold: usize,
-    share_count: usize,
+    threshold: u8,
+    share_count: u8,
     rng: &mut R,
 ) -> Result<Vec<Share>, ShamirError> {
     if threshold == 0 || threshold > share_count {
         return Err(ShamirError::InvalidThreshold);
     }
-    if share_count == 0 || share_count > 255 {
+    if share_count == 0 {
         return Err(ShamirError::InvalidShareCount);
     }
     if secret.is_empty() {
         return Err(ShamirError::EmptySecret);
     }
 
-    let mut shares = Vec::with_capacity(share_count);
+    let mut shares = Vec::with_capacity(share_count as usize);
 
     // Initialize shares with x-coordinates 1..n
     for i in 1..=share_count {
         shares.push(Share {
-            x: i as u8,
+            x: i,
             y: Vec::with_capacity(secret.len()),
         });
     }
 
     // For each byte of the secret, create a polynomial and evaluate at share points
     for &secret_byte in secret {
-        let poly = Polynomial::random(threshold - 1, secret_byte.into(), rng);
+        let poly = Polynomial::random(
+            (threshold - 1) as usize,
+            secret_byte.into(),
+            rng,
+        );
 
         for share in &mut shares {
             let y_val = poly.eval(share.x.into());
@@ -204,10 +253,10 @@ mod tests {
         let share_count = 5;
 
         let shares = split(secret, threshold, share_count, &mut rng).unwrap();
-        assert_eq!(shares.len(), share_count);
+        assert_eq!(shares.len(), share_count as usize);
 
         // Test reconstruction with exact threshold
-        let reconstructed = recover(&shares[0..threshold]).unwrap();
+        let reconstructed = recover(&shares[0..threshold as usize]).unwrap();
         assert_eq!(reconstructed, secret);
 
         // Test reconstruction with more shares
@@ -225,11 +274,11 @@ mod tests {
         let shares = split(secret, threshold, share_count, &mut rng).unwrap();
 
         // Should work with threshold shares
-        let result = recover(&shares[0..threshold]);
+        let result = recover(&shares[0..threshold as usize]);
         assert!(result.is_ok());
 
         // Should fail with too few shares (threshold - 1)
-        let result = recover(&shares[0..threshold - 1]);
+        let result = recover(&shares[0..threshold as usize - 1]);
         // Note: This currently doesn't check the threshold in recover()
         // The mathematical property ensures it won't give the right answer with too few shares
         // but it won't explicitly error. Let's test that it gives a wrong result instead.
@@ -250,7 +299,8 @@ mod tests {
                 (0..size).map(|i| (i % 256) as u8).collect();
             let shares =
                 split(&secret, threshold, share_count, &mut rng).unwrap();
-            let reconstructed = recover(&shares[0..threshold]).unwrap();
+            let reconstructed =
+                recover(&shares[0..threshold as usize]).unwrap();
             assert_eq!(reconstructed, secret, "Failed for size {}", size);
         }
     }
@@ -270,15 +320,11 @@ mod tests {
             Err(ShamirError::InvalidThreshold)
         );
 
-        // Invalid share count (threshold is valid but share_count is not)
+        // Invalid share count
         assert_eq!(
             split(secret, 0, 0, &mut rng),
             Err(ShamirError::InvalidThreshold)
-        ); // This will hit threshold check first
-        assert_eq!(
-            split(secret, 2, 256, &mut rng),
-            Err(ShamirError::InvalidShareCount)
-        );
+        ); // This will hit threshold check first since both are 0
 
         // Empty secret
         assert_eq!(split(&[], 2, 3, &mut rng), Err(ShamirError::EmptySecret));
@@ -345,7 +391,7 @@ mod tests {
         // f(0) = 5
         assert_eq!(poly.eval(Gf256(0)), Gf256(5));
 
-        // f(1) = 5 + 3 + 2 = 10 (but in GF256: 5 ^ 3 ^ 2 = 6)
+        // f(1) = 5 + 3 + 2 = 10 (but in GF256: 5 ^ 3 ^ 2 = 4)
         let expected = Gf256(5) + Gf256(3) + Gf256(2);
         assert_eq!(poly.eval(Gf256(1)), expected);
     }
@@ -359,7 +405,7 @@ mod tests {
 
         let shares =
             split(&secret, threshold, share_count, &mut rng).unwrap();
-        let reconstructed = recover(&shares[0..threshold]).unwrap();
+        let reconstructed = recover(&shares[0..threshold as usize]).unwrap();
         assert_eq!(reconstructed, secret);
     }
 
@@ -371,7 +417,72 @@ mod tests {
         let share_count = 5;
 
         let shares = split(secret, threshold, share_count, &mut rng).unwrap();
-        let reconstructed = recover(&shares[0..threshold]).unwrap();
+        let reconstructed = recover(&shares[0..threshold as usize]).unwrap();
         assert_eq!(reconstructed, secret);
+    }
+
+    #[test]
+    fn test_share_serialization() {
+        let mut rng = thread_rng();
+        let secret = b"test serialization";
+        let threshold = 2;
+        let share_count = 3;
+
+        let shares = split(secret, threshold, share_count, &mut rng).unwrap();
+
+        // Test each share can be serialized and deserialized
+        for share in &shares {
+            let bytes = share.to_bytes();
+            let deserialized = Share::from_bytes(&bytes).unwrap();
+            assert_eq!(*share, deserialized);
+        }
+
+        // Test that serialized shares can still reconstruct the secret
+        let serialized_shares: Vec<Share> = shares
+            .iter()
+            .map(|s| Share::from_bytes(&s.to_bytes()).unwrap())
+            .collect();
+
+        let reconstructed =
+            recover(&serialized_shares[0..threshold as usize]).unwrap();
+        assert_eq!(reconstructed, secret);
+    }
+
+    #[test]
+    fn test_share_format_validation() {
+        // Test invalid magic byte
+        let bad_magic = vec![99, 1, 0, 1, 42]; // wrong magic
+        assert_eq!(
+            Share::from_bytes(&bad_magic),
+            Err(ShamirError::InvalidShare)
+        );
+
+        // Test zero x-coordinate
+        let zero_x = vec![SHARE_MAGIC_V1, 0, 0, 1, 42]; // x = 0
+        assert_eq!(
+            Share::from_bytes(&zero_x),
+            Err(ShamirError::InvalidShare)
+        );
+
+        // Test empty y data
+        let empty_y = vec![SHARE_MAGIC_V1, 1, 0, 0]; // y_len = 0
+        assert_eq!(
+            Share::from_bytes(&empty_y),
+            Err(ShamirError::InvalidShare)
+        );
+
+        // Test length mismatch
+        let wrong_len = vec![SHARE_MAGIC_V1, 1, 0, 2, 42]; // claims 2 bytes but only has 1
+        assert_eq!(
+            Share::from_bytes(&wrong_len),
+            Err(ShamirError::InvalidShare)
+        );
+
+        // Test too short
+        let too_short = vec![SHARE_MAGIC_V1, 1]; // missing length and data
+        assert_eq!(
+            Share::from_bytes(&too_short),
+            Err(ShamirError::InvalidShare)
+        );
     }
 }
