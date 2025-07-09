@@ -61,16 +61,15 @@ pub struct Share {
 
 impl Share {
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(4 + self.y.len());
+        let mut bytes = Vec::with_capacity(2 + self.y.len());
         bytes.push(SHARE_MAGIC_V1); // Version identifier
-        bytes.push(self.x);
-        bytes.extend((self.y.len() as u16).to_le_bytes());
-        bytes.extend(&self.y);
+        bytes.push(self.x);         // x-coordinate
+        bytes.extend(&self.y);      // y data
         bytes
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, ShamirError> {
-        if bytes.len() < 4 {
+        if bytes.len() < 3 {
             return Err(ShamirError::InvalidShare);
         }
 
@@ -85,19 +84,12 @@ impl Share {
             return Err(ShamirError::InvalidShare);
         }
 
-        // Parse y length
-        let y_len = u16::from_le_bytes([bytes[2], bytes[3]]) as usize;
-
-        // Validate total length
-        if bytes.len() != 4 + y_len {
+        // Extract y data (everything after magic and x)
+        let y = bytes[2..].to_vec();
+        if y.is_empty() {
             return Err(ShamirError::InvalidShare);
         }
 
-        if y_len == 0 {
-            return Err(ShamirError::InvalidShare);
-        }
-
-        let y = bytes[4..4 + y_len].to_vec();
         Ok(Share { x, y })
     }
 }
@@ -457,35 +449,28 @@ mod tests {
     #[test]
     fn test_share_format_validation() {
         // Test invalid magic byte
-        let bad_magic = vec![99, 1, 0, 1, 42]; // wrong magic
+        let bad_magic = vec![99, 1, 42]; // wrong magic
         assert_eq!(
             Share::from_bytes(&bad_magic),
             Err(ShamirError::InvalidShare)
         );
 
         // Test zero x-coordinate
-        let zero_x = vec![SHARE_MAGIC_V1, 0, 0, 1, 42]; // x = 0
+        let zero_x = vec![SHARE_MAGIC_V1, 0, 42]; // x = 0
         assert_eq!(
             Share::from_bytes(&zero_x),
             Err(ShamirError::InvalidShare)
         );
 
         // Test empty y data
-        let empty_y = vec![SHARE_MAGIC_V1, 1, 0, 0]; // y_len = 0
+        let empty_y = vec![SHARE_MAGIC_V1, 1]; // no y data
         assert_eq!(
             Share::from_bytes(&empty_y),
             Err(ShamirError::InvalidShare)
         );
 
-        // Test length mismatch
-        let wrong_len = vec![SHARE_MAGIC_V1, 1, 0, 2, 42]; // claims 2 bytes but only has 1
-        assert_eq!(
-            Share::from_bytes(&wrong_len),
-            Err(ShamirError::InvalidShare)
-        );
-
         // Test too short
-        let too_short = vec![SHARE_MAGIC_V1, 1]; // missing length and data
+        let too_short = vec![SHARE_MAGIC_V1]; // missing x and y data
         assert_eq!(
             Share::from_bytes(&too_short),
             Err(ShamirError::InvalidShare)
