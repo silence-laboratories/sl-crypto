@@ -22,9 +22,6 @@ pub struct SignedMessage<T, S: SignatureEncoding> {
 }
 
 impl<S: SignatureEncoding, T: AnyBitPattern + NoUninit> SignedMessage<T, S> {
-    /// Size of the message header.
-    pub const HEADER_SIZE: usize = MESSAGE_HEADER_SIZE;
-
     const T_SIZE: usize = core::mem::size_of::<T>();
     const S_SIZE: usize = core::mem::size_of::<S::Repr>();
 
@@ -112,22 +109,16 @@ impl<S: SignatureEncoding, T: AnyBitPattern + NoUninit> SignedMessage<T, S> {
     /// Verify signed message and return a payload reference.
     pub fn verify_with_trailer<'msg, V: Verifier<S>>(
         buffer: &'msg [u8],
-        trailer: usize,
         verify_key: &V,
     ) -> Option<(&'msg T, &'msg [u8])> {
-        // Make sure that buffer is exactly right size
-        if buffer.len() != Self::size(trailer) {
-            return None;
-        }
-
-        let sign_offset = buffer.len() - Self::S_SIZE;
-        let (msg, sign) = buffer.split_at(sign_offset);
+        let sign_offset = buffer.len().checked_sub(Self::S_SIZE)?;
+        let (msg, sign) = buffer.split_at_checked(sign_offset)?;
         let sign = S::try_from(sign).ok()?;
 
         verify_key.verify(msg, &sign).ok()?;
 
-        let body = &msg[MESSAGE_HEADER_SIZE..];
-        let (payload, trailer) = body.split_at(Self::T_SIZE);
+        let body = msg.get(MESSAGE_HEADER_SIZE..)?;
+        let (payload, trailer) = body.split_at_checked(Self::T_SIZE)?;
         Some((bytemuck::from_bytes(payload), trailer))
     }
 
@@ -136,7 +127,8 @@ impl<S: SignatureEncoding, T: AnyBitPattern + NoUninit> SignedMessage<T, S> {
         buffer: &'msg [u8],
         verify_key: &V,
     ) -> Option<&'msg T> {
-        Self::verify_with_trailer(buffer, 0, verify_key).map(|(m, _)| m)
+        Self::verify_with_trailer(buffer, verify_key)
+            .and_then(|(m, trailer)| trailer.is_empty().then_some(m))
     }
 }
 
@@ -147,16 +139,10 @@ impl<S: SignatureEncoding> SignedMessage<(), S> {
         buffer: &[u8],
         verify_key: &V,
     ) -> Option<Range<usize>> {
-        let overhead = MESSAGE_HEADER_SIZE + Self::S_SIZE;
+        Self::verify_with_trailer(buffer, verify_key).map(|(_, trailer)| {
+            let end = MESSAGE_HEADER_SIZE + trailer.len();
 
-        if buffer.len() > overhead {
-            let trailer = buffer.len() - overhead;
-
-            Self::verify_with_trailer(buffer, trailer, verify_key)?;
-
-            Some(MESSAGE_HEADER_SIZE..buffer.len() - Self::S_SIZE)
-        } else {
-            None
-        }
+            MESSAGE_HEADER_SIZE..end
+        })
     }
 }
