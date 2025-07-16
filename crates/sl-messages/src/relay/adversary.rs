@@ -50,10 +50,9 @@ impl EvilPlay {
     where
         F: FnMut(&HashSet<MsgId>, usize) -> bool + Send + 'static,
     {
-        let mut bytes = BytesMut::with_capacity(msg.len());
-        bytes.extend_from_slice(&msg);
+        let msg = Bytes::from(msg).into();
         let cond = Box::new(cond);
-        self.injects.push(Inject { msg: bytes, cond });
+        self.injects.push(Inject { msg, cond });
 
         self
     }
