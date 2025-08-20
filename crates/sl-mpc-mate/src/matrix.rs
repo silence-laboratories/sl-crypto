@@ -97,61 +97,72 @@ fn mod_bareiss_determinant<C: CurveArithmetic>(
 }
 
 /// Calculates the modular inverse of a matrix, generic over curves
-// TODO: Use result or option instead of panicking
 pub fn matrix_inverse<C: CurveArithmetic>(
-    matrix: Vec<Vec<C::Scalar>>,
+    mut matrix: Vec<Vec<C::Scalar>>,
     rows: usize,
-) -> Vec<Vec<C::Scalar>> {
-    let determinant = mod_bareiss_determinant::<C>(matrix.clone(), rows)
-        .expect("Error while finding det");
-    let determinant_inv = determinant.invert().unwrap();
-    let n = matrix.len();
+) -> Result<Vec<Vec<C::Scalar>>, &'static str> {
+    let n = rows;
+    if matrix.len() != n || matrix.iter().any(|row| row.len() != n) {
+        return Err("Matrix must be square");
+    }
 
-    let minus_one = C::Scalar::ZERO.sub(&C::Scalar::ONE);
     if n == 2 {
+        let determinant = mod_bareiss_determinant::<C>(matrix.clone(), n)?;
+        let determinant_inv = determinant.invert().expect("Matrix is singular");
+        let minus_one = C::Scalar::ZERO.sub(&C::Scalar::ONE);
         let a11 = matrix[1][1] * determinant_inv;
         let a12 = minus_one * matrix[0][1] * determinant_inv;
         let a21 = minus_one * matrix[1][0] * determinant_inv;
         let a22 = matrix[0][0] * determinant_inv;
-
-        return vec![vec![a11, a12], vec![a21, a22]];
+        return Ok(vec![vec![a11, a12], vec![a21, a22]]);
     }
 
-    #[cfg(feature = "rayon")]
-    let iter = matrix.par_iter();
-    #[cfg(not(feature = "rayon"))]
-    let iter = matrix.iter();
+    let mut inv = vec![vec![C::Scalar::ZERO; n]; n];
+    for i in 0..n {
+        inv[i][i] = C::Scalar::ONE;
+    }
 
-    let cofactors = iter.enumerate()
-        .map(|(r, row)| {
-            #[cfg(feature = "rayon")]
-            let iter = row.par_iter();
-            #[cfg(not(feature = "rayon"))]
-            let iter = row.iter();
+    for i in 0..n {
+        let mut pivot = matrix[i][i];
+        let mut pivot_row = i;
+        for k in (i + 1)..n {
+            if bool::from(matrix[k][i].is_zero()) {
+                continue;
+            }
+            if bool::from(pivot.is_zero()) || matrix[k][i] > pivot {
+                pivot = matrix[k][i];
+                pivot_row = k;
+            }
+        }
 
-            iter.enumerate()
-                .map(|(c, _)| {
-                    let minor = matrix_minor::<C>(&matrix, r, c);
-                    let minor_rows = minor.len();
-                    let exponentiation = minus_one.pow([((r + c) as u64)]);
-                    let value: C::Scalar = exponentiation
-                        * mod_bareiss_determinant::<C>(minor, minor_rows)
-                            .expect("Error while finding det for minor, Given ranks setup might not be valid");
-                    value
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
+        if bool::from(pivot.is_zero()) {
+            return Err("Matrix is singular");
+        }
 
-    let mut transposed = transpose::<C>(cofactors);
+        if pivot_row != i {
+            matrix.swap(i, pivot_row);
+            inv.swap(i, pivot_row);
+        }
 
-    for row in &mut transposed {
-        for x in row {
-            x.mul_assign(determinant_inv);
+        let inv_pivot = pivot.invert().unwrap(); // Safe since pivot != 0
+        for j in 0..n {
+            matrix[i][j] *= inv_pivot;
+            inv[i][j] *= inv_pivot;
+        }
+
+        for k in 0..n {
+            if k != i {
+                let factor = matrix[k][i];
+                for j in 0..n {
+                    let mij = matrix[i][j]; 
+                    let inv_ij = inv[i][j]; 
+                    matrix[k][j] -= mij * factor;
+                    inv[k][j] -= inv_ij * factor;
+                }
+            }
         }
     }
-
-    transposed
+    Ok(inv)
 }
 
 #[cfg(test)]
@@ -294,6 +305,69 @@ mod tests {
             ],
         ];
 
-        assert_eq!(expected, inverse)
+        assert_eq!(expected, inverse.unwrap())
     }
+    
+
+    #[test]
+fn test_inverse_large_matrix() {
+    use k256::{Scalar, Secp256k1};
+    
+    const N: usize = 100;
+
+    // Generate a 100x100 diagonal matrix with random non-zero diagonal entries
+    let mut rng = rand::thread_rng();
+    let mut matrix = vec![vec![Scalar::ZERO; N]; N];
+    for i in 0..N {
+
+        for j in 0..N {
+            // Random non-zero scalar for the diagonal
+            let mut scalar = Scalar::random(&mut rng);
+            while bool::from(scalar.is_zero()) {
+                scalar = Scalar::random(&mut rng); // Ensure non-zero
+            }
+            matrix[i][j] = scalar;
+        }
+
+    }
+
+    // Compute the inverse using the matrix_inverse function
+    let inverse = matrix_inverse::<Secp256k1>(matrix.clone(), N)
+        .expect("Diagonal matrix with non-zero entries is invertible");
+
+    // Additional verification: check that matrix * inverse = identity
+    let product = multiply_matrices(&matrix, &inverse);
+    assert!(is_identity(&product), "Matrix inverse is incorrect");
+
+    // Helper function to multiply two matrices
+    fn multiply_matrices(a: &[Vec<Scalar>], b: &[Vec<Scalar>]) -> Vec<Vec<Scalar>> {
+        let n = a.len();
+        let mut result = vec![vec![Scalar::ZERO; n]; n];
+        for i in 0..n {
+            for j in 0..n {
+                for k in 0..n {
+                    result[i][j] += a[i][k] * b[k][j];
+                }
+            }
+        }
+        result
+    }
+
+    // Helper function to check if a matrix is the identity matrix
+    fn is_identity(matrix: &[Vec<Scalar>]) -> bool {
+        let n = matrix.len();
+        for i in 0..n {
+            for j in 0..n {
+                if i == j {
+                    if matrix[i][j] != Scalar::ONE {
+                        return false;
+                    }
+                } else if matrix[i][j] != Scalar::ZERO {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
 }

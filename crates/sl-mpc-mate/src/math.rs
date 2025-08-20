@@ -368,8 +368,8 @@ where
         .iter()
         .map(|(x_i, n_i)| polynomial_coeff_multipliers(x_i, *n_i, n))
         .collect();
-
-    matrix_inverse::<C>(matrix, n).swap_remove(0)
+    let inv = matrix_inverse::<C>(matrix, n);
+    inv.unwrap().swap_remove(0)
 }
 
 #[cfg(not(feature = "serde"))]
