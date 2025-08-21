@@ -4,15 +4,30 @@
 pub mod message;
 pub mod relay;
 
-mod proto;
+pub(crate) mod proto;
 
 pub mod pairs;
 
 pub use bytes::{Bytes, BytesMut};
-pub use proto::{
-    EncryptedMessage, EncryptionScheme, Scheme as DefaultEncryptionScheme,
-    SignedMessage,
-};
+
+pub mod signed {
+    pub use crate::proto::signed::SignedMessage;
+}
+
+pub mod encrypted {
+    pub use crate::proto::{
+        encrypted::{
+            EncryptedMessage, MessageBuilder, MessageKey,
+            Scheme as DefaultEncryptionScheme,
+        },
+        scheme::aead::AeadX25519Builder,
+        scheme::passthrough::{PassThroughEncryption, PassThroughEncryptionBuilder},
+        scheme::{
+            EncryptionError, EncryptionScheme, EncryptionSchemeBuilder,
+            PublicKeyError,
+        },
+    };
+}
 
 #[cfg(feature = "fast-ws")]
 pub mod ws;
