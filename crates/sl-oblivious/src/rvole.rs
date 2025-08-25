@@ -12,8 +12,7 @@
 
 use std::array;
 
-use merlin::Transcript;
-
+use bytemuck::{allocation::zeroed_box, AnyBitPattern, NoUninit, Zeroable};
 use k256::{
     elliptic_curve::{
         bigint::Encoding,
@@ -22,6 +21,10 @@ use k256::{
         subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
     },
     Scalar, U256,
+};
+use sha3::{
+    digest::{ExtendableOutput, Update, XofReader},
+    Shake256 as Shake,
 };
 
 use crate::{
@@ -39,51 +42,55 @@ use crate::{
 
 const XI: usize = L; // by definition
 
+fn init_shake(input: &[&[u8]]) -> Shake {
+    let mut d = Shake::default();
+    for i in input {
+        d.update(i)
+    }
+    d
+}
+
 fn generate_gadget_vec(session_id: &[u8]) -> impl Iterator<Item = Scalar> {
-    let mut t = Transcript::new(&RANDOM_VOLE_GADGET_VECTOR_LABEL);
-    t.append_message(b"session-id", session_id);
+    let mut bytes = init_shake(&[
+        &RANDOM_VOLE_GADGET_VECTOR_LABEL,
+        b"session-id",
+        session_id,
+    ])
+    .finalize_xof();
 
-    (0..XI).map(move |i| {
-        t.append_u64(b"index", i as u64);
-
+    (0..XI).map(move |_i| {
         let mut repr = [0u8; KAPPA_BYTES];
-        t.challenge_bytes(b"next value", &mut repr);
+        bytes.read(&mut repr);
 
         Scalar::reduce(U256::from_be_bytes(repr))
     })
 }
 
 /// Message output in RVOLE protocol
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
+#[derive(Clone, Copy, AnyBitPattern, NoUninit)]
 #[repr(C)]
 pub struct RVOLEOutput {
     a_tilde: [[[u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
     eta: [[u8; KAPPA_BYTES]; RHO],
-    mu_hash: [u8; 64],
+    mu_hash: [u8; 2 * LAMBDA_C_BYTES],
 }
 
 impl RVOLEOutput {
     fn get_a_tilde(&self, j: usize, i: usize) -> Scalar {
-        Scalar::reduce(U256::from_be_bytes(self.a_tilde[j][i]))
+        Scalar::reduce(U256::from_be_slice(&self.a_tilde[j][i]))
     }
 }
 
 impl Default for RVOLEOutput {
     fn default() -> Self {
-        RVOLEOutput {
-            a_tilde: [[[0u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
-            eta: [[0u8; KAPPA_BYTES]; RHO],
-            mu_hash: [0u8; 64],
-        }
+        bytemuck::zeroed()
     }
 }
 
-#[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
-#[repr(C)]
+#[derive(Zeroable)]
 pub struct RVOLEReceiver {
     session_id: [u8; 32],
-    beta: [u8; L_BYTES],
-    receiver_extended_output: ReceiverExtendedOutput,
+    extended_output: ReceiverExtendedOutput,
 }
 
 impl RVOLEReceiver {
@@ -94,14 +101,16 @@ impl RVOLEReceiver {
         round1_output: &mut Round1Output,
         rng: &mut R,
     ) -> (Box<RVOLEReceiver>, Scalar) {
-        let mut beta = [0u8; L_BYTES];
-        rng.fill_bytes(&mut beta);
+        let mut next = zeroed_box::<RVOLEReceiver>();
+
+        next.session_id = session_id;
+        rng.fill_bytes(&mut next.extended_output.choices);
 
         // b = <g, /beta>
         let b = generate_gadget_vec(&session_id).enumerate().fold(
             Scalar::ZERO,
             |option_0, (i, gv)| {
-                let i_bit = beta.extract_bit(i);
+                let i_bit = next.extended_output.choices.extract_bit(i);
                 let option_1 = option_0 + gv;
 
                 Scalar::conditional_select(
@@ -112,17 +121,11 @@ impl RVOLEReceiver {
             },
         );
 
-        let mut next = bytemuck::allocation::zeroed_box::<RVOLEReceiver>();
-
-        next.session_id = session_id;
-        next.beta = beta;
-        next.receiver_extended_output.choices = beta;
-
         SoftSpokenOTReceiver::process(
             &session_id,
             seed_ot_results,
             round1_output,
-            &mut next.receiver_extended_output,
+            &mut next.extended_output,
             rng,
         );
 
@@ -135,25 +138,40 @@ impl RVOLEReceiver {
         &self,
         rvole_output: &RVOLEOutput,
     ) -> Result<[Scalar; L_BATCH], &'static str> {
-        let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
-        t.append_message(b"session-id", &self.session_id);
+        let mut t = init_shake(&[
+            &RANDOM_VOLE_THETA_LABEL,
+            b"session-id",
+            &self.session_id,
+        ]);
 
         for j in 0..XI {
-            t.append_u64(b"row of a tilde", j as u64);
+            t.update(b"row of a tilde");
+            t.update(&(j as u64).to_le_bytes());
             for i in 0..L_BATCH_PLUS_RHO {
-                t.append_message(b"", &rvole_output.a_tilde[j][i]);
+                t.update(&rvole_output.a_tilde[j][i]);
             }
         }
+
+        let mut t_bytes = t.finalize_xof();
 
         let mut theta = [[Scalar::ZERO; L_BATCH]; RHO];
         #[allow(clippy::needless_range_loop)]
         for k in 0..RHO {
             for i in 0..L_BATCH {
-                t.append_u64(b"theta k", k as u64);
-                t.append_u64(b"theta i", i as u64);
+                let mut h_init = [0u8; 32];
+                t_bytes.read(&mut h_init);
+
+                let mut h = init_shake(&[&h_init]);
+
+                h.update(b"teta k");
+                h.update(&(k as u64).to_le_bytes());
+
+                h.update(b"teta i");
+                h.update(&(i as u64).to_le_bytes());
 
                 let mut digest = [0u8; KAPPA_BYTES];
-                t.challenge_bytes(b"theta", digest.as_mut());
+                h.finalize_xof_into(&mut digest);
+
                 theta[k][i] = Scalar::reduce(U256::from_be_bytes(digest));
             }
         }
@@ -162,41 +180,51 @@ impl RVOLEReceiver {
         let mut d_hat = [[Scalar::ZERO; RHO]; XI];
 
         for j in 0..XI {
-            let j_bit = self.beta.extract_bit(j);
+            let j_bit = self.extended_output.choices.extract_bit(j);
             for i in 0..L_BATCH {
-                let option_0 = Scalar::reduce(U256::from_be_bytes(
-                    self.receiver_extended_output.v_x[j][i],
+                let option_0 = Scalar::reduce(U256::from_be_slice(
+                    &self.extended_output.v_x[j][i],
                 ));
+
                 let option_1 = option_0 + rvole_output.get_a_tilde(j, i);
+
                 let chosen = Scalar::conditional_select(
                     &option_0,
                     &option_1,
                     Choice::from(j_bit as u8),
                 );
+
                 d_dot[j][i] = chosen
             }
+
             for k in 0..RHO {
-                let option_0 = Scalar::reduce(U256::from_be_bytes(
-                    self.receiver_extended_output.v_x[j][L_BATCH + k],
+                let option_0 = Scalar::reduce(U256::from_be_slice(
+                    &self.extended_output.v_x[j][L_BATCH + k],
                 ));
+
                 let option_1 =
                     option_0 + rvole_output.get_a_tilde(j, L_BATCH + k);
+
                 let chosen = Scalar::conditional_select(
                     &option_0,
                     &option_1,
                     Choice::from(j_bit as u8),
                 );
+
                 d_hat[j][k] = chosen
             }
         }
 
         // mu_prime hash
-        let mut t = Transcript::new(&RANDOM_VOLE_MU_LABEL);
-        t.append_message(b"session-id", &self.session_id);
+        let mut t = init_shake(&[
+            &RANDOM_VOLE_MU_LABEL,
+            b"session-id",
+            &self.session_id,
+        ]);
 
         #[allow(clippy::needless_range_loop)]
         for j in 0..XI {
-            let j_bit = self.beta.extract_bit(j);
+            let j_bit = self.extended_output.choices.extract_bit(j);
 
             for k in 0..RHO {
                 let mut v = d_hat[j][k];
@@ -205,33 +233,39 @@ impl RVOLEReceiver {
                 }
 
                 let option_0 = v;
+
                 let option_1 = option_0
-                    - Scalar::reduce(U256::from_be_bytes(
-                        rvole_output.eta[k],
+                    - Scalar::reduce(U256::from_be_slice(
+                        &rvole_output.eta[k],
                     ));
+
                 let chosen = Scalar::conditional_select(
                     &option_0,
                     &option_1,
                     Choice::from(j_bit as u8),
                 );
-                t.append_message(b"chosen", &chosen.to_bytes());
+
+                t.update(b"chosen");
+                t.update(chosen.to_bytes().as_slice());
             }
         }
 
-        let mut mu_prime_hash = [0u8; 64];
-        t.challenge_bytes(b"mu-hash", &mut mu_prime_hash);
+        let mut mu_prime_hash = [0u8; 2 * LAMBDA_C_BYTES];
+        t.update(b"mu-hash");
+        t.finalize_xof_into(&mut mu_prime_hash);
 
         if rvole_output.mu_hash.ct_ne(&mu_prime_hash).into() {
             return Err("Consistency check failed");
         }
 
         let mut d = [Scalar::ZERO; L_BATCH];
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..L_BATCH {
-            for (j, gv) in generate_gadget_vec(&self.session_id).enumerate() {
-                d[i] += gv * d_dot[j][i];
-            }
-        }
+        generate_gadget_vec(&self.session_id).enumerate().for_each(
+            |(j, gv)| {
+                for (i, d) in d.iter_mut().enumerate() {
+                    *d += gv * d_dot[j][i];
+                }
+            },
+        );
 
         Ok(d)
     }
@@ -255,76 +289,82 @@ impl RVOLESender {
         )?;
 
         let alpha_0 = |j: usize, i: usize| {
-            Scalar::reduce(U256::from_be_bytes(
-                sender_extended_output.v_0[j][i],
+            Scalar::reduce(U256::from_be_slice(
+                &sender_extended_output.v_0[j][i],
             ))
         };
 
         let alpha_1 = |j: usize, i: usize| {
-            Scalar::reduce(U256::from_be_bytes(
-                sender_extended_output.v_1[j][i],
+            Scalar::reduce(U256::from_be_slice(
+                &sender_extended_output.v_1[j][i],
             ))
         };
 
-        let c: [Scalar; L_BATCH] = array::from_fn(|i| {
-            generate_gadget_vec(session_id)
-                .enumerate()
-                .map(|(j, gv)| gv * alpha_0(j, i))
-                .sum::<Scalar>()
-                .negate()
-        });
+        let eta: [Scalar; RHO] =
+            array::from_fn(|_| Scalar::generate_biased(rng));
 
-        output.eta.iter_mut().for_each(|eta| {
-            *eta = Scalar::generate_biased(rng).to_bytes().into();
-        });
+        let mut t = init_shake(&[
+            &RANDOM_VOLE_THETA_LABEL,
+            b"session-id",
+            session_id,
+        ]);
 
-        let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
-        t.append_message(b"session-id", session_id);
+        for (j, a_tilde_j) in output.a_tilde.iter_mut().enumerate() {
+            t.update(b"row of a tilde");
+            t.update(&(j as u64).to_le_bytes());
 
-        for (j, a_tilde_j_ref) in output.a_tilde.iter_mut().enumerate() {
-            t.append_u64(b"row of a tilde", j as u64);
             for i in 0..L_BATCH {
                 let v = alpha_0(j, i) - alpha_1(j, i) + a[i];
-                a_tilde_j_ref[i] = v.to_bytes().into();
+                a_tilde_j[i] = v.to_bytes().into();
 
-                t.append_message(b"", &a_tilde_j_ref[i]);
+                t.update(&a_tilde_j[i]);
             }
 
-            for (k, eta) in output.eta.iter().enumerate() {
-                let v = alpha_0(j, L_BATCH + k) - alpha_1(j, L_BATCH + k)
-                    + Scalar::reduce(U256::from_be_bytes(*eta));
-                a_tilde_j_ref[L_BATCH + k] = v.to_bytes().into();
+            for (k, eta) in eta.iter().enumerate() {
+                let v =
+                    alpha_0(j, L_BATCH + k) - alpha_1(j, L_BATCH + k) + eta;
+                a_tilde_j[L_BATCH + k] = v.to_bytes().into();
 
-                t.append_message(b"", &a_tilde_j_ref[L_BATCH + k]);
+                t.update(&a_tilde_j[L_BATCH + k]);
             }
         }
+
+        let mut t_bytes = t.finalize_xof();
 
         let mut theta = [[Scalar::ZERO; L_BATCH]; RHO];
         #[allow(clippy::needless_range_loop)]
         for k in 0..RHO {
             for i in 0..L_BATCH {
-                t.append_u64(b"theta k", k as u64);
-                t.append_u64(b"theta i", i as u64);
+                let mut h_init = [0u8; 32];
+                t_bytes.read(&mut h_init);
+
+                let mut h = init_shake(&[&h_init]);
+
+                h.update(b"teta k");
+                h.update(&(k as u64).to_le_bytes());
+
+                h.update(b"teta i");
+                h.update(&(i as u64).to_le_bytes());
 
                 let mut digest = [0u8; 32];
-                t.challenge_bytes(b"theta", &mut digest);
+                h.finalize_xof_into(&mut digest);
 
                 theta[k][i] = Scalar::reduce(U256::from_be_bytes(digest));
             }
         }
 
-        for (k, eta) in output.eta.iter_mut().enumerate() {
-            let mut s = Scalar::reduce(U256::from_be_bytes(*eta));
-            s += theta[k]
-                .iter()
-                .zip(a)
-                .map(|(t_k_i, a_i)| t_k_i * a_i)
-                .sum::<Scalar>();
-            *eta = s.to_bytes().into();
+        for (k, eta) in eta.into_iter().enumerate() {
+            let s = eta
+                + theta[k]
+                    .iter()
+                    .zip(a)
+                    .map(|(t_k_i, a_i)| t_k_i * a_i)
+                    .sum::<Scalar>();
+            output.eta[k] = s.to_bytes().into();
         }
 
-        let mut t = Transcript::new(&RANDOM_VOLE_MU_LABEL);
-        t.append_message(b"session-id", session_id);
+        let mut t =
+            init_shake(&[&RANDOM_VOLE_MU_LABEL, b"session-id", session_id]);
 
         #[allow(clippy::needless_range_loop)]
         for j in 0..XI {
@@ -333,13 +373,25 @@ impl RVOLESender {
                 for i in 0..L_BATCH {
                     v += theta[k][i] * alpha_0(j, i)
                 }
-                t.append_message(b"chosen", &v.to_bytes());
+
+                t.update(b"chosen");
+                t.update(v.to_bytes().as_slice());
             }
         }
 
-        t.challenge_bytes(b"mu-hash", &mut output.mu_hash);
+        t.update(b"mu-hash");
+        t.finalize_xof_into(&mut output.mu_hash);
 
-        Ok(c)
+        let mut c = [Scalar::ZERO; L_BATCH];
+        generate_gadget_vec(session_id)
+            .enumerate()
+            .for_each(|(j, gv)| {
+                for (i, c) in c.iter_mut().enumerate() {
+                    *c += gv * alpha_0(j, i);
+                }
+            });
+
+        Ok(c.map(|v| v.negate()))
     }
 }
 
@@ -360,6 +412,7 @@ mod tests {
         let session_id: [u8; 32] = rng.gen();
 
         let mut round1_output = Round1Output::default();
+
         let (receiver, beta) = RVOLEReceiver::new(
             session_id,
             &sender_ot_seed,
