@@ -21,32 +21,27 @@ pub mod utils {
     use std::ops::Index;
 
     use elliptic_curve::{
-        bigint::Encoding, ops::Reduce, sec1::ToEncodedPoint, Scalar,
+        ff::PrimeField,
+        ops::Reduce,
+        sec1::{ModulusSize, ToEncodedPoint},
+        CurveArithmetic, FieldBytes,
     };
-    use k256::{ProjectivePoint, Secp256k1, U256};
     use merlin::Transcript;
 
     /// Custom extension trait for the merlin transcript.
-    pub trait TranscriptProtocol {
+    pub trait TranscriptProtocol<C: CurveArithmetic> {
         /// Append a point to the transcript.
         fn append_point(
             &mut self,
             label: &'static [u8],
-            point: &ProjectivePoint,
+            point: &C::ProjectivePoint,
         );
 
         /// Append a scalar to the transcript.
-        fn append_scalar(
-            &mut self,
-            label: &'static [u8],
-            scalar: &Scalar<Secp256k1>,
-        );
+        fn append_scalar(&mut self, label: &'static [u8], scalar: &C::Scalar);
 
         /// Get challenge as scalar from the transcript.
-        fn challenge_scalar(
-            &mut self,
-            label: &'static [u8],
-        ) -> Scalar<Secp256k1>;
+        fn challenge_scalar(&mut self, label: &'static [u8]) -> C::Scalar;
 
         /// New transcript for DLOG proof
         fn new_dlog_proof(
@@ -57,24 +52,27 @@ pub mod utils {
         ) -> Transcript;
     }
 
-    impl TranscriptProtocol for Transcript {
+    impl<C> TranscriptProtocol<C> for Transcript
+    where
+        C: CurveArithmetic,
+        C::FieldBytesSize: ModulusSize,
+        C::ProjectivePoint: ToEncodedPoint<C>,
+    {
         fn append_point(
             &mut self,
             label: &'static [u8],
-            point: &ProjectivePoint,
+            point: &C::ProjectivePoint,
         ) {
-            self.append_message(
-                label,
-                point.to_encoded_point(true).as_bytes(),
-            )
+            self.append_message(label, point.to_encoded_point(true).as_ref())
         }
 
         fn append_scalar(
             &mut self,
             label: &'static [u8],
-            scalar: &Scalar<Secp256k1>,
+            scalar: &C::Scalar,
         ) {
-            self.append_message(label, scalar.to_bytes().as_slice())
+            let bytes = scalar.to_repr();
+            self.append_message(label, bytes.as_ref())
         }
 
         fn new_dlog_proof(
@@ -91,14 +89,10 @@ pub mod utils {
             transcript
         }
 
-        fn challenge_scalar(
-            &mut self,
-            label: &'static [u8],
-        ) -> Scalar<Secp256k1> {
-            // TODO buf: FieldBytes
-            let mut buf = [0u8; 32];
+        fn challenge_scalar(&mut self, label: &'static [u8]) -> C::Scalar {
+            let mut buf = FieldBytes::<C>::default();
             self.challenge_bytes(label, &mut buf);
-            Scalar::<Secp256k1>::reduce(U256::from_be_bytes(buf))
+            C::Scalar::reduce_bytes(&buf)
         }
     }
 

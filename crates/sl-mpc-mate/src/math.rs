@@ -292,7 +292,7 @@ pub fn factorial_range<S: PrimeField>(start: usize, end: usize) -> S {
         return S::from(FACT[end] / FACT[start]);
     }
 
-    (start + 1..=end).fold(S::from(1_u64), |acc, x| acc * S::from(x as u64))
+    (start + 1..=end).fold(S::ONE, |acc, x| acc * S::from(x as u64))
 }
 
 /// Feldman verification

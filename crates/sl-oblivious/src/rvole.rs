@@ -10,19 +10,17 @@
 //! lambda_c = 256
 //! l = 2, rho = 1, OT_WIDTH = l + rho = 3
 
-use std::array;
+use std::{array, ops::Neg};
 
-use merlin::Transcript;
-
-use k256::{
-    elliptic_curve::{
-        bigint::Encoding,
-        ops::Reduce,
-        rand_core::CryptoRngCore,
-        subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
-    },
-    Scalar, U256,
+use elliptic_curve::{
+    consts::U32,
+    ff::Field,
+    ops::Reduce,
+    rand_core::CryptoRngCore,
+    subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
+    CurveArithmetic, FieldBytes, FieldBytesEncoding, PrimeField,
 };
+use merlin::Transcript;
 
 use crate::{
     constants::{
@@ -39,17 +37,31 @@ use crate::{
 
 const XI: usize = L; // by definition
 
-fn generate_gadget_vec(session_id: &[u8]) -> impl Iterator<Item = Scalar> {
+#[inline]
+fn decode_scalar<C>(bytes: &[u8]) -> C::Scalar
+where
+    C: CurveArithmetic<FieldBytesSize = U32>,
+{
+    let bytes = FieldBytes::<C>::from_slice(bytes);
+    C::Scalar::reduce(C::Uint::decode_field_bytes(bytes))
+}
+
+fn generate_gadget_vec<C>(
+    session_id: &[u8],
+) -> impl Iterator<Item = C::Scalar>
+where
+    C: CurveArithmetic<FieldBytesSize = U32>,
+{
     let mut t = Transcript::new(&RANDOM_VOLE_GADGET_VECTOR_LABEL);
     t.append_message(b"session-id", session_id);
 
     (0..XI).map(move |i| {
         t.append_u64(b"index", i as u64);
 
-        let mut repr = [0u8; KAPPA_BYTES];
+        let mut repr = FieldBytes::<C>::default();
         t.challenge_bytes(b"next value", &mut repr);
 
-        Scalar::reduce(U256::from_be_bytes(repr))
+        decode_scalar::<C>(&repr)
     })
 }
 
@@ -63,8 +75,11 @@ pub struct RVOLEOutput {
 }
 
 impl RVOLEOutput {
-    fn get_a_tilde(&self, j: usize, i: usize) -> Scalar {
-        Scalar::reduce(U256::from_be_bytes(self.a_tilde[j][i]))
+    fn get_a_tilde<C>(&self, j: usize, i: usize) -> C::Scalar
+    where
+        C: CurveArithmetic<FieldBytesSize = U32>,
+    {
+        decode_scalar::<C>(&self.a_tilde[j][i])
     }
 }
 
@@ -88,23 +103,26 @@ pub struct RVOLEReceiver {
 
 impl RVOLEReceiver {
     /// Create a new RVOLE receiver
-    pub fn new<R: CryptoRngCore>(
+    pub fn new<C, R: CryptoRngCore>(
         session_id: [u8; 32],
         seed_ot_results: &SenderOTSeed,
         round1_output: &mut Round1Output,
         rng: &mut R,
-    ) -> (Box<RVOLEReceiver>, Scalar) {
+    ) -> (Box<RVOLEReceiver>, C::Scalar)
+    where
+        C: CurveArithmetic<FieldBytesSize = U32>,
+    {
         let mut beta = [0u8; L_BYTES];
         rng.fill_bytes(&mut beta);
 
         // b = <g, /beta>
-        let b = generate_gadget_vec(&session_id).enumerate().fold(
-            Scalar::ZERO,
+        let b = generate_gadget_vec::<C>(&session_id).enumerate().fold(
+            C::Scalar::ZERO,
             |option_0, (i, gv)| {
                 let i_bit = beta.extract_bit(i);
                 let option_1 = option_0 + gv;
 
-                Scalar::conditional_select(
+                C::Scalar::conditional_select(
                     &option_0,
                     &option_1,
                     Choice::from(i_bit as u8),
@@ -131,10 +149,13 @@ impl RVOLEReceiver {
 }
 
 impl RVOLEReceiver {
-    pub fn process(
+    pub fn process<C>(
         &self,
         rvole_output: &RVOLEOutput,
-    ) -> Result<[Scalar; L_BATCH], &'static str> {
+    ) -> Result<[C::Scalar; L_BATCH], &'static str>
+    where
+        C: CurveArithmetic<FieldBytesSize = U32>,
+    {
         let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
         t.append_message(b"session-id", &self.session_id);
 
@@ -145,7 +166,7 @@ impl RVOLEReceiver {
             }
         }
 
-        let mut theta = [[Scalar::ZERO; L_BATCH]; RHO];
+        let mut theta = [[C::Scalar::ZERO; L_BATCH]; RHO];
         #[allow(clippy::needless_range_loop)]
         for k in 0..RHO {
             for i in 0..L_BATCH {
@@ -154,21 +175,21 @@ impl RVOLEReceiver {
 
                 let mut digest = [0u8; KAPPA_BYTES];
                 t.challenge_bytes(b"theta", digest.as_mut());
-                theta[k][i] = Scalar::reduce(U256::from_be_bytes(digest));
+                theta[k][i] = decode_scalar::<C>(&digest);
             }
         }
 
-        let mut d_dot = [[Scalar::ZERO; L_BATCH]; XI];
-        let mut d_hat = [[Scalar::ZERO; RHO]; XI];
+        let mut d_dot = [[C::Scalar::ZERO; L_BATCH]; XI];
+        let mut d_hat = [[C::Scalar::ZERO; RHO]; XI];
 
         for j in 0..XI {
             let j_bit = self.beta.extract_bit(j);
             for i in 0..L_BATCH {
-                let option_0 = Scalar::reduce(U256::from_be_bytes(
-                    self.receiver_extended_output.v_x[j][i],
-                ));
-                let option_1 = option_0 + rvole_output.get_a_tilde(j, i);
-                let chosen = Scalar::conditional_select(
+                let option_0 = decode_scalar::<C>(
+                    &self.receiver_extended_output.v_x[j][i],
+                );
+                let option_1 = option_0 + rvole_output.get_a_tilde::<C>(j, i);
+                let chosen = C::Scalar::conditional_select(
                     &option_0,
                     &option_1,
                     Choice::from(j_bit as u8),
@@ -176,12 +197,12 @@ impl RVOLEReceiver {
                 d_dot[j][i] = chosen
             }
             for k in 0..RHO {
-                let option_0 = Scalar::reduce(U256::from_be_bytes(
-                    self.receiver_extended_output.v_x[j][L_BATCH + k],
-                ));
+                let option_0 = decode_scalar::<C>(
+                    &self.receiver_extended_output.v_x[j][L_BATCH + k],
+                );
                 let option_1 =
-                    option_0 + rvole_output.get_a_tilde(j, L_BATCH + k);
-                let chosen = Scalar::conditional_select(
+                    option_0 + rvole_output.get_a_tilde::<C>(j, L_BATCH + k);
+                let chosen = C::Scalar::conditional_select(
                     &option_0,
                     &option_1,
                     Choice::from(j_bit as u8),
@@ -205,16 +226,14 @@ impl RVOLEReceiver {
                 }
 
                 let option_0 = v;
-                let option_1 = option_0
-                    - Scalar::reduce(U256::from_be_bytes(
-                        rvole_output.eta[k],
-                    ));
-                let chosen = Scalar::conditional_select(
+                let option_1 =
+                    option_0 - decode_scalar::<C>(&rvole_output.eta[k]);
+                let chosen = C::Scalar::conditional_select(
                     &option_0,
                     &option_1,
                     Choice::from(j_bit as u8),
                 );
-                t.append_message(b"chosen", &chosen.to_bytes());
+                t.append_message(b"chosen", &chosen.to_repr());
             }
         }
 
@@ -225,10 +244,12 @@ impl RVOLEReceiver {
             return Err("Consistency check failed");
         }
 
-        let mut d = [Scalar::ZERO; L_BATCH];
+        let mut d = [C::Scalar::ZERO; L_BATCH];
         #[allow(clippy::needless_range_loop)]
         for i in 0..L_BATCH {
-            for (j, gv) in generate_gadget_vec(&self.session_id).enumerate() {
+            for (j, gv) in
+                generate_gadget_vec::<C>(&self.session_id).enumerate()
+            {
                 d[i] += gv * d_dot[j][i];
             }
         }
@@ -240,14 +261,17 @@ impl RVOLEReceiver {
 pub struct RVOLESender;
 
 impl RVOLESender {
-    pub fn process<R: CryptoRngCore>(
+    pub fn process<C, R: CryptoRngCore>(
         session_id: &[u8],
         seed_ot_results: &ReceiverOTSeed,
-        a: &[Scalar; L_BATCH],
+        a: &[C::Scalar; L_BATCH],
         round1_output: &Round1Output,
         output: &mut RVOLEOutput,
         rng: &mut R,
-    ) -> Result<[Scalar; L_BATCH], SoftSpokenOTError> {
+    ) -> Result<[C::Scalar; L_BATCH], SoftSpokenOTError>
+    where
+        C: CurveArithmetic<FieldBytesSize = U32>,
+    {
         let sender_extended_output = SoftSpokenOTSender::process(
             session_id,
             seed_ot_results,
@@ -255,27 +279,23 @@ impl RVOLESender {
         )?;
 
         let alpha_0 = |j: usize, i: usize| {
-            Scalar::reduce(U256::from_be_bytes(
-                sender_extended_output.v_0[j][i],
-            ))
+            decode_scalar::<C>(&sender_extended_output.v_0[j][i])
         };
 
         let alpha_1 = |j: usize, i: usize| {
-            Scalar::reduce(U256::from_be_bytes(
-                sender_extended_output.v_1[j][i],
-            ))
+            decode_scalar::<C>(&sender_extended_output.v_1[j][i])
         };
 
-        let c: [Scalar; L_BATCH] = array::from_fn(|i| {
-            generate_gadget_vec(session_id)
+        let c: [C::Scalar; L_BATCH] = array::from_fn(|i| {
+            generate_gadget_vec::<C>(session_id)
                 .enumerate()
                 .map(|(j, gv)| gv * alpha_0(j, i))
-                .sum::<Scalar>()
-                .negate()
+                .sum::<C::Scalar>()
+                .neg()
         });
 
         output.eta.iter_mut().for_each(|eta| {
-            *eta = Scalar::generate_biased(rng).to_bytes().into();
+            *eta = C::Scalar::random(&mut *rng).to_repr().into();
         });
 
         let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
@@ -285,21 +305,21 @@ impl RVOLESender {
             t.append_u64(b"row of a tilde", j as u64);
             for i in 0..L_BATCH {
                 let v = alpha_0(j, i) - alpha_1(j, i) + a[i];
-                a_tilde_j_ref[i] = v.to_bytes().into();
+                a_tilde_j_ref[i] = v.to_repr().into();
 
                 t.append_message(b"", &a_tilde_j_ref[i]);
             }
 
             for (k, eta) in output.eta.iter().enumerate() {
                 let v = alpha_0(j, L_BATCH + k) - alpha_1(j, L_BATCH + k)
-                    + Scalar::reduce(U256::from_be_bytes(*eta));
-                a_tilde_j_ref[L_BATCH + k] = v.to_bytes().into();
+                    + decode_scalar::<C>(eta);
+                a_tilde_j_ref[L_BATCH + k] = v.to_repr().into();
 
                 t.append_message(b"", &a_tilde_j_ref[L_BATCH + k]);
             }
         }
 
-        let mut theta = [[Scalar::ZERO; L_BATCH]; RHO];
+        let mut theta = [[C::Scalar::ZERO; L_BATCH]; RHO];
         #[allow(clippy::needless_range_loop)]
         for k in 0..RHO {
             for i in 0..L_BATCH {
@@ -309,18 +329,18 @@ impl RVOLESender {
                 let mut digest = [0u8; 32];
                 t.challenge_bytes(b"theta", &mut digest);
 
-                theta[k][i] = Scalar::reduce(U256::from_be_bytes(digest));
+                theta[k][i] = decode_scalar::<C>(&digest);
             }
         }
 
         for (k, eta) in output.eta.iter_mut().enumerate() {
-            let mut s = Scalar::reduce(U256::from_be_bytes(*eta));
+            let mut s = decode_scalar::<C>(eta);
             s += theta[k]
                 .iter()
                 .zip(a)
-                .map(|(t_k_i, a_i)| t_k_i * a_i)
-                .sum::<Scalar>();
-            *eta = s.to_bytes().into();
+                .map(|(&t_k_i, &a_i)| t_k_i * a_i)
+                .sum::<C::Scalar>();
+            *eta = s.to_repr().into();
         }
 
         let mut t = Transcript::new(&RANDOM_VOLE_MU_LABEL);
@@ -333,7 +353,7 @@ impl RVOLESender {
                 for i in 0..L_BATCH {
                     v += theta[k][i] * alpha_0(j, i)
                 }
-                t.append_message(b"chosen", &v.to_bytes());
+                t.append_message(b"chosen", &v.to_repr());
             }
         }
 
@@ -350,8 +370,10 @@ mod tests {
 
     use crate::soft_spoken::generate_all_but_one_seed_ot;
 
-    #[test]
-    fn pairwise() {
+    fn pairwise<C>()
+    where
+        C: CurveArithmetic<FieldBytesSize = U32>,
+    {
         let mut rng = rand::thread_rng();
 
         let (sender_ot_seed, receiver_ot_seed) =
@@ -360,21 +382,19 @@ mod tests {
         let session_id: [u8; 32] = rng.gen();
 
         let mut round1_output = Round1Output::default();
-        let (receiver, beta) = RVOLEReceiver::new(
+        let (receiver, beta) = RVOLEReceiver::new::<C, _>(
             session_id,
             &sender_ot_seed,
             &mut round1_output,
             &mut rng,
         );
 
-        let (alpha1, alpha2) = (
-            Scalar::generate_biased(&mut rng),
-            Scalar::generate_biased(&mut rng),
-        );
+        let (alpha1, alpha2) =
+            (C::Scalar::random(&mut rng), C::Scalar::random(&mut rng));
 
         let mut round2_output = Default::default();
 
-        let sender_shares = RVOLESender::process(
+        let sender_shares = RVOLESender::process::<C, _>(
             &session_id,
             &receiver_ot_seed,
             &[alpha1, alpha2],
@@ -384,12 +404,22 @@ mod tests {
         )
         .unwrap();
 
-        let receiver_shares = receiver.process(&round2_output).unwrap();
+        let receiver_shares = receiver.process::<C>(&round2_output).unwrap();
 
         let sum_0 = receiver_shares[0] + sender_shares[0];
         let sum_1 = receiver_shares[1] + sender_shares[1];
 
         assert_eq!(sum_0, alpha1 * beta);
         assert_eq!(sum_1, alpha2 * beta);
+    }
+
+    #[test]
+    fn pairwise_secp256k1() {
+        pairwise::<k256::Secp256k1>()
+    }
+
+    #[test]
+    fn pairwise_spec256r1() {
+        pairwise::<p256::NistP256>()
     }
 }

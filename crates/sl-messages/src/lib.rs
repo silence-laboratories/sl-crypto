@@ -21,7 +21,9 @@ pub mod encrypted {
             Scheme as DefaultEncryptionScheme,
         },
         scheme::aead::AeadX25519Builder,
-        scheme::passthrough::{PassThroughEncryption, PassThroughEncryptionBuilder},
+        scheme::passthrough::{
+            PassThroughEncryption, PassThroughEncryptionBuilder,
+        },
         scheme::{
             EncryptionError, EncryptionScheme, EncryptionSchemeBuilder,
             PublicKeyError,

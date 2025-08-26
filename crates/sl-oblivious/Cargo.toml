@@ -17,5 +17,8 @@ bytemuck = { version = "1.14.1", features = [ "derive", "min_const_generics", "e
 serde = { version = "1", optional = true }
 serde_arrays = { version = "0.1", optional = true }
 
+[dev-dependencies]
+p256 = { version = "0.13" }
+
 [features]
 serde = [ "dep:serde", "serde_arrays", "serde/derive", "k256/serde" ]
