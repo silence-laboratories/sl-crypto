@@ -1,9 +1,6 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-#![allow(dead_code)]
-
-
 use crate::proto::encrypted::MessageKey;
 
 pub mod aead;

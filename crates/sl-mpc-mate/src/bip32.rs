@@ -4,11 +4,13 @@
 use base64::{engine::general_purpose, Engine as _};
 use bs58::Alphabet;
 use derivation_path::{ChildIndex, DerivationPath};
-use hmac::{Hmac, Mac};
-use k256::{
-    elliptic_curve::{ops::Reduce, sec1::ToEncodedPoint, Curve},
-    ProjectivePoint, Scalar, Secp256k1, U256,
+use elliptic_curve::{
+    consts::U32,
+    ops::Reduce,
+    sec1::{ModulusSize, ToEncodedPoint},
+    CurveArithmetic, FieldBytesEncoding, Group,
 };
+use hmac::{Hmac, Mac};
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -66,7 +68,7 @@ impl From<[u8; 4]> for Prefix {
 
 /// Extended public key
 #[derive(Clone, Debug)]
-pub struct XPubKey {
+pub struct XPubKey<C: CurveArithmetic> {
     /// Prefix (version) as a 4-byte integer
     pub prefix: Prefix,
     /// Parent fingerprint
@@ -74,19 +76,17 @@ pub struct XPubKey {
     /// Child number
     pub child_number: u32,
     /// Public key
-    pub pubkey: ProjectivePoint,
+    pub pubkey: C::ProjectivePoint,
     /// Root chain code
     pub chain_code: [u8; 32],
     /// Depth
     pub depth: u8,
 }
 
-fn base58_encode(serialized: [u8; 78]) -> String {
-    let checksum: [u8; 4] = Sha256::digest(Sha256::digest(serialized))[..4]
-        .try_into()
-        .unwrap();
+fn base58_encode(serialized: &[u8; 78]) -> String {
+    let checksum = &Sha256::digest(Sha256::digest(serialized))[..4];
 
-    let serialized = [&serialized, checksum.as_slice()].concat();
+    let serialized = [serialized, checksum].concat();
     bs58::encode(serialized)
         .with_alphabet(Alphabet::BITCOIN)
         .into_string()
@@ -109,7 +109,12 @@ pub enum BIP32Error {
     InvalidChildScalar,
 }
 
-impl XPubKey {
+impl<C> XPubKey<C>
+where
+    C: CurveArithmetic<FieldBytesSize = U32>,
+    C::FieldBytesSize: ModulusSize,
+    C::ProjectivePoint: ToEncodedPoint<C>,
+{
     /// Serialize to string
     /// # Arguments
     /// * `encoded` - If true, the string will be encoded to Base58 with checksum (like Bitcoin addresses)
@@ -129,7 +134,7 @@ impl XPubKey {
         );
 
         if encoded {
-            base58_encode(serialized)
+            base58_encode(&serialized)
         } else {
             hex::encode(serialized)
         }
@@ -137,11 +142,16 @@ impl XPubKey {
 }
 
 /// Derive a child public key from a parent public key and a parent chain code
-pub fn derive_child_pubkey(
-    parent_pubkey: &ProjectivePoint,
+pub fn derive_child_pubkey<C>(
+    parent_pubkey: &C::ProjectivePoint,
     parent_chain_code: [u8; 32],
     child_number: &ChildIndex,
-) -> Result<(Scalar, ProjectivePoint, [u8; 32]), BIP32Error> {
+) -> Result<(C::Scalar, C::ProjectivePoint, [u8; 32]), BIP32Error>
+where
+    C: CurveArithmetic<FieldBytesSize = U32>,
+    C::FieldBytesSize: ModulusSize,
+    C::ProjectivePoint: ToEncodedPoint<C>,
+{
     let mut hmac_hasher =
         Hmac::<sha2::Sha512>::new_from_slice(&parent_chain_code)
             .map_err(|_| BIP32Error::InvalidChainCode)?;
@@ -155,31 +165,37 @@ pub fn derive_child_pubkey(
     hmac_hasher.update(&child_number.to_bits().to_be_bytes());
     let result = hmac_hasher.finalize().into_bytes();
     let (il_int, child_chain_code) = result.split_at(KEY_SIZE);
-    let il_int = U256::from_be_slice(il_int);
+    let il_int = C::Uint::decode_field_bytes(il_int.into());
 
     // Has a chance of 1 in 2^127
-    if il_int > Secp256k1::ORDER {
+    if il_int > C::ORDER {
         return Err(BIP32Error::InvalidChildScalar);
     }
 
-    let pubkey = ProjectivePoint::GENERATOR * Scalar::reduce(il_int);
+    let child_offset = C::Scalar::reduce(il_int);
+    let pubkey = C::ProjectivePoint::generator() * child_offset;
 
     let child_pubkey = pubkey + parent_pubkey;
 
     // Return error if child pubkey is the point at infinity
-    if child_pubkey == ProjectivePoint::IDENTITY {
+    if child_pubkey == C::ProjectivePoint::identity() {
         return Err(BIP32Error::PubkeyPointAtInfinity);
     }
 
     Ok((
-        Scalar::reduce(il_int),
+        child_offset,
         child_pubkey,
         child_chain_code.try_into().unwrap(),
     ))
 }
 
 /// Get the fingerprint of the root public key
-pub fn get_finger_print(public_key: &ProjectivePoint) -> KeyFingerPrint {
+pub fn get_finger_print<C>(public_key: &C::ProjectivePoint) -> KeyFingerPrint
+where
+    C: CurveArithmetic<FieldBytesSize = U32>,
+    C::FieldBytesSize: ModulusSize,
+    C::ProjectivePoint: ToEncodedPoint<C>,
+{
     let pubkey_bytes: [u8; 33] = public_key
         .to_encoded_point(true)
         .as_bytes()
@@ -197,10 +213,15 @@ pub fn get_finger_print(public_key: &ProjectivePoint) -> KeyFingerPrint {
 /// * `root_chain_code` - Root chain code (32 bytes)
 /// # Returns
 /// * `key_id` - Base64 encoded string
-pub fn generate_key_id(
-    root_pubkey: &ProjectivePoint,
+pub fn generate_key_id<C>(
+    root_pubkey: &C::ProjectivePoint,
     root_chain_code: [u8; 32],
-) -> String {
+) -> String
+where
+    C: CurveArithmetic,
+    C::FieldBytesSize: ModulusSize,
+    C::ProjectivePoint: ToEncodedPoint<C>,
+{
     let id = sha2::Sha256::new()
         .chain_update(root_pubkey.to_encoded_point(true).as_bytes().as_ref())
         .chain_update(root_chain_code)
@@ -216,15 +237,20 @@ pub fn generate_key_id(
 ///
 /// # Returns
 /// * `XPubKey` - Extended public key
-pub fn derive_xpub(
+pub fn derive_xpub<C>(
     prefix: Prefix,
-    root_public_key: &ProjectivePoint,
+    root_public_key: &C::ProjectivePoint,
     root_chain_code: [u8; 32],
     chain_path: DerivationPath,
-) -> Result<XPubKey, BIP32Error> {
+) -> Result<XPubKey<C>, BIP32Error>
+where
+    C: CurveArithmetic<FieldBytesSize = U32>,
+    C::FieldBytesSize: ModulusSize,
+    C::ProjectivePoint: ToEncodedPoint<C>,
+{
     let mut pubkey = *root_public_key;
     let mut chain_code = root_chain_code;
-    let mut parent_fingerprint: [u8; 4] = [0u8; 4];
+    let mut parent_fingerprint = [0u8; 4];
 
     let path = chain_path.path();
 
@@ -237,9 +263,9 @@ pub fn derive_xpub(
     };
 
     for child_num in path {
-        parent_fingerprint = get_finger_print(&pubkey);
+        parent_fingerprint = get_finger_print::<C>(&pubkey);
         let (_, child_pubkey, child_chain_code) =
-            derive_child_pubkey(&pubkey, chain_code, child_num)?;
+            derive_child_pubkey::<C>(&pubkey, chain_code, child_num)?;
         pubkey = child_pubkey;
         chain_code = child_chain_code;
     }
@@ -256,6 +282,8 @@ pub fn derive_xpub(
 
 #[cfg(test)]
 mod tests {
+    use k256::{ProjectivePoint, Scalar, Secp256k1};
+
     use super::*;
 
     fn setup() -> (ProjectivePoint, [u8; 32]) {
@@ -273,7 +301,7 @@ mod tests {
     fn test_derive_base() {
         let (root_public_key, root_chain_code) = setup();
 
-        let xpub = derive_xpub(
+        let xpub = derive_xpub::<Secp256k1>(
             Prefix::XPub,
             &root_public_key,
             root_chain_code,
@@ -299,7 +327,7 @@ mod tests {
     fn test_derive_level_1() {
         let (root_public_key, root_chain_code) = setup();
 
-        let xpub = derive_xpub(
+        let xpub = derive_xpub::<Secp256k1>(
             Prefix::XPub,
             &root_public_key,
             root_chain_code,
@@ -311,7 +339,7 @@ mod tests {
         assert_eq!(xpub.child_number, 0);
         assert_eq!(xpub.depth, 1);
 
-        let xpub = derive_xpub(
+        let xpub = derive_xpub::<Secp256k1>(
             Prefix::XPub,
             &root_public_key,
             root_chain_code,
@@ -323,7 +351,7 @@ mod tests {
         assert_eq!(xpub.child_number, 1);
         assert_eq!(xpub.depth, 1);
 
-        let xpub = derive_xpub(
+        let xpub = derive_xpub::<Secp256k1>(
             Prefix::XPub,
             &root_public_key,
             root_chain_code,
@@ -340,7 +368,7 @@ mod tests {
     fn test_derive_level_3() {
         let (root_public_key, root_chain_code) = setup();
 
-        let xpub = derive_xpub(
+        let xpub = derive_xpub::<Secp256k1>(
             Prefix::XPub,
             &root_public_key,
             root_chain_code,
@@ -352,7 +380,7 @@ mod tests {
         assert_eq!(xpub.child_number, 2);
         assert_eq!(xpub.depth, 3);
 
-        let xpub = derive_xpub(
+        let xpub = derive_xpub::<Secp256k1>(
             Prefix::XPub,
             &root_public_key,
             root_chain_code,
@@ -364,7 +392,7 @@ mod tests {
         assert_eq!(xpub.child_number, 5);
         assert_eq!(xpub.depth, 3);
 
-        let xpub = derive_xpub(
+        let xpub = derive_xpub::<Secp256k1>(
             Prefix::XPub,
             &root_public_key,
             root_chain_code,
@@ -382,7 +410,7 @@ mod tests {
     fn test_fail_hardended() {
         let (root_public_key, root_chain_code) = setup();
 
-        derive_xpub(
+        derive_xpub::<Secp256k1>(
             Prefix::XPub,
             &root_public_key,
             root_chain_code,
@@ -396,7 +424,7 @@ mod tests {
     fn test_fail_hardened_index() {
         let (root_public_key, root_chain_code) = setup();
 
-        derive_xpub(
+        derive_xpub::<Secp256k1>(
             Prefix::XPub,
             &root_public_key,
             root_chain_code,

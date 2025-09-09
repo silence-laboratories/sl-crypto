@@ -57,7 +57,6 @@ pub struct AeadX25519Builder<S> {
 /// The implementation of EncryptionScheme that uses x25519 for key
 /// exchange and any implementation of `AeadInPlace`.
 pub struct AeadX25519<S> {
-    secret: ReusableSecret,
     public_key: PublicKey,
     counter: NonceCounter,
     pk: Pairs<(SharedKey, PublicKey), usize>,
@@ -132,7 +131,6 @@ where
 
     fn build(self) -> Self::Scheme {
         Self::Scheme {
-            secret: self.secret,
             public_key: self.public_key,
             counter: NonceCounter::new(),
             pk: self.pk,

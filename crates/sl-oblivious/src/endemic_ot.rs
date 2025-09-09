@@ -1,23 +1,24 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use elliptic_curve::{Field, Group};
-use std::array;
-use std::hint::black_box;
+use std::{array, hint::black_box, ops::Neg};
 
+use elliptic_curve::{group::GroupEncoding, Field, Group};
+use k256::{ProjectivePoint, Scalar};
 use merlin::Transcript;
 use rand::prelude::*;
 
 use crate::{
     constants::ENDEMIC_OT_LABEL, params::consts::*, utils::ExtractBit,
 };
-use k256::{elliptic_curve::group::GroupEncoding, ProjectivePoint, Scalar};
-use std::ops::Neg;
 
 const POINT_BYTES_SIZE: usize = 33;
 
-/// External representation of a point on a curve
-pub type PointBytes = [u8; POINT_BYTES_SIZE];
+// External representation of a point on a curve
+//
+// k256 is implementation detail here
+//
+type PointBytes = [u8; POINT_BYTES_SIZE];
 
 /// EndemicOT Message 1
 #[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]

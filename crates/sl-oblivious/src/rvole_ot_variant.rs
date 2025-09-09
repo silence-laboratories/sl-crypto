@@ -13,17 +13,14 @@
 
 use std::array;
 
-use merlin::Transcript;
-
-use k256::{
-    elliptic_curve::{
-        bigint::Encoding,
-        ops::Reduce,
-        rand_core::CryptoRngCore,
-        subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
-    },
-    Scalar, U256,
+use elliptic_curve::{
+    bigint::Encoding,
+    ops::Reduce,
+    rand_core::CryptoRngCore,
+    subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
 };
+use k256::{Scalar, U256};
+use merlin::Transcript;
 
 use crate::endemic_ot::{
     EndemicOTMsg1, EndemicOTMsg2, EndemicOTReceiver, EndemicOTSender,
