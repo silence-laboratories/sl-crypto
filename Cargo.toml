@@ -8,7 +8,7 @@ members = [
     "crates/sl-verifiable-enc",
     "crates/sl-messages",
     "crates/sl-shamir",
-    "crates/sl-compute",
+    "crates/sl-compute-common",
 ]
 
 [profile.bench]
