@@ -1011,3 +1011,22 @@ impl ServerState {
         }
     }
 }
+pub fn binary_string_to_u8_vec(input: BinaryString) -> Vec<u8> {
+    let mut vec_u8 = Vec::new();
+    let mut byte = 0u8;
+
+    for i in 0..(input.length as usize) {
+        if input.get(i) {
+            byte |= 1 << (7 - (i % 8));
+        }
+        if i % 8 == 7 {
+            vec_u8.push(byte);
+            byte = 0;
+        }
+    }
+    if input.length % 8 != 0 {
+        vec_u8.push(byte);
+    }
+
+    vec_u8
+}
