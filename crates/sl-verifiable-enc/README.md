@@ -11,13 +11,14 @@ We use the verifiable encryption scheme from https://eprint.iacr.org/1999/008
 
 ## Installation
 Add the following to your cargo.toml file in order to use the crate
-```
+```toml
 [dependencies]
 sl-verifiable-enc = { version = "0.1.0", registry = "silencelaboratories" }
 ```
 
 Add a config.toml file under ```your_project_dir/.cargo/config.toml``` with the following content:
-```
+
+```toml
 [registries]
 silencelaboratories = { index = "ssh://git@ssh.shipyard.rs/silencelaboratories/crate-index.git" }
 
