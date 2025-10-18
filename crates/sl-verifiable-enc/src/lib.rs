@@ -133,6 +133,7 @@ where
         label: &[u8],
     ) -> Result<(), RsaError> {
         let challenge = Self::challenge(q_point, label, &self.proofs);
+        let mut verified = Choice::from(1u8);
         for i in 0..self.security_param {
             let proof = &self.proofs[i];
             let open_scalar = &self.open_scalars[i];
@@ -146,10 +147,12 @@ where
             )?;
 
             let g_r_option = G::from_bytes(&proof.g_r);
+            verified &= g_r_option.is_some();
+
             let g_r = if g_r_option.is_some().unwrap_u8() == 1 {
                 g_r_option.unwrap()
             } else {
-                return Err(RsaError::VerificationFailed);
+                G::identity()
             };
 
             // If choice bit is 0
@@ -166,14 +169,17 @@ where
                 cond1 & cond2
             };
 
-            let verified =
-                Choice::conditional_select(&cond_a, &cond_b, choice_bit)
-                    .unwrap_u8();
-            if verified != 1 {
-                return Err(RsaError::VerificationFailed);
-            }
+            let is_valid_proof =
+                Choice::conditional_select(&cond_a, &cond_b, choice_bit);
+
+            verified &= is_valid_proof;
         }
-        Ok(())
+
+        if bool::from(verified) {
+            Ok(())
+        } else {
+            Err(RsaError::VerificationFailed)
+        }
     }
 
     pub fn decrypt(
@@ -603,6 +609,147 @@ mod tests {
         assert_eq!(private_key, decrypted_x);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_verify_fails_wrong_public_key() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+
+        let wrong_private_key = Scalar::generate_vartime(&mut rng);
+        let wrong_public_key = ProjectivePoint::GENERATOR * wrong_private_key;
+
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+
+        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            proof.verify(&wrong_public_key, &rsa_public_key, b"label"),
+            Err(RsaError::VerificationFailed)
+        ));
+    }
+
+    #[test]
+    fn test_verify_fails_wrong_label() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+        let public_key = ProjectivePoint::GENERATOR * private_key;
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+
+        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            proof.verify(&public_key, &rsa_public_key, b"wrong-label"),
+            Err(RsaError::VerificationFailed)
+        ));
+    }
+
+    #[test]
+    fn test_verify_fails_tampered_proof() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+        let public_key = ProjectivePoint::GENERATOR * private_key;
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+
+        let mut proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        proof.proofs[0].enc_r[0] ^= 1;
+
+        assert!(matches!(
+            proof.verify(&public_key, &rsa_public_key, b"label"),
+            Err(RsaError::VerificationFailed)
+        ));
+    }
+
+    #[test]
+    fn test_decrypt_fails_wrong_public_point() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+        let public_key = ProjectivePoint::GENERATOR * private_key;
+        let wrong_public_key =
+            ProjectivePoint::GENERATOR * Scalar::generate_vartime(&mut rng);
+
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+
+        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        proof
+            .verify(&public_key, &rsa_public_key, b"label")
+            .unwrap();
+
+        assert!(matches!(
+            proof.decrypt(&wrong_public_key, &rsa_private_key, b"label"),
+            Err(RsaError::DecError)
+        ));
+    }
+
+    #[test]
+    fn test_decrypt_fails_wrong_rsa_key() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+        let public_key = ProjectivePoint::GENERATOR * private_key;
+
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+        let wrong_rsa_private_key =
+            RsaPrivateKey::new(&mut rng, 2048).unwrap();
+
+        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            proof.decrypt(&public_key, &wrong_rsa_private_key, b"label"),
+            Err(RsaError::DecError)
+        ));
+    }
+
+    #[test]
+    fn test_serde_fails_corrupted_data() {
+        let corrupted = vec![0u8; 100];
+        assert!(matches!(
+            VerifiableRsaEncryption::<ProjectivePoint>::from_bytes(
+                &corrupted
+            ),
+            Err(RsaError::SerdeError(_))
+        ));
     }
 
     #[test]
