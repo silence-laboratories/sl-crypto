@@ -13,8 +13,7 @@ use num_bigint_dig::ModInverse;
 use rand::{Rng, SeedableRng};
 use rand_chacha::{rand_core::CryptoRngCore, ChaCha20Rng};
 use rsa::{
-    traits::PublicKeyParts, BigUint, Pkcs1v15Encrypt, RsaPrivateKey,
-    RsaPublicKey,
+    traits::PublicKeyParts, BigUint, Oaep, RsaPrivateKey, RsaPublicKey,
 };
 use sha2::{Digest, Sha256};
 use std::ops::Index;
@@ -390,8 +389,9 @@ fn rsa_encrypt_with_label(
     let m_int = BigUint::from_bytes_be(m.as_ref());
     let label_int = label_int_from_bytes(label);
     let plaintext = (m_int * label_int) % rsa_pubkey.n();
+    let padding = Oaep::new::<Sha256>();
     rsa_pubkey
-        .encrypt(&mut rng, Pkcs1v15Encrypt, &plaintext.to_bytes_be())
+        .encrypt(&mut rng, padding, &plaintext.to_bytes_be())
         .map_err(|_| RsaError::EncError)
 }
 
@@ -400,8 +400,9 @@ fn rsa_decrypt_with_label(
     label: &[u8],
     rsa_privkey: &RsaPrivateKey,
 ) -> Result<Vec<u8>, RsaError> {
+    let padding = Oaep::new::<Sha256>();
     let plaintext = rsa_privkey
-        .decrypt(Pkcs1v15Encrypt, ciphertext)
+        .decrypt(padding, ciphertext)
         .map_err(|_| RsaError::DecError)?;
 
     let n = rsa_privkey.n();
