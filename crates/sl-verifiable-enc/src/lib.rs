@@ -21,6 +21,7 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use thiserror::Error;
 
 pub const SECURITY_PARAM: u16 = 128;
+const VERSION: u8 = 1;
 
 //Re-Exports
 pub use rsa;
@@ -42,6 +43,8 @@ pub enum RsaError {
     SerdeError(String),
     #[error("Invalid Security Parameter, cannot be more than 256")]
     InvalidSecurityParam,
+    #[error("Unsupported version")]
+    UnsupportedVersion,
 }
 
 pub struct ProofData<G: Group + GroupEncoding> {
@@ -244,6 +247,7 @@ where
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
+        bytes.push(VERSION);
         bytes.extend_from_slice(&self.seed);
         // Adding the sizes
         // Security parameter, g_r size, enc_x_r size (will be same as enc_r size) and scalar size
@@ -271,13 +275,20 @@ where
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, RsaError> {
-        let res = || {
-            if data.len() < 32 + 8 {
-                // 32 (seed) + 8 (4 * u16 sizes)
-                return Err("Input data too short");
-            }
+        if data.len() < 1 + 32 + 8 {
+            // 1 (version) + 32 (seed) + 8 (4 * u16 sizes)
+            return Err(RsaError::SerdeError(
+                "Input data too short".to_string(),
+            ));
+        }
 
-            let mut offset = 0;
+        // Check version
+        if data[0] != VERSION {
+            return Err(RsaError::UnsupportedVersion);
+        }
+
+        let res = || {
+            let mut offset = 1;
 
             // Read seed
             let mut seed = [0u8; 32];
@@ -766,6 +777,15 @@ mod tests {
             VerifiableRsaEncryption::<ProjectivePoint>::from_bytes(
                 &corrupted
             ),
+            Err(RsaError::UnsupportedVersion)
+        ));
+    }
+
+    #[test]
+    fn test_serde_fails_empty_data() {
+        let empty = vec![];
+        assert!(matches!(
+            VerifiableRsaEncryption::<ProjectivePoint>::from_bytes(&empty),
             Err(RsaError::SerdeError(_))
         ));
     }
