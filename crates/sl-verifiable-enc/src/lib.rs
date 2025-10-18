@@ -76,7 +76,7 @@ where
         let security_param = security_param.unwrap_or(SECURITY_PARAM);
         // Security parameter must be at least 128 and at most 256
         if !(SECURITY_PARAM..=256).contains(&security_param) {
-            return Err(RsaError::InvalidSizeParam);
+            return Err(RsaError::InvalidSecurityParam);
         }
         let mut proofs = Vec::with_capacity(security_param);
         let q_point = G::generator() * x;
