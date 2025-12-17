@@ -1,13 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/sl-mpc-mate",
-  "crates/sl-oblivious",
-  "crates/sl-paillier",
-  "crates/sl-mpc-traits",
-  "crates/sl-verifiable-enc",
-  "crates/sl-messages",
-   "crates/sl-shamir",
+    "crates/sl-mpc-mate",
+    "crates/sl-oblivious",
+    "crates/sl-paillier",
+    "crates/sl-mpc-traits",
+    "crates/sl-verifiable-enc",
+    "crates/sl-messages",
+    "crates/sl-shamir",
+    "crates/sl-compute-common",
 ]
 
 [profile.bench]
