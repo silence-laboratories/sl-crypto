@@ -41,7 +41,7 @@ pub enum RsaError {
     InvalidSizeParam,
     #[error("(de)Serialization error")]
     SerdeError(String),
-    #[error("Invalid Security Parameter, cannot be more than 256")]
+    #[error("Invalid Security Parameter, must be between 128 and 256 (inclusive)")]
     InvalidSecurityParam,
     #[error("Unsupported version")]
     UnsupportedVersion,
