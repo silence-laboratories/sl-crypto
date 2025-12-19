@@ -58,9 +58,9 @@ where
     G: Group + GroupEncoding + ConstantTimeEq,
     G::Scalar: ConditionallySelectable,
 {
-    pub seed: [u8; 32],
-    pub proofs: Vec<ProofData<G>>,
-    pub open_scalars: Vec<G::Scalar>,
+    seed: [u8; 32],
+    proofs: Vec<ProofData<G>>,
+    open_scalars: Vec<G::Scalar>,
     security_param: u16,
 }
 
@@ -136,12 +136,46 @@ where
         })
     }
 
+    /// Get a reference to the seed.
+    pub fn seed(&self) -> &[u8; 32] {
+        &self.seed
+    }
+
+    /// Get a reference to the proofs.
+    pub fn proofs(&self) -> &[ProofData<G>] {
+        &self.proofs
+    }
+
+    /// Get a reference to the open scalars.
+    pub fn open_scalars(&self) -> &[G::Scalar] {
+        &self.open_scalars
+    }
+
+    /// Get the security parameter.
+    pub fn security_param(&self) -> u16 {
+        self.security_param
+    }
+
+    /// Get mutable access to proofs (for testing only).
+    #[cfg(test)]
+    pub fn proofs_mut(&mut self) -> &mut Vec<ProofData<G>> {
+        &mut self.proofs
+    }
+
     pub fn verify(
         &self,
         q_point: &G,
         rsa_pubkey: &RsaPublicKey,
         label: &[u8],
     ) -> Result<(), RsaError> {
+        // Validate that proofs and open_scalars have the correct length
+        if self.proofs.len() != self.security_param as usize {
+            return Err(RsaError::VerificationFailed);
+        }
+        if self.open_scalars.len() != self.security_param as usize {
+            return Err(RsaError::VerificationFailed);
+        }
+
         // Check proof uniqueness to prevent nonce reuse attacks
         // Allowing early return as there is no leakage of sensitive information
         let mut seen = HashSet::new();
@@ -246,6 +280,26 @@ where
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
+        // Validate invariants before serialization
+        // These checks ensure the struct is in a valid state
+        debug_assert_eq!(
+            self.proofs.len(),
+            self.security_param as usize,
+            "proofs length must match security_param"
+        );
+        debug_assert_eq!(
+            self.open_scalars.len(),
+            self.security_param as usize,
+            "open_scalars length must match security_param"
+        );
+        debug_assert!(!self.proofs.is_empty(), "proofs must not be empty");
+
+        // In release builds, if invariants are violated, we still try to serialize
+        // but the result may be invalid. This is a defensive measure.
+        if self.proofs.is_empty() {
+            return Vec::new();
+        }
+
         let mut bytes = Vec::new();
         bytes.push(VERSION);
         bytes.extend_from_slice(&self.seed);
@@ -377,6 +431,14 @@ where
                         .ok_or("Invalid scalar")?;
                 offset += scalar_size;
                 open_scalars.push(scalar);
+            }
+
+            // Final validation: ensure lengths match security_param
+            if proofs.len() != security_param as usize {
+                return Err("Proofs length does not match security parameter");
+            }
+            if open_scalars.len() != security_param as usize {
+                return Err("Open scalars length does not match security parameter");
             }
 
             Ok(Self {
@@ -706,7 +768,7 @@ mod tests {
         )
         .unwrap();
 
-        proof.proofs[0].enc_r[0] ^= 1;
+        proof.proofs_mut()[0].enc_r[0] ^= 1;
 
         assert!(matches!(
             proof.verify(&public_key, &rsa_public_key, b"label"),
@@ -839,10 +901,11 @@ mod tests {
         .unwrap();
 
         // Duplicate the first proof to simulate nonce reuse
-        proof.proofs[1] = ProofData {
-            g_r: proof.proofs[0].g_r,
-            enc_x_r: proof.proofs[0].enc_x_r.clone(),
-            enc_r: proof.proofs[0].enc_r.clone(),
+        let proofs = proof.proofs_mut();
+        proofs[1] = ProofData {
+            g_r: proofs[0].g_r,
+            enc_x_r: proofs[0].enc_x_r.clone(),
+            enc_r: proofs[0].enc_r.clone(),
         };
 
         assert!(matches!(
