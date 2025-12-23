@@ -87,8 +87,11 @@ impl<R: Relay> Relay for BufferedMsgRelay<R> {
         self.relay.flush()
     }
 
-    fn next(&mut self) -> impl Future<Output = Option<BytesMut>> {
-        self.relay.next()
+    async fn next(&mut self) -> Option<BytesMut> {
+        if let Some(msg) = self.buffer.pop() {
+            return Some(msg);
+        }
+        self.relay.next().await
     }
 
     async fn ask(
@@ -111,5 +114,66 @@ impl<R: Relay> Deref for BufferedMsgRelay<R> {
 impl<R: Relay> DerefMut for BufferedMsgRelay<R> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.relay
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tokio::time::{sleep, timeout};
+
+    use crate::{
+        message::{InstanceId, MessageTag, MsgId, allocate_message},
+        relay::{BufferedMsgRelay, Bytes, Relay, SimpleMessageRelay},
+    };
+
+    fn mk_msg(id: &MsgId) -> Bytes {
+        allocate_message(id, Duration::from_secs(10), 0, &[0, 255])
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn out_of_order_messages() {
+        let instance = InstanceId::from([1u8; 32]);
+
+        let r = SimpleMessageRelay::new();
+
+        let c = r.connect();
+
+        let mut brelay = BufferedMsgRelay::new(r.connect());
+
+        let sender = [1; 32];
+        let id1 = MsgId::new(&instance, &sender, None, MessageTag::tag(1));
+        let id2 = MsgId::new(&instance, &sender, None, MessageTag::tag(2));
+
+        brelay.ask(&id1, Duration::from_secs(10)).await.unwrap();
+        brelay.ask(&id2, Duration::from_secs(10)).await.unwrap();
+
+        let h = tokio::spawn(async move {
+            let m1 = brelay.wait_for(|id| id == &id1).await;
+
+            let m2 = brelay.next().await;
+
+            (m1, m2)
+        });
+
+        c.send(mk_msg(&id2)).await.unwrap();
+        sleep(Duration::from_millis(10)).await;
+        c.send(mk_msg(&id1)).await.unwrap();
+
+        let (m1, m2) = timeout(Duration::from_millis(10), h)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            m1.as_deref().and_then(|m| <&MsgId>::try_from(m).ok()),
+            Some(&id1)
+        );
+
+        assert_eq!(
+            m2.as_deref().and_then(|m| <&MsgId>::try_from(m).ok()),
+            Some(&id2)
+        );
     }
 }
