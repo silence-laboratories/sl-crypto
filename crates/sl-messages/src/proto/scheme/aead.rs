@@ -4,9 +4,9 @@
 use std::marker::PhantomData;
 
 use aead::{
-    AeadCore, AeadInPlace, Key, KeyInit, Nonce, Tag,
     consts::{U10, U32},
-    generic_array::{GenericArray, typenum::Unsigned},
+    generic_array::{typenum::Unsigned, GenericArray},
+    AeadCore, AeadInPlace, Key, KeyInit, Nonce, Tag,
 };
 use chacha20::hchacha;
 use rand_core::CryptoRngCore;

@@ -1,36 +1,31 @@
 [package]
 name = "sl-mpc-mate"
-version = "0.1.0"
+version = "1.0.1-beta.2"
 edition = "2021"
 license-file = "../../LICENSE"
 description = "Utilities for secure multi-party computation"
-publish = false
+rust-version = "1.88"
 
 [dependencies]
-tokio = { version = "1", features = ["rt", "sync", "time"], optional = true }
-sha2 = { version = "0.10" }
-rand = "0.8.5"
-rand_core = "0.6"
-elliptic-curve = { version = "0.13" }
-subtle = { version = "2.5", default-features = false, features = [
-  "const-generics",
-] }
-thiserror = "1.0.38"
-k256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
-derivation-path = "0.2.0"
-hmac = { version = "0.12.1" }
-base64 = "0.22"
-ripemd = "0.1.3"
-hex = "0.4.3"
-bs58 = "0.4.0"
-futures-util = { version = "0.3.0", features = ["sink"] }
-rayon = { version = "1", optional = true }
-serde = { version = "1", optional = true }
-bytemuck = { version = "1.14.1", features = [ "derive", "min_const_generics", "extern_crate_alloc" ] }
-zeroize = { version = "1.6", features = [ "derive" ] }
+base64 = { workspace = true }
+bs58 = { workspace = true }
+derivation-path = { workspace = true }
+elliptic-curve = { workspace = true }
+hex = { workspace = true }
+hmac = { workspace = true }
+k256 = { workspace = true, features = ["arithmetic"] }
+rand = { workspace = true }
+rand_core = { workspace = true }
+ripemd = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true, features = ["const-generics",] }
+thiserror = { workspace = true }
+zeroize = { workspace = true, features = [ "derive" ] }
+
+rayon = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "sync", "macros"] }
 bincode = { version = "1" }
 
 [features]
@@ -40,4 +35,3 @@ serde = [
   "elliptic-curve/arithmetic",
   "k256/serde",
 ]
-simple-relay = ["dep:tokio"]
