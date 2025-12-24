@@ -1,12 +1,13 @@
-
 [package]
 name = "sl-shamir"
-version = "0.1.0"
+version = "1.0.1-beta.1"
 edition = "2021"
+license-file = "../../LICENSE"
+rust-version = "1.88"
 
 [dependencies]
-rand = "0.8.5"
-zeroize = { version = "1.0", features = ["zeroize_derive"], optional = true }
+rand = { workspace = true }
+zeroize = { workspace = true, features = ["zeroize_derive"], optional = true }
 
 [features]
 default = ["zeroize"]

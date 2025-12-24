@@ -2,32 +2,13 @@
 
 This library provides a generic implementation of verifiable RSA encryption. It allows for the encryption of scalar values from various elliptic curves while providing proofs of correct encryption. This is particularly useful in cryptographic protocols where you need to prove that an encrypted value corresponds to a public key without revealing the private key.
 
-We use the verifiable encryption scheme from https://eprint.iacr.org/1999/008  
+We use the verifiable encryption scheme from https://eprint.iacr.org/1999/008
 
 ### Features
 
 - Generic over elliptic curves
-- Uses RSA to be HSM-friendly 
+- Uses RSA to be HSM-friendly
 
-## Installation
-Add the following to your cargo.toml file in order to use the crate
-```
-[dependencies]
-sl-verifiable-enc = { version = "0.1.0", registry = "silencelaboratories" }
-```
-
-Add a config.toml file under ```your_project_dir/.cargo/config.toml``` with the following content:
-```
-[registries]
-silencelaboratories = { index = "ssh://git@ssh.shipyard.rs/silencelaboratories/crate-index.git" }
-
-[net]
-git-fetch-with-cli = true
-
-[registry]
-global-credential-providers = ["cargo:token", "cargo:macos-keychain", "cargo:wincred"]
-```
-Ask credentials to shipyard from a silencelabs members according to your git email
 ## Usage
 
 Here's a basic example of how to use the library with the `secp256k1` curve:
@@ -40,16 +21,16 @@ use sl_verifiable_enc::VerifiableRsaEncryption;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = rand::thread_rng();
-    
+
     // Generate keys
     let private_key = Scalar::generate_vartime(&mut rng);
     let public_key = ProjectivePoint::GENERATOR * private_key;
     let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048)?;
     let rsa_public_key = rsa_private_key.to_public_key();
-    
+
     // Encrypt with proof
     let label = b"example-label";
-    let verifiable_rsa = 
+    let verifiable_rsa =
         VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
@@ -57,14 +38,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             None,
             &mut rng,
         )?;
-    
+
     // Verify the proof
     verifiable_rsa.verify(&public_key, &rsa_public_key, label)?;
-    
+
     // Decrypt
     let decrypted_key = verifiable_rsa.decrypt(&public_key, &rsa_private_key, label)?;
     assert_eq!(private_key, decrypted_key);
-    
+
     Ok(())
 }
 ```
@@ -83,16 +64,16 @@ use group::Group;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = ChaCha20Rng::from_entropy();
-    
+
     // Generate keys
     let private_key = Scalar::random(&mut rng);
     let public_key = EdwardsPoint::generator() * private_key;
     let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048)?;
     let rsa_public_key = rsa_private_key.to_public_key();
-    
+
     // Encrypt with proof
     let label = b"example-label";
-    let verifiable_rsa = 
+    let verifiable_rsa =
         VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
@@ -100,14 +81,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             None,
             &mut rng,
         )?;
-    
+
     // Verify the proof
     verifiable_rsa.verify(&public_key, &rsa_public_key, label)?;
-    
+
     // Decrypt
     let decrypted_key = verifiable_rsa.decrypt(&public_key, &rsa_private_key, label)?;
     assert_eq!(private_key, decrypted_key);
-    
+
     Ok(())
 }
 ```
@@ -121,5 +102,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## License
 
-You can find the license [here](/LICENSE.md)
-
+You can find the license [here](../../LICENSE)

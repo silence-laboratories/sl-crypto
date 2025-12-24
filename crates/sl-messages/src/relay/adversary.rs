@@ -4,18 +4,18 @@
 use std::{
     collections::HashSet,
     sync::{
-        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
     },
 };
 
 use crate::{
-    Bytes, BytesMut,
     message::{MsgHdr, MsgId},
     relay::{
-        MessageRelayService, MessageSendError, Relay,
         simple::{MsgRelayConnection, SimpleMessageRelay},
+        MessageRelayService, MessageSendError, Relay,
     },
+    Bytes, BytesMut,
 };
 
 type Cond = Box<dyn FnMut(&HashSet<MsgId>, usize) -> bool + Send>;

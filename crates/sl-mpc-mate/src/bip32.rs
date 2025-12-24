@@ -5,6 +5,7 @@ use base64::{engine::general_purpose, Engine as _};
 use bs58::Alphabet;
 use derivation_path::{ChildIndex, DerivationPath};
 use elliptic_curve::{
+    bigint::Zero,
     consts::U32,
     ops::Reduce,
     sec1::{ModulusSize, ToEncodedPoint},
@@ -168,7 +169,7 @@ where
     let il_int = C::Uint::decode_field_bytes(il_int.into());
 
     // Has a chance of 1 in 2^127
-    if il_int > C::ORDER {
+    if il_int == C::Uint::ZERO || il_int >= C::ORDER {
         return Err(BIP32Error::InvalidChildScalar);
     }
 

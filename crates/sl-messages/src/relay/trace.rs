@@ -4,9 +4,9 @@
 use std::time::Duration;
 
 use crate::{
-    Bytes, BytesMut,
     message::MsgId,
     relay::{MessageSendError, Relay, Sender, SplitSender},
+    Bytes, BytesMut,
 };
 
 pub trait TraceNextExt: Relay + Sized {

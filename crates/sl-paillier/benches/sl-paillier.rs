@@ -1,11 +1,8 @@
+// Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
+// This software is licensed under the Silence Laboratories License Agreement.
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use crypto_bigint::*;
-
-use curv::arithmetic::Converter;
-use kzen_paillier::{
-    Add, BigInt, Decrypt, DecryptionKey, EncryptWithChosenRandomness,
-    EncryptionKey, Mul, Paillier, Randomness, RawPlaintext as KzRawPlaintext,
-};
 
 static P: &str = "95779f0de6b61f3db4c53b1b32aa29e2efb52ebedab7968c37cb10917767547963a121d454c8024dc56f22c523da2dff553ad8a1621ad8f0c093ad09561165fce74fdf977ab1b5f57b4cdcce58f449bcce50cd80359ed0ec4083000c091fbb237e52b8237438ea82932ad0ed7d58fae54ea300461755a0dabc41b5e46af4cee1";
 static Q: &str = "a80137484b2e0082dbcc520642ea0fcff5652a2367084c052c340b15f0c3ecfeb334024e28e5a982c8971d06f332fc2e91ca985ee37a8e51daa2bae16841b75617a43b52fecea902c5858276ef3ab5282a0635ef34579d5ea2de61bd56f4d7ec26afbcb8ae127c4bc5c0a5799a48d41565a7656fffa056ac3b73ccb3fd0098d1";
@@ -129,86 +126,8 @@ fn sl_decrypt(c: &mut Criterion) {
     });
 }
 
-fn kz_ek() -> (EncryptionKey, DecryptionKey) {
-    let q = BigInt::from_hex(Q).unwrap();
-    let p = BigInt::from_hex(P).unwrap();
-    let n = &p * &q;
-    let nn = &n * &n;
-
-    (EncryptionKey { n, nn }, DecryptionKey { p, q })
-}
-
-fn kz_encrypt(c: &mut Criterion) {
-    let r = Randomness(BigInt::from_hex(R).unwrap());
-    let m = BigInt::from_hex(M).unwrap();
-
-    let (ek, _) = kz_ek();
-
-    let rt = KzRawPlaintext::from(&m);
-
-    c.bench_function("kz-encrypt", |b| {
-        b.iter(|| {
-            black_box(Paillier::encrypt_with_chosen_randomness(
-                &ek,
-                rt.clone(),
-                &r,
-            ));
-        })
-    });
-}
-
-fn kz_decrypt(c: &mut Criterion) {
-    let r = Randomness(BigInt::from_hex(R).unwrap());
-    let m = BigInt::from_hex(M).unwrap();
-
-    let (ek, dk) = kz_ek();
-
-    let rt = KzRawPlaintext::from(&m);
-    let ct = Paillier::encrypt_with_chosen_randomness(&ek, rt.clone(), &r);
-
-    c.bench_function("kz-decrypt", |b| {
-        b.iter(|| {
-            black_box(Paillier::decrypt(&dk, ct.clone()));
-        })
-    });
-}
-
-pub fn kz_add(c: &mut Criterion) {
-    let r = Randomness(BigInt::from_hex(R).unwrap());
-    let m = BigInt::from_hex(M).unwrap();
-
-    let (ek, _) = kz_ek();
-
-    let rt = KzRawPlaintext::from(&m);
-    let ct = Paillier::encrypt_with_chosen_randomness(&ek, rt.clone(), &r);
-
-    c.bench_function("kz-add", |b| {
-        b.iter(|| {
-            black_box(Paillier::add(&ek, ct.clone(), ct.clone()));
-        })
-    });
-}
-
-fn kz_mul(c: &mut Criterion) {
-    let r = Randomness(BigInt::from_hex(R).unwrap());
-    let m = BigInt::from_hex(M).unwrap();
-
-    let (ek, _) = kz_ek();
-
-    let rt = KzRawPlaintext::from(&m);
-    let ct = Paillier::encrypt_with_chosen_randomness(&ek, rt.clone(), &r);
-
-    c.bench_function("kz-mul", |b| {
-        b.iter(|| {
-            black_box(Paillier::mul(&ek, ct.clone(), rt.clone()));
-        });
-    });
-}
-
 criterion_group!(
     sl_benches, sl_gen_sk, sl_encrypt, sl_decrypt, sl_add, sl_mul
 );
 
-criterion_group!(kz_benches, kz_encrypt, kz_decrypt, kz_add, kz_mul);
-
-criterion_main!(sl_benches, kz_benches);
+criterion_main!(sl_benches);

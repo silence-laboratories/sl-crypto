@@ -13,3 +13,47 @@ members = [
 
 [profile.bench]
 debug = true
+
+[workspace.dependencies]
+aead = { version = "0.5.2" }
+base64 = "0.22"
+bincode = "1"
+bs58 = "0.5.0"
+bytemuck = { version = "1.22" }
+bytes = "1"
+chacha20 = { version = "0.9" }
+chacha20poly1305 = { version = "0.10.1" }
+criterion = "0.5"
+crypto-bigint = { version = "0.5.5", default-features = false }
+crypto-primes = { version = "0.5", default-features = false }
+curve25519-dalek = { version = "4.1.3", default-features = false }
+derivation-path = "0.2.0"
+elliptic-curve = { version = "0.13" }
+fastwebsockets = { version = "0.10" }
+ff = "0.13.0"
+generic-array = { version = "0.14.7" }
+group = "0.13.0"
+hex = "0.4.3"
+hmac = { version = "0.12.1" }
+k256 = { version = "0.13", default-features = false }
+lazy_static = "1.4"
+merlin = "3.0.0"
+num-bigint-dig = "0.8.6"
+p256 = { version = "0.13" }
+quickcheck = "1"
+rand = "0.8.5"
+rand_chacha = "0.3.1"
+rand_core = { version = "0.6", default-features = false }
+rayon = { version = "1" }
+ripemd = "0.1.3"
+rsa = "0.9.9"
+serde = { version = "1.0.218", default-features = false }
+serde_arrays = { version = "0.1" }
+serde_json = "1.0"
+sha2 = "0.10.8"
+signature = { version = "2.2.0" }
+subtle = { version = "2.5", default-features = false }
+thiserror = "1"
+tokio = { version = "1.44" }
+x25519-dalek = { version = "2.0.0" }
+zeroize = { version = "1.6" }

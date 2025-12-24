@@ -3,7 +3,7 @@
 
 use std::{
     cmp::Ordering,
-    collections::{BinaryHeap, HashMap, hash_map::Entry},
+    collections::{hash_map::Entry, BinaryHeap, HashMap},
     future::poll_fn,
     mem,
     sync::{Arc, Mutex, Weak},

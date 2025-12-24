@@ -1,17 +1,14 @@
 [package]
 name = "sl-compute-common"
-version = "0.1.0"
-edition = "2024"
+version = "1.0.1-beta.1"
+edition = "2021"
 license-file = "../../LICENSE"
+rust-version = "1.88"
 
 [dependencies]
-serde = { version = "1.0.218", features = ["derive"] }
-crypto-bigint = { version = "0.5.5", features = ["serde", "alloc"] }
-chacha20 = { version = "0.9" }
-rand_chacha = "0.3.1"
-aead = { version = "0.5.2" }
-rand = "0.8"
-
-
-
-
+aead = { workspace = true }
+chacha20 = { workspace = true }
+crypto-bigint = { workspace = true, features = ["serde", "alloc"] }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
