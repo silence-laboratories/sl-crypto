@@ -13,15 +13,15 @@ use num_bigint_dig::ModInverse;
 use rand::{Rng, SeedableRng};
 use rand_chacha::{rand_core::CryptoRngCore, ChaCha20Rng};
 use rsa::{
-    traits::PublicKeyParts, BigUint, Pkcs1v15Encrypt, RsaPrivateKey,
-    RsaPublicKey,
+    traits::PublicKeyParts, BigUint, Oaep, RsaPrivateKey, RsaPublicKey,
 };
 use sha2::{Digest, Sha256};
-use std::ops::Index;
+use std::{collections::HashSet, ops::Index};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use thiserror::Error;
 
-pub const SECURITY_PARAM: usize = 128;
+pub const SECURITY_PARAM: u16 = 128;
+const VERSION: u8 = 1;
 
 //Re-Exports
 pub use rsa;
@@ -41,8 +41,10 @@ pub enum RsaError {
     InvalidSizeParam,
     #[error("(de)Serialization error")]
     SerdeError(String),
-    #[error("Invalid Security Parameter, cannot be more than 256")]
+    #[error("Invalid Security Parameter, must be between 128 and 256 (inclusive)")]
     InvalidSecurityParam,
+    #[error("Unsupported version")]
+    UnsupportedVersion,
 }
 
 pub struct ProofData<G: Group + GroupEncoding> {
@@ -56,10 +58,10 @@ where
     G: Group + GroupEncoding + ConstantTimeEq,
     G::Scalar: ConditionallySelectable,
 {
-    pub seed: [u8; 32],
-    pub proofs: Vec<ProofData<G>>,
-    pub open_scalars: Vec<G::Scalar>,
-    security_param: usize,
+    seed: [u8; 32],
+    proofs: Vec<ProofData<G>>,
+    open_scalars: Vec<G::Scalar>,
+    security_param: u16,
 }
 
 impl<G> VerifiableRsaEncryption<G>
@@ -70,22 +72,30 @@ where
         x: &G::Scalar,
         rsa_pubkey: &RsaPublicKey,
         label: &[u8],
-        security_param: Option<usize>,
+        security_param: Option<u16>,
         rng: &mut R,
     ) -> Result<Self, RsaError> {
         let seed = rng.gen::<[u8; 32]>();
         let security_param = security_param.unwrap_or(SECURITY_PARAM);
         // Security parameter must be at least 128 and at most 256
         if !(SECURITY_PARAM..=256).contains(&security_param) {
-            return Err(RsaError::InvalidSizeParam);
+            return Err(RsaError::InvalidSecurityParam);
         }
-        let mut proofs = Vec::with_capacity(security_param);
+        let mut proofs = Vec::with_capacity(security_param as usize);
         let q_point = G::generator() * x;
-        let mut r_list = Vec::with_capacity(security_param);
-        let mut x_plus_r_list = Vec::with_capacity(security_param);
+        let mut r_list = Vec::with_capacity(security_param as usize);
+        let mut x_plus_r_list = Vec::with_capacity(security_param as usize);
 
-        for _ in 0..security_param {
-            let r = G::Scalar::random(&mut *rng);
+        for round in 0..security_param {
+            // Derive r deterministically using round index to ensure uniqueness
+            let mut hasher = Sha256::new();
+            hasher.update(b"SL-verifiable-enc-round");
+            hasher.update(seed);
+            hasher.update(round.to_be_bytes());
+            let mut round_rng =
+                ChaCha20Rng::from_seed(hasher.finalize().into());
+            let r = G::Scalar::random(&mut round_rng);
+
             let g_r = G::generator() * r;
             let x_plus_r = *x + r;
             let enc_r =
@@ -107,8 +117,8 @@ where
             });
         }
         let challenge = Self::challenge(&q_point, label, &proofs);
-        let mut open_scalars = Vec::with_capacity(security_param);
-        for i in 0..security_param {
+        let mut open_scalars = Vec::with_capacity(security_param as usize);
+        for i in 0..security_param as usize {
             let choice_bit = challenge.extract_bit(i);
             let selected = G::Scalar::conditional_select(
                 &r_list[i],
@@ -126,14 +136,58 @@ where
         })
     }
 
+    /// Get a reference to the seed.
+    pub fn seed(&self) -> &[u8; 32] {
+        &self.seed
+    }
+
+    /// Get a reference to the proofs.
+    pub fn proofs(&self) -> &[ProofData<G>] {
+        &self.proofs
+    }
+
+    /// Get a reference to the open scalars.
+    pub fn open_scalars(&self) -> &[G::Scalar] {
+        &self.open_scalars
+    }
+
+    /// Get the security parameter.
+    pub fn security_param(&self) -> u16 {
+        self.security_param
+    }
+
+    /// Get mutable access to proofs (for testing only).
+    #[cfg(test)]
+    pub fn proofs_mut(&mut self) -> &mut Vec<ProofData<G>> {
+        &mut self.proofs
+    }
+
     pub fn verify(
         &self,
         q_point: &G,
         rsa_pubkey: &RsaPublicKey,
         label: &[u8],
     ) -> Result<(), RsaError> {
+        // Validate that proofs and open_scalars have the correct length
+        if self.proofs.len() != self.security_param as usize {
+            return Err(RsaError::VerificationFailed);
+        }
+        if self.open_scalars.len() != self.security_param as usize {
+            return Err(RsaError::VerificationFailed);
+        }
+
+        // Check proof uniqueness to prevent nonce reuse attacks
+        // Allowing early return as there is no leakage of sensitive information
+        let mut seen = HashSet::new();
+        for proof in &self.proofs {
+            if !seen.insert(proof.g_r.as_ref()) {
+                return Err(RsaError::VerificationFailed);
+            }
+        }
+
         let challenge = Self::challenge(q_point, label, &self.proofs);
-        for i in 0..self.security_param {
+        let mut verified = Choice::from(1u8);
+        for i in 0..self.security_param as usize {
             let proof = &self.proofs[i];
             let open_scalar = &self.open_scalars[i];
             let scalar_expo = G::generator() * open_scalar;
@@ -146,10 +200,12 @@ where
             )?;
 
             let g_r_option = G::from_bytes(&proof.g_r);
+            verified &= g_r_option.is_some();
+
             let g_r = if g_r_option.is_some().unwrap_u8() == 1 {
                 g_r_option.unwrap()
             } else {
-                return Err(RsaError::VerificationFailed);
+                G::identity()
             };
 
             // If choice bit is 0
@@ -166,14 +222,17 @@ where
                 cond1 & cond2
             };
 
-            let verified =
-                Choice::conditional_select(&cond_a, &cond_b, choice_bit)
-                    .unwrap_u8();
-            if verified != 1 {
-                return Err(RsaError::VerificationFailed);
-            }
+            let is_valid_proof =
+                Choice::conditional_select(&cond_a, &cond_b, choice_bit);
+
+            verified &= is_valid_proof;
         }
-        Ok(())
+
+        if bool::from(verified) {
+            Ok(())
+        } else {
+            Err(RsaError::VerificationFailed)
+        }
     }
 
     pub fn decrypt(
@@ -182,7 +241,7 @@ where
         rsa_privkey: &RsaPrivateKey,
         label: &[u8],
     ) -> Result<G::Scalar, RsaError> {
-        if self.proofs.len() != self.security_param {
+        if self.proofs.len() != self.security_param as usize {
             return Err(RsaError::VerificationFailed);
         }
 
@@ -221,11 +280,32 @@ where
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
+        // Validate invariants before serialization
+        // These checks ensure the struct is in a valid state
+        debug_assert_eq!(
+            self.proofs.len(),
+            self.security_param as usize,
+            "proofs length must match security_param"
+        );
+        debug_assert_eq!(
+            self.open_scalars.len(),
+            self.security_param as usize,
+            "open_scalars length must match security_param"
+        );
+        debug_assert!(!self.proofs.is_empty(), "proofs must not be empty");
+
+        // In release builds, if invariants are violated, we still try to serialize
+        // but the result may be invalid. This is a defensive measure.
+        if self.proofs.is_empty() {
+            return Vec::new();
+        }
+
         let mut bytes = Vec::new();
+        bytes.push(VERSION);
         bytes.extend_from_slice(&self.seed);
         // Adding the sizes
         // Security parameter, g_r size, enc_x_r size (will be same as enc_r size) and scalar size
-        bytes.extend_from_slice(&(self.security_param as u16).to_be_bytes());
+        bytes.extend_from_slice(&self.security_param.to_be_bytes());
         bytes.extend_from_slice(
             &(self.proofs[0].g_r.as_ref().len() as u16).to_be_bytes(),
         );
@@ -249,13 +329,20 @@ where
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, RsaError> {
-        let res = || {
-            if data.len() < 32 + 8 {
-                // 32 (seed) + 8 (4 * u16 sizes)
-                return Err("Input data too short");
-            }
+        if data.len() < 1 + 32 + 8 {
+            // 1 (version) + 32 (seed) + 8 (4 * u16 sizes)
+            return Err(RsaError::SerdeError(
+                "Input data too short".to_string(),
+            ));
+        }
 
-            let mut offset = 0;
+        // Check version
+        if data[0] != VERSION {
+            return Err(RsaError::UnsupportedVersion);
+        }
+
+        let res = || {
+            let mut offset = 1;
 
             // Read seed
             let mut seed = [0u8; 32];
@@ -264,7 +351,7 @@ where
 
             // Read sizes
             let security_param =
-                u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
+                u16::from_be_bytes([data[offset], data[offset + 1]]);
             offset += 2;
             let g_r_size =
                 u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
@@ -295,7 +382,7 @@ where
                 return Err("Security param must at least be 128");
             }
 
-            if num_proofs != security_param {
+            if num_proofs != security_param as usize {
                 return Err("Inconsistent number of proofs, must be equal to the security parameter");
             }
 
@@ -346,6 +433,14 @@ where
                 open_scalars.push(scalar);
             }
 
+            // Final validation: ensure lengths match security_param
+            if proofs.len() != security_param as usize {
+                return Err("Proofs length does not match security parameter");
+            }
+            if open_scalars.len() != security_param as usize {
+                return Err("Open scalars length does not match security parameter");
+            }
+
             Ok(Self {
                 seed,
                 proofs,
@@ -384,8 +479,9 @@ fn rsa_encrypt_with_label(
     let m_int = BigUint::from_bytes_be(m.as_ref());
     let label_int = label_int_from_bytes(label);
     let plaintext = (m_int * label_int) % rsa_pubkey.n();
+    let padding = Oaep::new::<Sha256>();
     rsa_pubkey
-        .encrypt(&mut rng, Pkcs1v15Encrypt, &plaintext.to_bytes_be())
+        .encrypt(&mut rng, padding, &plaintext.to_bytes_be())
         .map_err(|_| RsaError::EncError)
 }
 
@@ -394,8 +490,9 @@ fn rsa_decrypt_with_label(
     label: &[u8],
     rsa_privkey: &RsaPrivateKey,
 ) -> Result<Vec<u8>, RsaError> {
+    let padding = Oaep::new::<Sha256>();
     let plaintext = rsa_privkey
-        .decrypt(Pkcs1v15Encrypt, ciphertext)
+        .decrypt(padding, ciphertext)
         .map_err(|_| RsaError::DecError)?;
 
     let n = rsa_privkey.n();
@@ -606,6 +703,156 @@ mod tests {
     }
 
     #[test]
+    fn test_verify_fails_wrong_public_key() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+
+        let wrong_private_key = Scalar::generate_vartime(&mut rng);
+        let wrong_public_key = ProjectivePoint::GENERATOR * wrong_private_key;
+
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+
+        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            proof.verify(&wrong_public_key, &rsa_public_key, b"label"),
+            Err(RsaError::VerificationFailed)
+        ));
+    }
+
+    #[test]
+    fn test_verify_fails_wrong_label() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+        let public_key = ProjectivePoint::GENERATOR * private_key;
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+
+        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            proof.verify(&public_key, &rsa_public_key, b"wrong-label"),
+            Err(RsaError::VerificationFailed)
+        ));
+    }
+
+    #[test]
+    fn test_verify_fails_tampered_proof() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+        let public_key = ProjectivePoint::GENERATOR * private_key;
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+
+        let mut proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        proof.proofs_mut()[0].enc_r[0] ^= 1;
+
+        assert!(matches!(
+            proof.verify(&public_key, &rsa_public_key, b"label"),
+            Err(RsaError::VerificationFailed)
+        ));
+    }
+
+    #[test]
+    fn test_decrypt_fails_wrong_public_point() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+        let public_key = ProjectivePoint::GENERATOR * private_key;
+        let wrong_public_key =
+            ProjectivePoint::GENERATOR * Scalar::generate_vartime(&mut rng);
+
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+
+        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        proof
+            .verify(&public_key, &rsa_public_key, b"label")
+            .unwrap();
+
+        assert!(matches!(
+            proof.decrypt(&wrong_public_key, &rsa_private_key, b"label"),
+            Err(RsaError::DecError)
+        ));
+    }
+
+    #[test]
+    fn test_decrypt_fails_wrong_rsa_key() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+        let public_key = ProjectivePoint::GENERATOR * private_key;
+
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+        let wrong_rsa_private_key =
+            RsaPrivateKey::new(&mut rng, 2048).unwrap();
+
+        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            proof.decrypt(&public_key, &wrong_rsa_private_key, b"label"),
+            Err(RsaError::DecError)
+        ));
+    }
+
+    #[test]
+    fn test_serde_fails_corrupted_data() {
+        let corrupted = vec![0u8; 100];
+        assert!(matches!(
+            VerifiableRsaEncryption::<ProjectivePoint>::from_bytes(
+                &corrupted
+            ),
+            Err(RsaError::UnsupportedVersion)
+        ));
+    }
+
+    #[test]
+    fn test_serde_fails_empty_data() {
+        let empty = vec![];
+        assert!(matches!(
+            VerifiableRsaEncryption::<ProjectivePoint>::from_bytes(&empty),
+            Err(RsaError::SerdeError(_))
+        ));
+    }
+
+    #[test]
     fn test_extract_bit() {
         let array: [u8; 1] = [0b0100_1110];
 
@@ -634,5 +881,36 @@ mod tests {
         assert!(
             array.extract_bit(7).ct_eq(&Choice::from(0)).unwrap_u8() == 1
         );
+    }
+
+    #[test]
+    fn test_verify_fails_duplicate_proofs() {
+        let mut rng = ChaCha20Rng::from_entropy();
+        let private_key = Scalar::generate_vartime(&mut rng);
+        let public_key = ProjectivePoint::GENERATOR * private_key;
+        let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let rsa_public_key = rsa_private_key.to_public_key();
+
+        let mut proof = VerifiableRsaEncryption::encrypt_with_proof(
+            &private_key,
+            &rsa_public_key,
+            b"label",
+            None,
+            &mut rng,
+        )
+        .unwrap();
+
+        // Duplicate the first proof to simulate nonce reuse
+        let proofs = proof.proofs_mut();
+        proofs[1] = ProofData {
+            g_r: proofs[0].g_r,
+            enc_x_r: proofs[0].enc_x_r.clone(),
+            enc_r: proofs[0].enc_r.clone(),
+        };
+
+        assert!(matches!(
+            proof.verify(&public_key, &rsa_public_key, b"label"),
+            Err(RsaError::VerificationFailed)
+        ));
     }
 }
