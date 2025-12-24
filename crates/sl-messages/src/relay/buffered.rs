@@ -124,7 +124,7 @@ mod tests {
     use tokio::time::{sleep, timeout};
 
     use crate::{
-        message::{InstanceId, MessageTag, MsgId, allocate_message},
+        message::{allocate_message, InstanceId, MessageTag, MsgId},
         relay::{BufferedMsgRelay, Bytes, Relay, SimpleMessageRelay},
     };
 

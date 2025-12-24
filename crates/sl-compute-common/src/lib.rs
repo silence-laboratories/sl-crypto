@@ -1,15 +1,22 @@
-mod constants;
+// Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
+// This software is licensed under the Silence Laboratories License Agreement.
 
-use crate::constants::{FIELD_SIZE, FIELD_SIZE_BYTES, FRACTION_LENGTH, N};
+use std::mem;
+use std::ops::Index;
+
 use aead::rand_core::SeedableRng;
 use crypto_bigint::{Encoding, U64};
 use rand::Rng;
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
-use std::mem;
-use std::ops::Index;
+
+mod constants;
+
+use crate::constants::{FIELD_SIZE, FIELD_SIZE_BYTES, FRACTION_LENGTH, N};
+
 pub type FieldElement = U64;
 pub type Binary = bool;
+
 pub trait ExtractBit: Index<usize, Output = u8> {
     fn extract_bit(&self, idx: usize) -> bool {
         let byte_idx = idx >> 3;
@@ -141,16 +148,6 @@ impl BinaryArithmeticShare {
     pub fn from_binary_share(
         from_share: &BinaryShare,
     ) -> BinaryArithmeticShare {
-        // let mut row_id_bool_p: BinaryStringShare = BinaryStringShare::with_capacity(FIELD_SIZE);
-        // for _ in 0..FIELD_SIZE {
-        //     row_id_bool_p.push(false, false);
-        // }
-        //
-        // row_id_bool_p.set(
-        //     FRACTION_LENGTH,
-        //     input_table_p.0[i].is_delimiter.value1,
-        //     input_table_p.0[i].is_delimiter.value2,
-        // );
         let mut share = BinaryArithmeticShare::default();
         let byte_idx = FRACTION_LENGTH >> 3;
         let bit_idx = FRACTION_LENGTH & 0x7;
@@ -501,6 +498,7 @@ impl BinaryShare {
         (self.value1 & other.value1) ^ (self.value2 & other.value2) ^ alpha
     }
 }
+
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct BinaryStringShare {
     pub length: u64,
@@ -846,6 +844,7 @@ impl BinaryStringShare {
         self.value2.extend_from_slice(&other.value2);
     }
 }
+
 #[derive(Clone, Debug)]
 pub struct CommonRandomness {
     f1: ChaCha20Rng,
@@ -1011,6 +1010,7 @@ impl ServerState {
         }
     }
 }
+
 pub fn binary_string_to_u8_vec(input: BinaryString) -> Vec<u8> {
     let mut vec_u8 = Vec::new();
     let mut byte = 0u8;
