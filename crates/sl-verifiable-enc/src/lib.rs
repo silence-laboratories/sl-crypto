@@ -15,13 +15,50 @@ use rand_chacha::{rand_core::CryptoRngCore, ChaCha20Rng};
 use rsa::{
     traits::PublicKeyParts, BigUint, Oaep, RsaPrivateKey, RsaPublicKey,
 };
-use sha2::{Digest, Sha256};
+use digest::{Digest, OutputSizeUser};
+use sha2::Sha256;
 use std::{collections::HashSet, ops::Index};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use thiserror::Error;
 
-pub const SECURITY_PARAM: u16 = 128;
 const VERSION: u8 = 1;
+
+/// Trait for hash functions used in verifiable RSA encryption.
+/// 
+/// This trait defines the security properties of a hash function:
+/// - `COLLISION_RESISTANCE_BITS`: The collision resistance in bits (typically output_size / 2)
+/// - `MAX_SECURITY_PARAM`: Maximum security parameter (hash output size in bits)
+/// - `DEFAULT_SECURITY_PARAM`: Default security parameter (collision resistance)
+pub trait HashFunction: 
+    Digest 
+    + OutputSizeUser 
+    + digest::FixedOutputReset
+    + digest::DynDigest
+    + Send 
+    + Sync 
+    + 'static 
+    + Clone
+{
+    /// Collision resistance in bits (birthday bound).
+    /// For most hash functions, this is OUTPUT_SIZE_BITS / 2.
+    const COLLISION_RESISTANCE_BITS: u16;
+    
+    /// Maximum security parameter in bits (hash output size).
+    /// This is the maximum number of bits we can extract from the hash output.
+    const MAX_SECURITY_PARAM: u16;
+    
+    /// Default security parameter (collision resistance).
+    /// This is the recommended security parameter for the hash function.
+    const DEFAULT_SECURITY_PARAM: u16 = Self::COLLISION_RESISTANCE_BITS;
+}
+
+impl HashFunction for Sha256 {
+    /// SHA-256 has 128 bits of collision resistance (birthday bound).
+    const COLLISION_RESISTANCE_BITS: u16 = 128;
+    
+    /// SHA-256 outputs 256 bits, so we can extract up to 256 bits.
+    const MAX_SECURITY_PARAM: u16 = 256;
+}
 
 //Re-Exports
 pub use rsa;
@@ -41,7 +78,7 @@ pub enum RsaError {
     InvalidSizeParam,
     #[error("(de)Serialization error")]
     SerdeError(String),
-    #[error("Invalid Security Parameter, must be between 128 and 256 (inclusive)")]
+    #[error("Invalid Security Parameter: must be at least the hash function's collision resistance and not exceed its maximum output size")]
     InvalidSecurityParam,
     #[error("Unsupported version")]
     UnsupportedVersion,
@@ -53,20 +90,24 @@ pub struct ProofData<G: Group + GroupEncoding> {
     enc_r: Vec<u8>,
 }
 
-pub struct VerifiableRsaEncryption<G>
+pub struct VerifiableRsaEncryption<G, H = Sha256>
 where
     G: Group + GroupEncoding + ConstantTimeEq,
     G::Scalar: ConditionallySelectable,
+    H: HashFunction,
 {
     seed: [u8; 32],
     proofs: Vec<ProofData<G>>,
     open_scalars: Vec<G::Scalar>,
     security_param: u16,
+    _phantom: core::marker::PhantomData<H>,
 }
 
-impl<G> VerifiableRsaEncryption<G>
+impl<G, H> VerifiableRsaEncryption<G, H>
 where
     G: Group + GroupEncoding + ConstantTimeEq,
+    G::Scalar: ConditionallySelectable,
+    H: HashFunction,
 {
     pub fn encrypt_with_proof<R: CryptoRngCore>(
         x: &G::Scalar,
@@ -76,9 +117,12 @@ where
         rng: &mut R,
     ) -> Result<Self, RsaError> {
         let seed = rng.gen::<[u8; 32]>();
-        let security_param = security_param.unwrap_or(SECURITY_PARAM);
-        // Security parameter must be at least 128 and at most 256
-        if !(SECURITY_PARAM..=256).contains(&security_param) {
+        let security_param = security_param.unwrap_or(H::DEFAULT_SECURITY_PARAM);
+        
+        if security_param < H::COLLISION_RESISTANCE_BITS {
+            return Err(RsaError::InvalidSecurityParam);
+        }
+        if security_param > H::MAX_SECURITY_PARAM {
             return Err(RsaError::InvalidSecurityParam);
         }
         let mut proofs = Vec::with_capacity(security_param as usize);
@@ -88,19 +132,24 @@ where
 
         for round in 0..security_param {
             // Derive r deterministically using round index to ensure uniqueness
-            let mut hasher = Sha256::new();
-            hasher.update(b"SL-verifiable-enc-round");
-            hasher.update(seed);
-            hasher.update(round.to_be_bytes());
-            let mut round_rng =
-                ChaCha20Rng::from_seed(hasher.finalize().into());
+            let mut hasher = H::new();
+            Digest::update(&mut hasher, b"SL-verifiable-enc-round");
+            Digest::update(&mut hasher, seed);
+            Digest::update(&mut hasher, round.to_be_bytes());
+            let hash_output = hasher.finalize();
+            // Convert hash output to seed array (pad or truncate as needed)
+            let mut seed_bytes = [0u8; 32];
+            let hash_bytes = hash_output.as_slice();
+            let copy_len = core::cmp::min(32, hash_bytes.len());
+            seed_bytes[..copy_len].copy_from_slice(&hash_bytes[..copy_len]);
+            let mut round_rng = ChaCha20Rng::from_seed(seed_bytes);
             let r = G::Scalar::random(&mut round_rng);
 
             let g_r = G::generator() * r;
             let x_plus_r = *x + r;
             let enc_r =
-                rsa_encrypt_with_label(r.to_repr(), label, rsa_pubkey, seed)?;
-            let enc_x_plus_r = rsa_encrypt_with_label(
+                rsa_encrypt_with_label::<H>(r.to_repr(), label, rsa_pubkey, seed)?;
+            let enc_x_plus_r = rsa_encrypt_with_label::<H>(
                 x_plus_r.to_repr(),
                 label,
                 rsa_pubkey,
@@ -133,6 +182,7 @@ where
             proofs,
             seed,
             security_param,
+            _phantom: core::marker::PhantomData,
         })
     }
 
@@ -192,7 +242,7 @@ where
             let open_scalar = &self.open_scalars[i];
             let scalar_expo = G::generator() * open_scalar;
             let choice_bit = challenge.extract_bit(i);
-            let enc_open_scalar = rsa_encrypt_with_label(
+            let enc_open_scalar = rsa_encrypt_with_label::<H>(
                 open_scalar.to_repr(),
                 label,
                 rsa_pubkey,
@@ -249,7 +299,7 @@ where
             let enc_r = &proof.enc_r;
             let enc_x_r = &proof.enc_x_r;
 
-            let r = rsa_decrypt_with_label(enc_r, label, rsa_privkey)?;
+            let r = rsa_decrypt_with_label::<H>(enc_r, label, rsa_privkey)?;
 
             // If r is not a valid scalar, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
             let r = if let Some(r) = decode_scalar::<G::Scalar>(&r) {
@@ -259,7 +309,7 @@ where
             };
 
             let x_plus_r =
-                rsa_decrypt_with_label(enc_x_r, label, rsa_privkey)?;
+                rsa_decrypt_with_label::<H>(enc_x_r, label, rsa_privkey)?;
 
             let x_plus_r = if let Some(x_plus_r) =
                 decode_scalar::<G::Scalar>(&x_plus_r)
@@ -378,8 +428,12 @@ where
             let remaining_data = data.len() - offset;
             let num_proofs = remaining_data / (proof_size + scalar_size);
 
-            if security_param < SECURITY_PARAM {
-                return Err("Security param must at least be 128");
+               
+            if security_param < H::COLLISION_RESISTANCE_BITS {
+                return Err("Security param must be at least the hash function's collision resistance");
+            }
+            if security_param > H::MAX_SECURITY_PARAM {
+                return Err("Security param exceeds hash function's maximum output size");
             }
 
             if num_proofs != security_param as usize {
@@ -446,6 +500,7 @@ where
                 proofs,
                 open_scalars,
                 security_param,
+                _phantom: core::marker::PhantomData,
             })
         };
         res().map_err(|e| RsaError::SerdeError(e.to_string()))
@@ -455,21 +510,21 @@ where
         q_point: &G,
         label: &[u8],
         proofs: &[ProofData<G>],
-    ) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(b"Verified-RSA-encryption");
-        hasher.update(q_point.to_bytes());
+    ) -> Vec<u8> {
+        let mut hasher = H::new();
+        Digest::update(&mut hasher, b"Verified-RSA-encryption");
+        Digest::update(&mut hasher, q_point.to_bytes());
         for proof in proofs {
-            hasher.update(proof.g_r);
-            hasher.update(&proof.enc_x_r);
-            hasher.update(&proof.enc_r);
+            Digest::update(&mut hasher, proof.g_r);
+            Digest::update(&mut hasher, &proof.enc_x_r);
+            Digest::update(&mut hasher, &proof.enc_r);
         }
-        hasher.update(label);
-        hasher.finalize().into()
+        Digest::update(&mut hasher, label);
+        hasher.finalize().to_vec()
     }
 }
 
-fn rsa_encrypt_with_label(
+fn rsa_encrypt_with_label<H: HashFunction>(
     m: impl AsRef<[u8]>,
     label: &[u8],
     rsa_pubkey: &RsaPublicKey,
@@ -477,26 +532,26 @@ fn rsa_encrypt_with_label(
 ) -> Result<Vec<u8>, RsaError> {
     let mut rng = ChaCha20Rng::from_seed(seed);
     let m_int = BigUint::from_bytes_be(m.as_ref());
-    let label_int = label_int_from_bytes(label);
+    let label_int = label_int_from_bytes::<H>(label);
     let plaintext = (m_int * label_int) % rsa_pubkey.n();
-    let padding = Oaep::new::<Sha256>();
+    let padding = Oaep::new::<H>();
     rsa_pubkey
         .encrypt(&mut rng, padding, &plaintext.to_bytes_be())
         .map_err(|_| RsaError::EncError)
 }
 
-fn rsa_decrypt_with_label(
+fn rsa_decrypt_with_label<H: HashFunction>(
     ciphertext: &[u8],
     label: &[u8],
     rsa_privkey: &RsaPrivateKey,
 ) -> Result<Vec<u8>, RsaError> {
-    let padding = Oaep::new::<Sha256>();
+    let padding = Oaep::new::<H>();
     let plaintext = rsa_privkey
         .decrypt(padding, ciphertext)
         .map_err(|_| RsaError::DecError)?;
 
     let n = rsa_privkey.n();
-    let label_inv = label_int_from_bytes(label)
+    let label_inv = label_int_from_bytes::<H>(label)
         .mod_inverse(n)
         .and_then(|num| num.to_biguint())
         .ok_or(RsaError::InvalidLabel)?;
@@ -506,12 +561,12 @@ fn rsa_decrypt_with_label(
     Ok(message.to_bytes_be())
 }
 
-fn label_int_from_bytes(label: &[u8]) -> BigUint {
-    let mut hasher = Sha256::new();
-    hasher.update(b"SL-label-for-RSA");
-    hasher.update(label);
+fn label_int_from_bytes<H: HashFunction>(label: &[u8]) -> BigUint {
+    let mut hasher = H::new();
+    Digest::update(&mut hasher, b"SL-label-for-RSA");
+    Digest::update(&mut hasher, label);
     let digest = hasher.finalize();
-    BigUint::from_bytes_be(&digest[..])
+    BigUint::from_bytes_be(digest.as_slice())
 }
 
 /// Simple trait to extract a bit from a byte array.
@@ -520,12 +575,29 @@ pub trait ExtractBit: Index<usize, Output = u8> {
     fn extract_bit(&self, idx: usize) -> Choice {
         let byte_idx = idx >> 3;
         let bit_idx = idx & 0x7;
+        if byte_idx >= self.len() {
+            return Choice::from(0u8);
+        }
         let byte = self[byte_idx];
         let mask = 1 << bit_idx;
         Choice::from(((byte & mask) != 0) as u8)
     }
+    
+    /// Get the length of the byte array.
+    fn len(&self) -> usize;
 }
-impl<const N: usize> ExtractBit for [u8; N] {}
+
+impl<const N: usize> ExtractBit for [u8; N] {
+    fn len(&self) -> usize {
+        N
+    }
+}
+
+impl ExtractBit for Vec<u8> {
+    fn len(&self) -> usize {
+        self.len()
+    }
+}
 
 fn decode_scalar<S: PrimeField>(bytes: &[u8]) -> Option<S> {
     if bytes.len() != size_of::<S::Repr>() {
@@ -558,7 +630,7 @@ mod tests {
             .expect("Failed to generate RSA private key");
         let rsa_public_key = rsa_private_key.to_public_key();
         let label = b"test-label";
-        let verifiable_rsa = VerifiableRsaEncryption::encrypt_with_proof(
+        let verifiable_rsa: VerifiableRsaEncryption<ProjectivePoint, Sha256> = VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
             label,
@@ -586,7 +658,7 @@ mod tests {
             .expect("Failed to generate RSA private key");
         let rsa_public_key = rsa_private_key.to_public_key();
         let label = b"test-label";
-        let verifiable_rsa = VerifiableRsaEncryption::encrypt_with_proof(
+        let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint, Sha256> = VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
             label,
@@ -595,7 +667,7 @@ mod tests {
         )?;
         let bytes = verifiable_rsa.to_bytes();
 
-        let deserialized: VerifiableRsaEncryption<EdwardsPoint> =
+        let deserialized: VerifiableRsaEncryption<EdwardsPoint, Sha256> =
             VerifiableRsaEncryption::from_bytes(&bytes).unwrap();
 
         deserialized.verify(&public_key, &rsa_public_key, label)?;
@@ -618,7 +690,7 @@ mod tests {
             .expect("Failed to generate RSA private key");
         let rsa_public_key = rsa_private_key.to_public_key();
         let label = b"test-label";
-        let verifiable_rsa: VerifiableRsaEncryption<ProjectivePoint> =
+        let verifiable_rsa: VerifiableRsaEncryption<ProjectivePoint, Sha256> =
             VerifiableRsaEncryption::encrypt_with_proof(
                 &private_key,
                 &rsa_public_key,
@@ -628,7 +700,7 @@ mod tests {
             )?;
 
         let bytes = verifiable_rsa.to_bytes();
-        let deserialized =
+        let deserialized: VerifiableRsaEncryption<ProjectivePoint, Sha256> =
             VerifiableRsaEncryption::from_bytes(&bytes).unwrap();
         deserialized.verify(&public_key, &rsa_public_key, label)?;
 
@@ -649,7 +721,7 @@ mod tests {
             .expect("Failed to generate RSA private key");
         let rsa_public_key = rsa_private_key.to_public_key();
         let label = b"test-label";
-        let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint> =
+        let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint, Sha256> =
             VerifiableRsaEncryption::encrypt_with_proof(
                 &private_key,
                 &rsa_public_key,
@@ -659,7 +731,7 @@ mod tests {
             )?;
 
         let bytes = verifiable_rsa.to_bytes();
-        let deserialized =
+        let deserialized: VerifiableRsaEncryption<EdwardsPoint, Sha256> =
             VerifiableRsaEncryption::from_bytes(&bytes).unwrap();
         deserialized.verify(&public_key, &rsa_public_key, label)?;
 
@@ -681,7 +753,7 @@ mod tests {
             .expect("Failed to generate RSA private key");
         let rsa_public_key = rsa_private_key.to_public_key();
         let label = b"test-label";
-        let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint> =
+        let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint, Sha256> =
             VerifiableRsaEncryption::encrypt_with_proof(
                 &private_key,
                 &rsa_public_key,
@@ -691,7 +763,7 @@ mod tests {
             )?;
 
         let bytes = verifiable_rsa.to_bytes();
-        let deserialized =
+        let deserialized: VerifiableRsaEncryption<EdwardsPoint, Sha256> =
             VerifiableRsaEncryption::from_bytes(&bytes).unwrap();
         deserialized.verify(&public_key, &rsa_public_key, label)?;
 
@@ -713,7 +785,7 @@ mod tests {
         let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
         let rsa_public_key = rsa_private_key.to_public_key();
 
-        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+        let proof: VerifiableRsaEncryption<ProjectivePoint, Sha256> = VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
             b"label",
@@ -736,7 +808,7 @@ mod tests {
         let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
         let rsa_public_key = rsa_private_key.to_public_key();
 
-        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+        let proof: VerifiableRsaEncryption<ProjectivePoint, Sha256> = VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
             b"label",
@@ -759,7 +831,7 @@ mod tests {
         let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
         let rsa_public_key = rsa_private_key.to_public_key();
 
-        let mut proof = VerifiableRsaEncryption::encrypt_with_proof(
+        let mut proof: VerifiableRsaEncryption<ProjectivePoint, Sha256> = VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
             b"label",
@@ -787,7 +859,7 @@ mod tests {
         let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
         let rsa_public_key = rsa_private_key.to_public_key();
 
-        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+        let proof: VerifiableRsaEncryption<ProjectivePoint, Sha256> = VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
             b"label",
@@ -817,7 +889,7 @@ mod tests {
         let wrong_rsa_private_key =
             RsaPrivateKey::new(&mut rng, 2048).unwrap();
 
-        let proof = VerifiableRsaEncryption::encrypt_with_proof(
+        let proof: VerifiableRsaEncryption<ProjectivePoint, Sha256> = VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
             b"label",
@@ -891,7 +963,7 @@ mod tests {
         let rsa_private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
         let rsa_public_key = rsa_private_key.to_public_key();
 
-        let mut proof = VerifiableRsaEncryption::encrypt_with_proof(
+        let mut proof: VerifiableRsaEncryption<ProjectivePoint, Sha256> = VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
             b"label",

@@ -37,6 +37,7 @@ Here's a basic example of how to use the library with the `secp256k1` curve:
 use k256::{ProjectivePoint, Scalar};
 use rand::SeedableRng;
 use rsa::RsaPrivateKey;
+use sha2::Sha256;
 use sl_verifiable_enc::VerifiableRsaEncryption;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Encrypt with proof
     let label = b"example-label";
-    let verifiable_rsa = 
+    let verifiable_rsa: VerifiableRsaEncryption<ProjectivePoint, Sha256> = 
         VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
@@ -79,6 +80,7 @@ use curve25519_dalek::{EdwardsPoint, Scalar};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use rsa::RsaPrivateKey;
+use sha2::Sha256;
 use sl_verifiable_enc::VerifiableRsaEncryption;
 use group::Group;
 
@@ -93,7 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Encrypt with proof
     let label = b"example-label";
-    let verifiable_rsa = 
+    let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint, Sha256> = 
         VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
@@ -117,7 +119,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Security Considerations
 
 - The library uses constant-time operations where possible to mitigate timing attacks.
-- The default security parameter is set to 128, which can be adjusted if needed.
+- The security parameter is derived from the hash function's collision resistance (default 128 bits for SHA-256) and can be adjusted up to the hash function's maximum output size.
+- The security parameter is automatically validated to ensure it matches the hash function's security properties.
 - Always use cryptographically secure random number generators in production environments.
 
 ## License
