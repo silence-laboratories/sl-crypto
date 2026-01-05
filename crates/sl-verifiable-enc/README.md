@@ -121,5 +121,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## License
 
-You can find the license [here](/LICENSE.md)
+You can find the license [here](/LICENSE)
 
