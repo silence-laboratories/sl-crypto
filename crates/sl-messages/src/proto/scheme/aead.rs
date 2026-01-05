@@ -9,8 +9,9 @@ use aead::{
     generic_array::{GenericArray, typenum::Unsigned},
 };
 use chacha20::hchacha;
-use rand_core::CryptoRngCore;
 use sha2::{Digest, Sha256};
+use rand_core::{CryptoRng as CryptoRng09, OsRng as OsRng09}; // v0.9
+use rand_core_06::{CryptoRng as CryptoRng06, RngCore as RngCore06}; // v0.6 // v0.6use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, ReusableSecret};
 use zeroize::Zeroizing;
 
@@ -19,9 +20,50 @@ use crate::pairs::Pairs;
 type SharedKey = Zeroizing<GenericArray<u8, U32>>;
 
 use super::{
-    EncryptionError, EncryptionScheme, EncryptionSchemeBuilder, MessageKey,
+    EncryptionError, EncryptionScheme, EncryptionSchemeBuilder, KeyExchange, MessageKey,
     PublicKeyError,
 };
+
+/// Wrapper for x25519_dalek::PublicKey that implements TryFrom<&[u8]>
+#[derive(Clone, Copy)]
+pub struct X25519PublicKey(pub PublicKey);
+
+impl AsRef<[u8]> for X25519PublicKey {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+}
+
+impl<'a> TryFrom<&'a [u8]> for X25519PublicKey {
+    type Error = PublicKeyError;
+
+    fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
+        let array: [u8; 32] = bytes.try_into().map_err(|_| PublicKeyError)?;
+        Ok(X25519PublicKey(PublicKey::from(array)))
+    }
+}
+
+impl From<PublicKey> for X25519PublicKey {
+    fn from(pk: PublicKey) -> Self {
+        X25519PublicKey(pk)
+    }
+}
+
+impl From<X25519PublicKey> for PublicKey {
+    fn from(wrapper: X25519PublicKey) -> Self {
+        wrapper.0
+    }
+}
+
+/// Empty key material for X25519 (no additional material to exchange)
+#[derive(Clone, Copy, Default)]
+pub struct EmptyKeyMaterial;
+
+impl AsRef<[u8]> for EmptyKeyMaterial {
+    fn as_ref(&self) -> &[u8] {
+        &[]
+    }
+}
 
 // Counter to create a unuque nonce.
 struct NonceCounter(u32);
@@ -70,7 +112,7 @@ pub struct AeadMessageKey<S: KeyInit + AeadCore> {
 
 impl<S> AeadX25519Builder<S> {
     /// Generate a new [`AeadX25519`] with the supplied RNG.
-    pub fn new(rng: &mut impl CryptoRngCore) -> Self {
+    pub fn new(rng: &mut (impl RngCore06 + CryptoRng06)) -> Self {
         let secret = ReusableSecret::random_from_rng(rng);
         let public_key = PublicKey::from(&secret);
 
@@ -95,6 +137,44 @@ impl<S> AeadX25519Builder<S> {
     }
 }
 
+impl<S> KeyExchange for AeadX25519Builder<S>
+where
+    S: AeadInPlace + KeyInit + Send,
+{
+    type PublicKey = X25519PublicKey;
+    type SharedSecret = SharedKey;
+    type KeyMaterial = EmptyKeyMaterial; // No additional material for X25519
+
+    fn establish_shared_secret(
+        &mut self,
+        receiver_pk: &Self::PublicKey,
+        _rng: &mut impl CryptoRng09,
+    ) -> Result<(Self::SharedSecret, EmptyKeyMaterial), PublicKeyError> {
+        // DH computation using our secret key and receiver's public key
+        let pk: PublicKey = receiver_pk.0.clone();
+        let shared_secret = self.secret.diffie_hellman(&pk);
+        if !shared_secret.was_contributory() {
+            return Err(PublicKeyError);
+        }
+        let shared_key = Zeroizing::new(hchacha::<U10>(
+            GenericArray::from_slice(shared_secret.as_bytes()),
+            &GenericArray::default(),
+        ));
+        Ok((shared_key, EmptyKeyMaterial))
+    }
+
+    fn receive_shared_secret(
+        &mut self,
+        sender_pk: &Self::PublicKey,
+        _key_material: &EmptyKeyMaterial,
+    ) -> Result<Self::SharedSecret, PublicKeyError> {
+        // For DH, same as establish (symmetric)
+        let mut rng = OsRng09;
+        self.establish_shared_secret(sender_pk, &mut rng)
+            .map(|(ss, _)| ss)
+    }
+}
+
 impl<S> EncryptionSchemeBuilder for AeadX25519Builder<S>
 where
     S: AeadInPlace + KeyInit + Send,
@@ -110,21 +190,18 @@ where
         receiver_index: usize,
         pk: &[u8],
     ) -> Result<(), PublicKeyError> {
-        let pk: [u8; 32] = pk.try_into().map_err(|_| PublicKeyError)?;
-        let pk = PublicKey::from(pk);
+        let receiver_pk = Self::PublicKey::try_from(pk)?;
 
-        let shared_secret = self.secret.diffie_hellman(&pk);
+        // This calls the establish_shared_secret() we implemented above
+        use rand_core::OsRng;
+        let (shared_secret, _key_material) = self.establish_shared_secret(
+            &receiver_pk,
+            &mut OsRng09,
+        )?;
 
-        if !shared_secret.was_contributory() {
-            return Err(PublicKeyError);
-        }
-
-        let shared_key = Zeroizing::new(hchacha::<U10>(
-            GenericArray::from_slice(shared_secret.as_bytes()),
-            &GenericArray::default(),
-        ));
-
-        self.pk.push(receiver_index, (shared_key, pk));
+        // Convert X25519PublicKey wrapper back to PublicKey for storage
+        let pk_inner: PublicKey = receiver_pk.into();
+        self.pk.push(receiver_index, (shared_secret, pk_inner));
 
         Ok(())
     }

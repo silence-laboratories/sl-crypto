@@ -4,7 +4,12 @@
 use crate::proto::encrypted::MessageKey;
 
 pub mod aead;
+pub mod key_exchange;
+pub mod mlkem;
 pub mod passthrough;
+
+pub use key_exchange::KeyExchange;
+
 
 #[derive(Debug)]
 pub struct PublicKeyError;
@@ -12,7 +17,7 @@ pub struct PublicKeyError;
 #[derive(Debug)]
 pub struct EncryptionError;
 
-pub trait EncryptionSchemeBuilder {
+pub trait EncryptionSchemeBuilder: KeyExchange {
     type Scheme: EncryptionScheme;
 
     /// Return external representation of own public key
@@ -50,6 +55,24 @@ pub trait EncryptionSchemeBuilder {
     ) -> Result<(), PublicKeyError>;
 
     fn build(self) -> Self::Scheme;
+
+    /// Get key material that needs to be sent to receiver.
+    /// For X25519: Returns `None` (no material to exchange)
+    /// For ML-KEM: Returns `Some(ciphertext)` that needs to be sent to receiver
+    fn get_key_material_for_receiver(&self, _receiver_index: usize) -> Option<&[u8]> {
+        None // Default: no material for symmetric exchanges
+    }
+
+    /// Receive and process key material from sender.
+    /// For X25519: No-op (shared secret already computed)
+    /// For ML-KEM: Decapsulates ciphertext and stores shared secret
+    fn receive_key_material(
+        &mut self,
+        _sender_index: usize,
+        _key_material: &[u8],
+    ) -> Result<(), PublicKeyError> {
+        Ok(()) // Default: no-op for symmetric exchanges
+    }
 }
 
 /// Represents an encryption scheme interface for in-place AEAD and
