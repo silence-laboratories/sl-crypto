@@ -2,6 +2,7 @@
 // This software is licensed under the Silence Laboratories License Agreement.
 
 use std::marker::PhantomData;
+use std::sync::OnceLock;
 
 use aead::{
     AeadCore, AeadInPlace, Key, KeyInit, Nonce, Tag,
@@ -46,16 +47,28 @@ impl NonceCounter {
 
 type SharedSecret = Zeroizing<Vec<u8>>; // 32 bytes for ML-KEM-768
 
-/// Wrapper that stores bytes separately for AsRef<[u8]>
-#[derive(Clone)]
+/// Wrapper that computes bytes on-demand from the key to save space
+/// Bytes are lazily computed and cached only when AsRef is called
 pub struct MlKemEncapsulationKey {
     key: ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>,
-    bytes: Vec<u8>, // Store bytes for AsRef<[u8]>
+    bytes: OnceLock<Vec<u8>>, // Lazily computed bytes, only allocated if AsRef is called
+}
+
+impl Clone for MlKemEncapsulationKey {
+    fn clone(&self) -> Self {
+        // Clone the key, but create a new empty OnceLock (bytes will be recomputed if needed)
+        Self {
+            key: self.key.clone(),
+            bytes: OnceLock::new(),
+        }
+    }
 }
 
 impl AsRef<[u8]> for MlKemEncapsulationKey {
     fn as_ref(&self) -> &[u8] {
-        &self.bytes
+        // Compute bytes on-demand and cache them
+        self.bytes
+            .get_or_init(|| self.key.as_bytes().as_slice().to_vec())
     }
 }
 
@@ -73,7 +86,7 @@ impl<'a> TryFrom<&'a [u8]> for MlKemEncapsulationKey {
         let key = Ek::from_bytes(&array);
         Ok(MlKemEncapsulationKey {
             key,
-            bytes: bytes.to_vec(),
+            bytes: OnceLock::new(),
         })
     }
 }
@@ -84,9 +97,11 @@ impl From<ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>>
     fn from(
         ek: ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>,
     ) -> Self {
-        // Convert Array to Vec<u8>
-        let bytes = ek.as_bytes().as_slice().to_vec();
-        MlKemEncapsulationKey { key: ek, bytes }
+        // Bytes will be computed lazily when AsRef is first called
+        MlKemEncapsulationKey {
+            key: ek,
+            bytes: OnceLock::new(),
+        }
     }
 }
 
@@ -373,20 +388,28 @@ mod tests {
 
     impl RngCore for InfallibleOsRng {
         fn next_u32(&mut self) -> u32 {
-            self.0.try_next_u32().unwrap()
+            // In tests, OsRng should never fail, but handle gracefully
+            self.0.try_next_u32().unwrap_or_else(|_| {
+                panic!("OsRng failed in test - this should never happen")
+            })
         }
         fn next_u64(&mut self) -> u64 {
-            self.0.try_next_u64().unwrap()
+            self.0.try_next_u64().unwrap_or_else(|_| {
+                panic!("OsRng failed in test - this should never happen")
+            })
         }
         fn fill_bytes(&mut self, dest: &mut [u8]) {
-            self.0.try_fill_bytes(dest).unwrap()
+            self.0.try_fill_bytes(dest).unwrap_or_else(|_| {
+                panic!("OsRng failed in test - this should never happen")
+            })
         }
     }
 
     impl CryptoRng for InfallibleOsRng {}
 
     #[test]
-    fn test_mlkem_key_exchange_and_encryption() {
+    fn test_mlkem_key_exchange_and_encryption()
+    -> Result<(), Box<dyn std::error::Error>> {
         // 1. Setup Sender and Receiver Builders
         // Use InfallibleOsRng to satisfy CryptoRng requirement (OsRng is TryCryptoRng)
         let mut rng = InfallibleOsRng(OsRng);
@@ -404,20 +427,24 @@ mod tests {
         let receiver_index = 1;
         sender_builder
             .receiver_public_key(receiver_index, receiver_pk_bytes)
-            .expect("sender failed to ingest receiver pk");
+            .map_err(|e| {
+                format!("sender failed to ingest receiver pk: {:?}", e)
+            })?;
 
         let sender_pk_bytes = sender_builder.public_key();
 
         // Sender gets the ciphertext to send to receiver
         let key_material = sender_builder
             .get_key_material_for_receiver(receiver_index)
-            .expect("sender should have ciphertext");
+            .ok_or("sender should have ciphertext")?;
 
         // Receiver ingests sender's ciphertext
         let sender_index = 2;
         receiver_builder
             .receive_key_material(sender_pk_bytes, sender_index, key_material)
-            .expect("receiver failed to ingest key material");
+            .map_err(|e| {
+                format!("receiver failed to ingest key material: {:?}", e)
+            })?;
 
         // 3. Build Schemes
         let mut sender_scheme = sender_builder.build();
@@ -431,14 +458,15 @@ mod tests {
         let mut encryption_buffer = vec![0u8; msg.len() + 16 + 12]; // msg + tag(16) + nonce(12)
         encryption_buffer[..msg.len()].copy_from_slice(msg);
 
-        let sender_key = sender_scheme
-            .encryption_key(receiver_index)
-            .expect("sender failed to get encryption key");
+        let sender_key =
+            sender_scheme.encryption_key(receiver_index).map_err(|e| {
+                format!("sender failed to get encryption key: {:?}", e)
+            })?;
 
         // Encrypt in place
         sender_key
             .encrypt(aad, &mut encryption_buffer)
-            .expect("encryption failed");
+            .map_err(|e| format!("encryption failed: {:?}", e))?;
 
         assert_ne!(
             &encryption_buffer[..msg.len()],
@@ -450,8 +478,10 @@ mod tests {
         // Receiver decrypts
         let decrypted = receiver_scheme
             .decrypt_message(aad, &mut encryption_buffer, sender_index)
-            .expect("decryption failed");
+            .map_err(|e| format!("decryption failed: {:?}", e))?;
 
         assert_eq!(decrypted, msg, "Decrypted message should match original");
+
+        Ok(())
     }
 }

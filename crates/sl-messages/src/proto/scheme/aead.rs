@@ -323,17 +323,27 @@ mod tests {
 
     impl RngCore06 for CompatOsRng {
         fn next_u32(&mut self) -> u32 {
-            self.0.try_next_u32().unwrap()
+            // In tests, OsRng should never fail, but handle gracefully
+            self.0.try_next_u32().unwrap_or_else(|_| {
+                panic!("OsRng failed in test - this should never happen")
+            })
         }
         fn next_u64(&mut self) -> u64 {
-            self.0.try_next_u64().unwrap()
+            self.0.try_next_u64().unwrap_or_else(|_| {
+                panic!("OsRng failed in test - this should never happen")
+            })
         }
         fn fill_bytes(&mut self, dest: &mut [u8]) {
-            self.0.try_fill_bytes(dest).unwrap()
+            self.0.try_fill_bytes(dest).unwrap_or_else(|_| {
+                panic!("OsRng failed in test - this should never happen")
+            })
         }
         fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error06> {
             self.0.try_fill_bytes(dest).map_err(|_e| {
-                let nz = core::num::NonZeroU32::new(1).unwrap();
+                // In tests, this should never happen, but handle gracefully
+                let nz = core::num::NonZeroU32::new(1).unwrap_or_else(|| {
+                    panic!("Failed to create NonZeroU32 in test")
+                });
                 Error06::from(nz)
             })
         }
@@ -342,7 +352,8 @@ mod tests {
     impl CryptoRng06 for CompatOsRng {}
 
     #[test]
-    fn test_x25519_key_exchange_and_encryption() {
+    fn test_x25519_key_exchange_and_encryption()
+    -> Result<(), Box<dyn std::error::Error>> {
         // 1. Setup Sender and Receiver Builders
         let mut rng = CompatOsRng(OsRng);
 
@@ -359,14 +370,18 @@ mod tests {
         let receiver_index = 1;
         sender_builder
             .receiver_public_key(receiver_index, receiver_pk_bytes)
-            .expect("sender failed to ingest receiver pk");
+            .map_err(|e| {
+                format!("sender failed to ingest receiver pk: {:?}", e)
+            })?;
 
         // Receiver MUST ingest sender's public key (to establish shared secret)
         let sender_pk_bytes = sender_builder.public_key();
         let sender_index = 2;
         receiver_builder
             .receiver_public_key(sender_index, sender_pk_bytes)
-            .expect("receiver failed to ingest sender pk");
+            .map_err(|e| {
+                format!("receiver failed to ingest sender pk: {:?}", e)
+            })?;
 
         // 3. Build Schemes
         let mut sender_scheme = sender_builder.build();
@@ -380,14 +395,15 @@ mod tests {
         let mut encryption_buffer = vec![0u8; msg.len() + 16 + 12]; // msg + tag(16) + nonce(12)
         encryption_buffer[..msg.len()].copy_from_slice(msg);
 
-        let sender_key = sender_scheme
-            .encryption_key(receiver_index)
-            .expect("sender failed to get encryption key");
+        let sender_key =
+            sender_scheme.encryption_key(receiver_index).map_err(|e| {
+                format!("sender failed to get encryption key: {:?}", e)
+            })?;
 
         // Encrypt in place
         sender_key
             .encrypt(aad, &mut encryption_buffer)
-            .expect("encryption failed");
+            .map_err(|e| format!("encryption failed: {:?}", e))?;
 
         assert_ne!(
             &encryption_buffer[..msg.len()],
@@ -399,8 +415,10 @@ mod tests {
         // Receiver decrypts
         let decrypted = receiver_scheme
             .decrypt_message(aad, &mut encryption_buffer, sender_index)
-            .expect("decryption failed");
+            .map_err(|e| format!("decryption failed: {:?}", e))?;
 
         assert_eq!(decrypted, msg, "Decrypted message should match original");
+
+        Ok(())
     }
 }
