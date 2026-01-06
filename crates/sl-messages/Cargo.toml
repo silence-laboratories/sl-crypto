@@ -10,14 +10,15 @@ bytes = "1.5"
 chacha20 = { version = "0.9" }
 chacha20poly1305 = { version = "0.10.1" }
 generic-array = { version = "0.14.7", features = [ "zeroize" ] }
-# Standardize on 0.9.3 for the modern side
-rand_core = { version = "0.9.3", features = ["os_rng", "std"] }
+# Modern side (ML-KEM and your traits)
+rand_core = { version = "0.9.3", features = ["std", "os_rng"] }
 
-# Standardize on 0.6.4 for the legacy (dalek) side
-rand_core_06 = { package = "rand_core", version = "0.6.4", features = ["std"] }
+rand_core_06 = { package = "rand_core", version = "0.6.4" }
 
-# Ensure dalek isn't pulling in an even older rand_core
-x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+rand = { version = "0.9.0-alpha.2", features = ["std"] }
+
+getrandom = { version = "0.3", features = ["std"] }
+x25519-dalek = { version = "2.0", features = ["reusable_secrets", "static_secrets"] }
 sha2 = { version = "0.10" }
 signature = { version = "2.2.0" }
 zeroize = { version = "1.6", features = [ "derive" ] }
@@ -28,6 +29,7 @@ tokio = { version = "1.43", optional = true }
 
 [dev-dependencies]
 rand = "0.8"
+
 tokio = { version = "1.43", features = ["sync", "macros", "rt-multi-thread", "net", "time"] }
 
 [features]

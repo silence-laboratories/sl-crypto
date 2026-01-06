@@ -9,9 +9,11 @@ use aead::{
     generic_array::{GenericArray, typenum::Unsigned},
 };
 use chacha20::hchacha;
+
+// Imports for the modern stack (v0.9/v0.10)
+use rand_core::{OsRng, TryCryptoRng};
+use rand_core_06::{CryptoRng as CryptoRng06, RngCore as RngCore06};
 use sha2::{Digest, Sha256};
-use rand_core::{CryptoRng as CryptoRng09, OsRng as OsRng09}; // v0.9
-use rand_core_06::{CryptoRng as CryptoRng06, RngCore as RngCore06}; // v0.6 // v0.6use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, ReusableSecret};
 use zeroize::Zeroizing;
 
@@ -65,7 +67,7 @@ impl AsRef<[u8]> for EmptyKeyMaterial {
     }
 }
 
-// Counter to create a unuque nonce.
+// Counter to create a unique nonce.
 struct NonceCounter(u32);
 
 impl NonceCounter {
@@ -148,7 +150,7 @@ where
     fn establish_shared_secret(
         &mut self,
         receiver_pk: &Self::PublicKey,
-        _rng: &mut impl CryptoRng09,
+        _rng: &mut impl TryCryptoRng,
     ) -> Result<(Self::SharedSecret, EmptyKeyMaterial), PublicKeyError> {
         // DH computation using our secret key and receiver's public key
         let pk: PublicKey = receiver_pk.0.clone();
@@ -169,7 +171,7 @@ where
         _key_material: &EmptyKeyMaterial,
     ) -> Result<Self::SharedSecret, PublicKeyError> {
         // For DH, same as establish (symmetric)
-        let mut rng = OsRng09;
+        let mut rng = OsRng;
         self.establish_shared_secret(sender_pk, &mut rng)
             .map(|(ss, _)| ss)
     }
@@ -193,10 +195,10 @@ where
         let receiver_pk = Self::PublicKey::try_from(pk)?;
 
         // This calls the establish_shared_secret() we implemented above
-        use rand_core::OsRng;
+        let mut rng = OsRng;
         let (shared_secret, _key_material) = self.establish_shared_secret(
             &receiver_pk,
-            &mut OsRng09,
+            &mut rng,
         )?;
 
         // Convert X25519PublicKey wrapper back to PublicKey for storage
@@ -305,5 +307,85 @@ where
             .map_err(|_| EncryptionError)?;
 
         Ok(buffer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chacha20poly1305::ChaCha20Poly1305;
+    // We need traits from rand_core_06 (which AeadX25519Builder uses)
+    // and we can bridge them using rand_core (v0.9) OsRng which is available
+    use rand_core_06::{RngCore as RngCore06, CryptoRng as CryptoRng06, Error as Error06};
+    use rand_core::{OsRng, TryRngCore}; // v0.9
+
+    struct CompatOsRng(OsRng);
+
+    impl RngCore06 for CompatOsRng {
+        fn next_u32(&mut self) -> u32 {
+            self.0.try_next_u32().unwrap()
+        }
+        fn next_u64(&mut self) -> u64 {
+            self.0.try_next_u64().unwrap()
+        }
+        fn fill_bytes(&mut self, dest: &mut [u8]) {
+            self.0.try_fill_bytes(dest).unwrap()
+        }
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error06> {
+             self.0.try_fill_bytes(dest).map_err(|_e| {
+                 let nz = core::num::NonZeroU32::new(1).unwrap();
+                 Error06::from(nz)
+             })
+        }
+    }
+
+    impl CryptoRng06 for CompatOsRng {}
+
+    #[test]
+    fn test_x25519_key_exchange_and_encryption() {
+        // 1. Setup Sender and Receiver Builders
+        let mut rng = CompatOsRng(OsRng);
+
+        let mut sender_builder = AeadX25519Builder::<ChaCha20Poly1305>::new(&mut rng);
+        let mut receiver_builder = AeadX25519Builder::<ChaCha20Poly1305>::new(&mut rng);
+
+        // 2. Exchange Keys
+        // Receiver exposes public key
+        let receiver_pk_bytes = receiver_builder.public_key();
+        
+        // Sender MUST ingest receiver's public key (to establish shared secret)
+        let receiver_index = 1;
+        sender_builder.receiver_public_key(receiver_index, receiver_pk_bytes).expect("sender failed to ingest receiver pk");
+
+        // Receiver MUST ingest sender's public key (to establish shared secret)
+        let sender_pk_bytes = sender_builder.public_key();
+        let sender_index = 2;
+        receiver_builder.receiver_public_key(sender_index, sender_pk_bytes).expect("receiver failed to ingest sender pk");
+
+
+        // 3. Build Schemes
+        let mut sender_scheme = sender_builder.build();
+        let receiver_scheme = receiver_builder.build(); // immutable is fine for decryption
+
+        // 4. Encrypt (Sender -> Receiver)
+        let msg = b"Quantum bream me!!!";
+        let aad = b"context";
+        
+        // Sender gets encryption key for receiver
+        let mut encryption_buffer = vec![0u8; msg.len() + 16 + 12]; // msg + tag(16) + nonce(12)
+        encryption_buffer[..msg.len()].copy_from_slice(msg);
+
+        let sender_key = sender_scheme.encryption_key(receiver_index).expect("sender failed to get encryption key");
+        
+        // Encrypt in place
+        sender_key.encrypt(aad, &mut encryption_buffer).expect("encryption failed");
+        
+        assert_ne!(&encryption_buffer[..msg.len()], msg, "Ciphertext should differ from plaintext");
+
+        // 5. Decrypt (Receiver <- Sender)
+        // Receiver decrypts
+        let decrypted = receiver_scheme.decrypt_message(aad, &mut encryption_buffer, sender_index).expect("decryption failed");
+
+        assert_eq!(decrypted, msg, "Decrypted message should match original");
     }
 }

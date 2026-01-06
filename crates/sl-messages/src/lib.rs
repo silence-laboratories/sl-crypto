@@ -24,6 +24,8 @@ pub mod encrypted {
         scheme::passthrough::{
             PassThroughEncryption, PassThroughEncryptionBuilder,
         },
+        scheme::mlkem::{AeadMlKem, AeadMlKemBuilder, MlKemEncapsulationKey},
+        scheme::rng_compat::RngCompat09To06,
         scheme::{
             EncryptionError, EncryptionScheme, EncryptionSchemeBuilder,
             PublicKeyError,

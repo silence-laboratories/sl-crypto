@@ -8,8 +8,8 @@ use aead::{
     generic_array::typenum::Unsigned,
 };
 use ml_kem::kem::{Decapsulate, Encapsulate};
-use ml_kem::{array::Array, Ciphertext, EncodedSizeUser, KemCore, MlKem768};
-use rand_core::{CryptoRng, OsRng}; 
+use ml_kem::{array::Array, EncodedSizeUser, KemCore, MlKem768};
+use rand_core::{TryCryptoRng, OsRng}; 
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -96,7 +96,6 @@ impl From<MlKemEncapsulationKey> for ml_kem::kem::EncapsulationKey<ml_kem::MlKem
 
 pub struct AeadMlKemBuilder<S> {
     decapsulation_key: Option<ml_kem::kem::DecapsulationKey<ml_kem::MlKem768Params>>,
-    encapsulation_key: ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>,
     encapsulation_key_bytes: Vec<u8>, // Store bytes for public_key() method
     shared_secrets: Pairs<(SharedSecret, Vec<u8>, Vec<u8>), usize>,
     marker: PhantomData<S>,
@@ -118,13 +117,13 @@ pub struct AeadMlKemMessageKey<S: KeyInit + AeadCore> {
 
 impl<S> AeadMlKemBuilder<S> {
     /// Generate a new [`AeadMlKem`] with the supplied RNG.
+    /// generate requires CryptoRng (infallible)
     pub fn new(rng: &mut impl rand_core::CryptoRng) -> Self {
         let (dk, ek) = MlKem768::generate(rng);
         let ek_bytes = ek.as_bytes().as_slice().to_vec();
 
         Self {
             decapsulation_key: Some(dk),
-            encapsulation_key: ek,
             encapsulation_key_bytes: ek_bytes,
             shared_secrets: Pairs::new(),
             marker: PhantomData,
@@ -133,15 +132,13 @@ impl<S> AeadMlKemBuilder<S> {
     
     // Internal implementation that uses trait object for ml-kem compatibility
     // ml-kem's encapsulate requires TryCryptoRng + ?Sized
-    // In rand_core 0.9, CryptoRng implements TryCryptoRng
     fn establish_shared_secret_impl(
         &mut self,
         receiver_pk: &MlKemEncapsulationKey,
-        rng: &mut impl CryptoRng
+        rng: &mut impl TryCryptoRng
     ) -> Result<(SharedSecret, Vec<u8>), PublicKeyError> {
         use Encapsulate as _;
         let ek = &receiver_pk.key;
-        // In rand_core 0.9, CryptoRng implements TryCryptoRng, so this works
         let (ct, k_send) = ek.encapsulate(rng)
             .map_err(|_| PublicKeyError)?;
         // SharedKey and Ciphertext are Array types, convert to Vec<u8>
@@ -163,7 +160,7 @@ where
     fn establish_shared_secret(
         &mut self,
         receiver_pk: &Self::PublicKey,
-        rng: &mut impl CryptoRng,
+        rng: &mut impl TryCryptoRng,
     ) -> Result<(Self::SharedSecret, Vec<u8>), PublicKeyError> {
         self.establish_shared_secret_impl(receiver_pk, rng)    }
 
@@ -358,6 +355,85 @@ where
             .map_err(|_| EncryptionError)?;
 
         Ok(buffer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chacha20poly1305::ChaCha20Poly1305;
+    use rand_core::{OsRng, RngCore, CryptoRng, TryRngCore};
+
+    struct InfallibleOsRng(OsRng);
+
+    impl RngCore for InfallibleOsRng {
+        fn next_u32(&mut self) -> u32 {
+            self.0.try_next_u32().unwrap()
+        }
+        fn next_u64(&mut self) -> u64 {
+            self.0.try_next_u64().unwrap()
+        }
+        fn fill_bytes(&mut self, dest: &mut [u8]) {
+            self.0.try_fill_bytes(dest).unwrap()
+        }
+
+    }
+
+    impl CryptoRng for InfallibleOsRng {}
+
+    #[test]
+    fn test_mlkem_key_exchange_and_encryption() {
+        // 1. Setup Sender and Receiver Builders
+        // Use InfallibleOsRng to satisfy CryptoRng requirement (OsRng is TryCryptoRng)
+        let mut rng = InfallibleOsRng(OsRng);
+
+        let mut sender_builder = AeadMlKemBuilder::<ChaCha20Poly1305>::new(&mut rng);
+        let mut receiver_builder = AeadMlKemBuilder::<ChaCha20Poly1305>::new(&mut rng);
+
+        // 2. Exchange Keys
+        // Receiver exposes public key
+        let receiver_pk_bytes = receiver_builder.public_key();
+        
+        // Sender adds receiver's public key -> generates ciphertext (encapsulated key)
+        let receiver_index = 1;
+        sender_builder.receiver_public_key(receiver_index, receiver_pk_bytes).expect("sender failed to ingest receiver pk");
+
+        // Receiver must also ingest sender's public key to establish the session slot
+        let sender_pk_bytes = sender_builder.public_key();
+        let sender_index = 2;
+        receiver_builder.receiver_public_key(sender_index, sender_pk_bytes).expect("receiver failed to ingest sender pk");
+
+        // Sender gets the ciphertext to send to receiver
+        let key_material = sender_builder.get_key_material_for_receiver(receiver_index).expect("sender should have ciphertext");
+
+        // Receiver ingests sender's ciphertext
+        let sender_index = 2;
+        receiver_builder.receive_key_material(sender_index, key_material).expect("receiver failed to ingest key material");
+
+        // 3. Build Schemes
+        let mut sender_scheme = sender_builder.build();
+        let receiver_scheme = receiver_builder.build();
+
+        // 4. Encrypt (Sender -> Receiver)
+        let msg = b"Come on Quantum!!!";
+        let aad = b"context";
+        
+        // Sender gets encryption key for receiver
+        let mut encryption_buffer = vec![0u8; msg.len() + 16 + 12]; // msg + tag(16) + nonce(12)
+        encryption_buffer[..msg.len()].copy_from_slice(msg);
+
+        let sender_key = sender_scheme.encryption_key(receiver_index).expect("sender failed to get encryption key");
+        
+        // Encrypt in place
+        sender_key.encrypt(aad, &mut encryption_buffer).expect("encryption failed");
+        
+        assert_ne!(&encryption_buffer[..msg.len()], msg, "Ciphertext should differ from plaintext");
+
+        // 5. Decrypt (Receiver <- Sender)
+        // Receiver decrypts
+        let decrypted = receiver_scheme.decrypt_message(aad, &mut encryption_buffer, sender_index).expect("decryption failed");
+
+        assert_eq!(decrypted, msg, "Decrypted message should match original");
     }
 }
 

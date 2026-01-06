@@ -7,6 +7,7 @@ pub mod aead;
 pub mod key_exchange;
 pub mod mlkem;
 pub mod passthrough;
+pub mod rng_compat;
 
 pub use key_exchange::KeyExchange;
 

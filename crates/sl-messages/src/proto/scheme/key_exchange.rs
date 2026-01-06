@@ -1,7 +1,7 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use rand_core::CryptoRng;
+use rand_core::TryCryptoRng;
 
 use super::PublicKeyError;
 
@@ -22,7 +22,7 @@ pub trait KeyExchange {
     fn establish_shared_secret(
         &mut self,
         receiver_pk: &Self::PublicKey,
-        rng: &mut impl CryptoRng,
+        rng: &mut impl TryCryptoRng,
     ) -> Result<(Self::SharedSecret, Self::KeyMaterial), PublicKeyError>;
     
 
