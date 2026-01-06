@@ -11,7 +11,6 @@ pub mod rng_compat;
 
 pub use key_exchange::KeyExchange;
 
-
 #[derive(Debug)]
 pub struct PublicKeyError;
 
@@ -60,7 +59,10 @@ pub trait EncryptionSchemeBuilder: KeyExchange {
     /// Get key material that needs to be sent to receiver.
     /// For X25519: Returns `None` (no material to exchange)
     /// For ML-KEM: Returns `Some(ciphertext)` that needs to be sent to receiver
-    fn get_key_material_for_receiver(&self, _receiver_index: usize) -> Option<&[u8]> {
+    fn get_key_material_for_receiver(
+        &self,
+        _receiver_index: usize,
+    ) -> Option<&[u8]> {
         None // Default: no material for symmetric exchanges
     }
 
@@ -69,6 +71,7 @@ pub trait EncryptionSchemeBuilder: KeyExchange {
     /// For ML-KEM: Decapsulates ciphertext and stores shared secret
     fn receive_key_material(
         &mut self,
+        _sender_pk_bytes: &[u8],
         _sender_index: usize,
         _key_material: &[u8],
     ) -> Result<(), PublicKeyError> {

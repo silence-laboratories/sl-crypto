@@ -4,8 +4,8 @@
 use rand_core::TryCryptoRng;
 
 use super::{
-    EncryptionError, EncryptionScheme, EncryptionSchemeBuilder, KeyExchange, MessageKey,
-    PublicKeyError,
+    EncryptionError, EncryptionScheme, EncryptionSchemeBuilder, KeyExchange,
+    MessageKey, PublicKeyError,
 };
 
 pub struct PassThroughEncryptionBuilder;
@@ -57,7 +57,8 @@ impl KeyExchange for PassThroughEncryptionBuilder {
         &mut self,
         _receiver_pk: &Self::PublicKey,
         _rng: &mut impl TryCryptoRng,
-    ) -> Result<(Self::SharedSecret, PassthroughKeyMaterial), PublicKeyError> {
+    ) -> Result<(Self::SharedSecret, PassthroughKeyMaterial), PublicKeyError>
+    {
         Ok((Vec::new(), PassthroughKeyMaterial))
     }
 

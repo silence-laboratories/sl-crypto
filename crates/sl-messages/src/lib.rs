@@ -21,10 +21,10 @@ pub mod encrypted {
             Scheme as DefaultEncryptionScheme,
         },
         scheme::aead::AeadX25519Builder,
+        scheme::mlkem::{AeadMlKem, AeadMlKemBuilder, MlKemEncapsulationKey},
         scheme::passthrough::{
             PassThroughEncryption, PassThroughEncryptionBuilder,
         },
-        scheme::mlkem::{AeadMlKem, AeadMlKemBuilder, MlKemEncapsulationKey},
         scheme::rng_compat::RngCompat09To06,
         scheme::{
             EncryptionError, EncryptionScheme, EncryptionSchemeBuilder,

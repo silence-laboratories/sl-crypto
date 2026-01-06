@@ -8,16 +8,16 @@ use aead::{
     generic_array::typenum::Unsigned,
 };
 use ml_kem::kem::{Decapsulate, Encapsulate};
-use ml_kem::{array::Array, EncodedSizeUser, KemCore, MlKem768};
-use rand_core::{TryCryptoRng, OsRng}; 
+use ml_kem::{EncodedSizeUser, KemCore, MlKem768, array::Array};
+use rand_core::{OsRng, TryCryptoRng};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use crate::pairs::Pairs;
 
 use super::{
-    EncryptionError, EncryptionScheme, EncryptionSchemeBuilder, KeyExchange, MessageKey,
-    PublicKeyError,
+    EncryptionError, EncryptionScheme, EncryptionSchemeBuilder, KeyExchange,
+    MessageKey, PublicKeyError,
 };
 
 // Counter to create a unique nonce.
@@ -68,7 +68,8 @@ impl<'a> TryFrom<&'a [u8]> for MlKemEncapsulationKey {
         if bytes.len() != 1184 {
             return Err(PublicKeyError);
         }
-          let array: Array<u8, _> = bytes.try_into().map_err(|_| PublicKeyError)?;
+        let array: Array<u8, _> =
+            bytes.try_into().map_err(|_| PublicKeyError)?;
         let key = Ek::from_bytes(&array);
         Ok(MlKemEncapsulationKey {
             key,
@@ -77,25 +78,29 @@ impl<'a> TryFrom<&'a [u8]> for MlKemEncapsulationKey {
     }
 }
 
-impl From<ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>> for MlKemEncapsulationKey {
-    fn from(ek: ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>) -> Self {
+impl From<ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>>
+    for MlKemEncapsulationKey
+{
+    fn from(
+        ek: ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>,
+    ) -> Self {
         // Convert Array to Vec<u8>
         let bytes = ek.as_bytes().as_slice().to_vec();
-        MlKemEncapsulationKey {
-            key: ek,
-            bytes,
-        }
+        MlKemEncapsulationKey { key: ek, bytes }
     }
 }
 
-impl From<MlKemEncapsulationKey> for ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params> {
+impl From<MlKemEncapsulationKey>
+    for ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>
+{
     fn from(wrapper: MlKemEncapsulationKey) -> Self {
         wrapper.key
     }
 }
 
 pub struct AeadMlKemBuilder<S> {
-    decapsulation_key: Option<ml_kem::kem::DecapsulationKey<ml_kem::MlKem768Params>>,
+    decapsulation_key:
+        Option<ml_kem::kem::DecapsulationKey<ml_kem::MlKem768Params>>,
     encapsulation_key_bytes: Vec<u8>, // Store bytes for public_key() method
     shared_secrets: Pairs<(SharedSecret, Vec<u8>, Vec<u8>), usize>,
     marker: PhantomData<S>,
@@ -129,18 +134,17 @@ impl<S> AeadMlKemBuilder<S> {
             marker: PhantomData,
         }
     }
-    
+
     // Internal implementation that uses trait object for ml-kem compatibility
     // ml-kem's encapsulate requires TryCryptoRng + ?Sized
     fn establish_shared_secret_impl(
         &mut self,
         receiver_pk: &MlKemEncapsulationKey,
-        rng: &mut impl TryCryptoRng
+        rng: &mut impl TryCryptoRng,
     ) -> Result<(SharedSecret, Vec<u8>), PublicKeyError> {
         use Encapsulate as _;
         let ek = &receiver_pk.key;
-        let (ct, k_send) = ek.encapsulate(rng)
-            .map_err(|_| PublicKeyError)?;
+        let (ct, k_send) = ek.encapsulate(rng).map_err(|_| PublicKeyError)?;
         // SharedKey and Ciphertext are Array types, convert to Vec<u8>
         Ok((
             Zeroizing::new(k_send.as_slice().to_vec()),
@@ -162,12 +166,13 @@ where
         receiver_pk: &Self::PublicKey,
         rng: &mut impl TryCryptoRng,
     ) -> Result<(Self::SharedSecret, Vec<u8>), PublicKeyError> {
-        self.establish_shared_secret_impl(receiver_pk, rng)    }
+        self.establish_shared_secret_impl(receiver_pk, rng)
+    }
 
     fn receive_shared_secret(
         &mut self,
         _sender_pk: &Self::PublicKey, // Not used for decapsulation
-        key_material: &Vec<u8>, // Ciphertext
+        key_material: &Vec<u8>,       // Ciphertext
     ) -> Result<Self::SharedSecret, PublicKeyError> {
         // Decapsulate: receiver recovers shared secret using own secret key
         use Decapsulate as _;
@@ -176,7 +181,10 @@ where
         if key_material.len() != 1088 {
             return Err(PublicKeyError);
         }
-        let ct: Ct = key_material.as_slice().try_into().map_err(|_| PublicKeyError)?;
+        let ct: Ct = key_material
+            .as_slice()
+            .try_into()
+            .map_err(|_| PublicKeyError)?;
         let k_recv = dk.decapsulate(&ct).map_err(|_| PublicKeyError)?;
         // SharedKey is an Array type, convert to Vec<u8>
         Ok(Zeroizing::new(k_recv.as_slice().to_vec()))
@@ -201,21 +209,20 @@ where
         let receiver_pk = Self::PublicKey::try_from(pk)?;
 
         // This performs: (shared_secret, ciphertext) = encapsulate(receiver_pk)
-        let (shared_secret, ciphertext) = self.establish_shared_secret(
-            &receiver_pk,
-            &mut OsRng,
-        )?;
+        let (shared_secret, ciphertext) =
+            self.establish_shared_secret(&receiver_pk, &mut OsRng)?;
 
         // The ciphertext will be sent to the receiver later via get_key_material_for_receiver()
-        self.shared_secrets.push(
-            receiver_index,
-            (shared_secret, ciphertext, pk.to_vec()),
-        );
+        self.shared_secrets
+            .push(receiver_index, (shared_secret, ciphertext, pk.to_vec()));
         Ok(())
     }
 
     // Override defaults for ML-KEM
-    fn get_key_material_for_receiver(&self, receiver_index: usize) -> Option<&[u8]> {
+    fn get_key_material_for_receiver(
+        &self,
+        receiver_index: usize,
+    ) -> Option<&[u8]> {
         // Return the stored ciphertext
         self.shared_secrets
             .find_pair_or_err(receiver_index, ())
@@ -225,25 +232,19 @@ where
 
     fn receive_key_material(
         &mut self,
+        sender_pk_bytes: &[u8],
         sender_index: usize,
         key_material: &[u8],
     ) -> Result<(), PublicKeyError> {
-        // Get sender's public key (stored during receiver_public_key)
-        let (_, _, pk_bytes) = self.shared_secrets
-            .find_pair_or_err(sender_index, PublicKeyError)?;
-        let sender_pk_bytes = pk_bytes.clone();
-
-        let sender_pk = Self::PublicKey::try_from(sender_pk_bytes.as_slice())?;
+        let sender_pk = Self::PublicKey::try_from(sender_pk_bytes)?;
 
         // Decapsulate using KeyExchange trait method
-        let shared_secret = self.receive_shared_secret(&sender_pk, &key_material.to_vec())?;
+        let shared_secret =
+            self.receive_shared_secret(&sender_pk, &key_material.to_vec())?;
 
-      
-        // TODO: Add update method to Pairs or handle this differently
-        let _old_entry = self.shared_secrets.pop_pair(sender_index);
         self.shared_secrets.push(
             sender_index,
-            (shared_secret, key_material.to_vec(), sender_pk_bytes),
+            (shared_secret, Vec::new(), sender_pk_bytes.to_vec()),
         );
         Ok(())
     }
@@ -251,8 +252,10 @@ where
     fn build(self) -> Self::Scheme {
         // Convert stored entries: (shared_secret, ciphertext, pk_bytes) -> (shared_secret, pk_bytes)
         let mut scheme_secrets = Pairs::new();
-        for (idx, (shared_secret, _, pk_bytes)) in self.shared_secrets.iter() {
-            scheme_secrets.push(*idx, (shared_secret.clone(), pk_bytes.clone()));
+        for (idx, (shared_secret, _, pk_bytes)) in self.shared_secrets.iter()
+        {
+            scheme_secrets
+                .push(*idx, (shared_secret.clone(), pk_bytes.clone()));
         }
 
         Self::Scheme {
@@ -306,8 +309,9 @@ where
         receiver: usize,
     ) -> Result<Self::Key, EncryptionError> {
         // Same as X25519: get (shared_secret, receiver_pk_bytes)
-        let (shared_secret, receiver_pk_bytes) =
-            self.shared_secrets.find_pair_or_err(receiver, EncryptionError)?;
+        let (shared_secret, receiver_pk_bytes) = self
+            .shared_secrets
+            .find_pair_or_err(receiver, EncryptionError)?;
 
         // Same key derivation as X25519: Sha256(receiver_pk || shared_secret)
         let key = Zeroizing::new(
@@ -336,8 +340,9 @@ where
             .ok_or(EncryptionError)?;
 
         // Same as X25519: get (shared_secret, _sender_pk_bytes) but use own public key
-        let (shared_secret, _sender_pk_bytes) =
-            self.shared_secrets.find_pair_or_err(sender, EncryptionError)?;
+        let (shared_secret, _sender_pk_bytes) = self
+            .shared_secrets
+            .find_pair_or_err(sender, EncryptionError)?;
 
         // Same key derivation as X25519: Sha256(own_pk || shared_secret)
         let key = Zeroizing::new(
@@ -362,7 +367,7 @@ where
 mod tests {
     use super::*;
     use chacha20poly1305::ChaCha20Poly1305;
-    use rand_core::{OsRng, RngCore, CryptoRng, TryRngCore};
+    use rand_core::{CryptoRng, OsRng, RngCore, TryRngCore};
 
     struct InfallibleOsRng(OsRng);
 
@@ -376,7 +381,6 @@ mod tests {
         fn fill_bytes(&mut self, dest: &mut [u8]) {
             self.0.try_fill_bytes(dest).unwrap()
         }
-
     }
 
     impl CryptoRng for InfallibleOsRng {}
@@ -387,28 +391,33 @@ mod tests {
         // Use InfallibleOsRng to satisfy CryptoRng requirement (OsRng is TryCryptoRng)
         let mut rng = InfallibleOsRng(OsRng);
 
-        let mut sender_builder = AeadMlKemBuilder::<ChaCha20Poly1305>::new(&mut rng);
-        let mut receiver_builder = AeadMlKemBuilder::<ChaCha20Poly1305>::new(&mut rng);
+        let mut sender_builder =
+            AeadMlKemBuilder::<ChaCha20Poly1305>::new(&mut rng);
+        let mut receiver_builder =
+            AeadMlKemBuilder::<ChaCha20Poly1305>::new(&mut rng);
 
         // 2. Exchange Keys
         // Receiver exposes public key
         let receiver_pk_bytes = receiver_builder.public_key();
-        
+
         // Sender adds receiver's public key -> generates ciphertext (encapsulated key)
         let receiver_index = 1;
-        sender_builder.receiver_public_key(receiver_index, receiver_pk_bytes).expect("sender failed to ingest receiver pk");
+        sender_builder
+            .receiver_public_key(receiver_index, receiver_pk_bytes)
+            .expect("sender failed to ingest receiver pk");
 
-        // Receiver must also ingest sender's public key to establish the session slot
         let sender_pk_bytes = sender_builder.public_key();
-        let sender_index = 2;
-        receiver_builder.receiver_public_key(sender_index, sender_pk_bytes).expect("receiver failed to ingest sender pk");
 
         // Sender gets the ciphertext to send to receiver
-        let key_material = sender_builder.get_key_material_for_receiver(receiver_index).expect("sender should have ciphertext");
+        let key_material = sender_builder
+            .get_key_material_for_receiver(receiver_index)
+            .expect("sender should have ciphertext");
 
         // Receiver ingests sender's ciphertext
         let sender_index = 2;
-        receiver_builder.receive_key_material(sender_index, key_material).expect("receiver failed to ingest key material");
+        receiver_builder
+            .receive_key_material(sender_pk_bytes, sender_index, key_material)
+            .expect("receiver failed to ingest key material");
 
         // 3. Build Schemes
         let mut sender_scheme = sender_builder.build();
@@ -417,23 +426,32 @@ mod tests {
         // 4. Encrypt (Sender -> Receiver)
         let msg = b"Come on Quantum!!!";
         let aad = b"context";
-        
+
         // Sender gets encryption key for receiver
         let mut encryption_buffer = vec![0u8; msg.len() + 16 + 12]; // msg + tag(16) + nonce(12)
         encryption_buffer[..msg.len()].copy_from_slice(msg);
 
-        let sender_key = sender_scheme.encryption_key(receiver_index).expect("sender failed to get encryption key");
-        
+        let sender_key = sender_scheme
+            .encryption_key(receiver_index)
+            .expect("sender failed to get encryption key");
+
         // Encrypt in place
-        sender_key.encrypt(aad, &mut encryption_buffer).expect("encryption failed");
-        
-        assert_ne!(&encryption_buffer[..msg.len()], msg, "Ciphertext should differ from plaintext");
+        sender_key
+            .encrypt(aad, &mut encryption_buffer)
+            .expect("encryption failed");
+
+        assert_ne!(
+            &encryption_buffer[..msg.len()],
+            msg,
+            "Ciphertext should differ from plaintext"
+        );
 
         // 5. Decrypt (Receiver <- Sender)
         // Receiver decrypts
-        let decrypted = receiver_scheme.decrypt_message(aad, &mut encryption_buffer, sender_index).expect("decryption failed");
+        let decrypted = receiver_scheme
+            .decrypt_message(aad, &mut encryption_buffer, sender_index)
+            .expect("decryption failed");
 
         assert_eq!(decrypted, msg, "Decrypted message should match original");
     }
 }
-
