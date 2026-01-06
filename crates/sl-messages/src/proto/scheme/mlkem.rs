@@ -68,9 +68,7 @@ impl<'a> TryFrom<&'a [u8]> for MlKemEncapsulationKey {
         if bytes.len() != 1184 {
             return Err(PublicKeyError);
         }
-        // Convert slice to Array - need to use the correct size type
-        // ML-KEM-768 uses a specific Array size, let's use TryFrom from hybrid_array
-        let array: Array<u8, _> = bytes.try_into().map_err(|_| PublicKeyError)?;
+          let array: Array<u8, _> = bytes.try_into().map_err(|_| PublicKeyError)?;
         let key = Ek::from_bytes(&array);
         Ok(MlKemEncapsulationKey {
             key,
@@ -167,9 +165,6 @@ where
         receiver_pk: &Self::PublicKey,
         rng: &mut impl CryptoRng,
     ) -> Result<(Self::SharedSecret, Vec<u8>), PublicKeyError> {
-        // Encapsulate: sender picks shared secret and encrypts it with receiver's public key
-        // ml-kem requires TryCryptoRng + ?Sized, so we use a trait object
-        // In rand_core 0.9, CryptoRng implements TryCryptoRng
         self.establish_shared_secret_impl(receiver_pk, rng)    }
 
     fn receive_shared_secret(
@@ -180,16 +175,10 @@ where
         // Decapsulate: receiver recovers shared secret using own secret key
         use Decapsulate as _;
         let dk = self.decapsulation_key.as_ref().ok_or(PublicKeyError)?;
-        // Convert bytes to fixed-size array for Ciphertext
-        // ML-KEM-768 ciphertext is 1088 bytes
-        // Ciphertext is a type alias: Array<u8, <K as KemCore>::CiphertextSize>
-        // The type alias expects K: KemCore, so we use MlKem768 (which is Kem<MlKem768Params>)
         type Ct = ml_kem::Ciphertext<MlKem768>;
         if key_material.len() != 1088 {
             return Err(PublicKeyError);
         }
-        // Convert Vec<u8> to Array using TryInto
-        // Ciphertext is a type alias for Array, so we can use TryInto directly
         let ct: Ct = key_material.as_slice().try_into().map_err(|_| PublicKeyError)?;
         let k_recv = dk.decapsulate(&ct).map_err(|_| PublicKeyError)?;
         // SharedKey is an Array type, convert to Vec<u8>
@@ -252,8 +241,7 @@ where
         // Decapsulate using KeyExchange trait method
         let shared_secret = self.receive_shared_secret(&sender_pk, &key_material.to_vec())?;
 
-        // Update stored entry with the decapsulated shared secret
-        // For now, we'll replace the entire entry
+      
         // TODO: Add update method to Pairs or handle this differently
         let _old_entry = self.shared_secrets.pop_pair(sender_index);
         self.shared_secrets.push(
