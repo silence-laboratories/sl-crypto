@@ -142,6 +142,7 @@ where
 }
 
 /// Derive a child public key from a parent public key and a parent chain code
+#[allow(clippy::type_complexity)]
 pub fn derive_child_pubkey<C>(
     parent_pubkey: &C::ProjectivePoint,
     parent_chain_code: [u8; 32],

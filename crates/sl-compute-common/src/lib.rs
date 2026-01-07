@@ -46,7 +46,7 @@ impl BinaryArithmetic {
 
         if len != FIELD_SIZE_BYTES {
             let zero_pad = FIELD_SIZE_BYTES - len;
-            value.extend(std::iter::repeat(0u8).take(zero_pad));
+            value.extend(std::iter::repeat_n(0u8, zero_pad));
         }
         BinaryArithmetic {
             value: value.try_into().unwrap(),
@@ -299,7 +299,7 @@ impl BinaryString {
     }
 
     pub fn new_with_zeros(size_in_bits: usize) -> Self {
-        let size_in_bytes = (size_in_bits + 7) / 8;
+        let size_in_bytes = size_in_bits.div_ceil(8);
         BinaryString {
             length: size_in_bits as u64,
             value: vec![0u8; size_in_bytes],
@@ -307,7 +307,7 @@ impl BinaryString {
     }
 
     pub fn length_in_bytes(&self) -> usize {
-        if (self.length % 8) == 0 {
+        if self.length.is_multiple_of(8) {
             (self.length / 8) as usize
         } else {
             (self.length / 8) as usize + 1
@@ -319,7 +319,7 @@ impl BinaryString {
     }
 
     pub fn with_capacity(size: usize) -> Self {
-        let num_bytes = (size + 7) / 8;
+        let num_bytes = size.div_ceil(8);
         BinaryString {
             length: 0_u64,
             value: Vec::with_capacity(num_bytes),
@@ -446,7 +446,7 @@ impl BinaryString {
     /// Use only for unverified_list
     pub fn append_bytes_with_padding(&mut self, other: &[u8]) {
         // pad length
-        self.length = (self.length + 7) / 8 * 8;
+        self.length = self.length.div_ceil(8) * 8;
         self.length += other.len() as u64;
         self.value.extend_from_slice(other);
     }
@@ -518,7 +518,7 @@ impl BinaryStringShare {
     }
 
     pub fn zero(length: usize) -> Self {
-        let num_bytes = (length + 7) / 8;
+        let num_bytes = length.div_ceil(8);
         BinaryStringShare {
             length: length as u64,
             value1: vec![0u8; num_bytes],
@@ -557,7 +557,7 @@ impl BinaryStringShare {
     }
 
     pub fn length_in_bytes(&self) -> usize {
-        if (self.length % 8) == 0 {
+        if self.length.is_multiple_of(8) {
             (self.length / 8) as usize
         } else {
             (self.length / 8) as usize + 1
@@ -569,7 +569,7 @@ impl BinaryStringShare {
     }
 
     pub fn with_capacity(size: usize) -> Self {
-        let num_bytes = (size + 7) / 8;
+        let num_bytes = size.div_ceil(8);
         BinaryStringShare {
             length: 0_u64,
             value1: Vec::with_capacity(num_bytes),
@@ -828,7 +828,7 @@ impl BinaryStringShare {
     /// Use only for verify mult triples
     pub fn append_with_padding(&mut self, other: &Self) {
         // pad length
-        self.length = (self.length + 7) / 8 * 8;
+        self.length = self.length.div_ceil(8) * 8;
         self.length += (other.value1.len() * 8) as u64;
         self.value1.extend_from_slice(&other.value1);
         self.value2.extend_from_slice(&other.value2);
@@ -840,7 +840,7 @@ impl BinaryStringShare {
         other: &BinaryArithmeticShare,
     ) {
         // pad length
-        self.length = (self.length + 7) / 8 * 8;
+        self.length = self.length.div_ceil(8) * 8;
         self.length += (other.value1.len() * 8) as u64;
         self.value1.extend_from_slice(&other.value1);
         self.value2.extend_from_slice(&other.value2);
@@ -907,7 +907,7 @@ impl CommonRandomness {
         &mut self,
         l: usize,
     ) -> BinaryStringShare {
-        let size_in_bytes = (l + 7) / 8;
+        let size_in_bytes = l.div_ceil(8);
         let mut value1 = Vec::with_capacity(size_in_bytes);
         let mut value2 = Vec::with_capacity(size_in_bytes);
         for _ in 0..size_in_bytes {
@@ -1024,7 +1024,7 @@ pub fn binary_string_to_u8_vec(input: BinaryString) -> Vec<u8> {
             byte = 0;
         }
     }
-    if input.length % 8 != 0 {
+    if !input.length.is_multiple_of(8) {
         vec_u8.push(byte);
     }
 

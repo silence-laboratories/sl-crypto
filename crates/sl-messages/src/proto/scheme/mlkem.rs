@@ -1,0 +1,648 @@
+// Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
+// This software is licensed under the Silence Laboratories License Agreement.
+
+use std::marker::PhantomData;
+use std::sync::OnceLock;
+
+use aead::{
+    AeadCore, AeadInPlace, Key, KeyInit, Nonce, Tag,
+    generic_array::typenum::Unsigned,
+};
+use ml_kem::kem::{Decapsulate, Encapsulate};
+use ml_kem::{
+    EncodedSizeUser, KemCore, MlKem512, MlKem768, MlKem1024, array::Array,
+};
+use rand_core_09::{CryptoRng, OsRng, TryCryptoRng};
+use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
+
+use crate::pairs::Pairs;
+
+use super::{
+    EncryptionError, EncryptionScheme, EncryptionSchemeBuilder, KeyExchange,
+    MessageKey, PublicKeyError,
+};
+
+/// ML-KEM specific error types that provide more context than generic PublicKeyError
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MlKemError {
+    /// Decapsulation key is missing (not initialized)
+    MissingDecapsulationKey,
+    /// Failed to parse ciphertext from bytes (invalid size or format)
+    InvalidCiphertext {
+        /// Expected size in bytes (if known)
+        expected_size: Option<usize>,
+        /// Actual size received
+        actual_size: usize,
+    },
+    /// Decapsulation operation failed (corrupted ciphertext, invalid key, etc.)
+    DecapsulationFailed,
+    /// Encapsulation operation failed
+    EncapsulationFailed,
+    /// Failed to parse public key from bytes
+    InvalidPublicKey {
+        /// Expected size in bytes (if known)
+        expected_size: Option<usize>,
+        /// Actual size received
+        actual_size: usize,
+    },
+}
+
+// Counter to create a unique nonce.
+struct NonceCounter(u32);
+
+impl NonceCounter {
+    /// New counter initialized by 0.
+    fn new() -> Self {
+        Self(0)
+    }
+
+    /// Increment counter.
+    fn next_nonce<S: AeadCore>(&mut self) -> Nonce<S> {
+        // In our design, we use 3-5 nonces per unique symmetric key.
+        // If the u32 counter overflows, then calling it is definitely
+        // a misuse of the counter, and it's safer to crash than reuse
+        // a nonce.
+        self.0 = self.0.checked_add(1).expect("nonce overflow");
+
+        let mut nonce = Nonce::<S>::default();
+        nonce[..4].copy_from_slice(&self.0.to_le_bytes());
+
+        nonce
+    }
+}
+
+type SharedSecret = Zeroizing<Vec<u8>>; // 32 bytes for all ML-KEM parameter sets
+
+/// Trait to abstract over ML-KEM parameter to be generic over parameter
+pub trait MlKemGenerate: KemCore + Send {
+    type MlKemDecapsulationKey;
+    type MlKemEncapsulationKey: ml_kem::EncodedSizeUser;
+    type MlKemCiphertext: for<'a> TryFrom<&'a [u8]>;
+
+    /// Get the expected size of the ciphertext in bytes
+    fn ciphertext_size() -> usize;
+
+    fn generate<R: CryptoRng>(
+        rng: &mut R,
+    ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey);
+
+    fn decapsulate(
+        dk: &Self::MlKemDecapsulationKey,
+        ct: &Self::MlKemCiphertext,
+    ) -> Result<SharedSecret, ()>;
+}
+
+// Implement for each parameter set
+impl MlKemGenerate for MlKem512 {
+    type MlKemDecapsulationKey =
+        ml_kem::kem::DecapsulationKey<ml_kem::MlKem512Params>;
+    type MlKemEncapsulationKey =
+        ml_kem::kem::EncapsulationKey<ml_kem::MlKem512Params>;
+    type MlKemCiphertext = ml_kem::Ciphertext<MlKem512>;
+
+    fn ciphertext_size() -> usize {
+        768 // ML-KEM-512 ciphertext size
+    }
+
+    fn generate<R: CryptoRng>(
+        rng: &mut R,
+    ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey) {
+        <MlKem512 as KemCore>::generate(rng)
+    }
+
+    fn decapsulate(
+        dk: &Self::MlKemDecapsulationKey,
+        ct: &Self::MlKemCiphertext,
+    ) -> Result<SharedSecret, ()> {
+        let shared_key = dk.decapsulate(ct).map_err(|_| ())?;
+        Ok(Zeroizing::new(shared_key.as_slice().to_vec()))
+    }
+}
+
+impl MlKemGenerate for MlKem768 {
+    type MlKemDecapsulationKey =
+        ml_kem::kem::DecapsulationKey<ml_kem::MlKem768Params>;
+    type MlKemEncapsulationKey =
+        ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>;
+    type MlKemCiphertext = ml_kem::Ciphertext<MlKem768>;
+
+    fn ciphertext_size() -> usize {
+        1088 // ML-KEM-768 ciphertext size
+    }
+
+    fn generate<R: CryptoRng>(
+        rng: &mut R,
+    ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey) {
+        <MlKem768 as KemCore>::generate(rng)
+    }
+
+    fn decapsulate(
+        dk: &Self::MlKemDecapsulationKey,
+        ct: &Self::MlKemCiphertext,
+    ) -> Result<SharedSecret, ()> {
+        let shared_key = dk.decapsulate(ct).map_err(|_| ())?;
+        Ok(Zeroizing::new(shared_key.as_slice().to_vec()))
+    }
+}
+
+impl MlKemGenerate for MlKem1024 {
+    type MlKemDecapsulationKey =
+        ml_kem::kem::DecapsulationKey<ml_kem::MlKem1024Params>;
+    type MlKemEncapsulationKey =
+        ml_kem::kem::EncapsulationKey<ml_kem::MlKem1024Params>;
+    type MlKemCiphertext = ml_kem::Ciphertext<MlKem1024>;
+
+    fn ciphertext_size() -> usize {
+        1568 // ML-KEM-1024 ciphertext size
+    }
+
+    fn generate<R: CryptoRng>(
+        rng: &mut R,
+    ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey) {
+        <MlKem1024 as KemCore>::generate(rng)
+    }
+
+    fn decapsulate(
+        dk: &Self::MlKemDecapsulationKey,
+        ct: &Self::MlKemCiphertext,
+    ) -> Result<SharedSecret, ()> {
+        let shared_key = dk.decapsulate(ct).map_err(|_| ())?;
+        Ok(Zeroizing::new(shared_key.as_slice().to_vec()))
+    }
+}
+
+/// Wrapper that computes bytes on-demand from the key
+pub struct MlKemEncapsulationKey<P: KemCore> {
+    key: <P as KemCore>::EncapsulationKey,
+    bytes: OnceLock<Vec<u8>>, // Lazily computed bytes, only allocated if AsRef is called
+    _phantom: PhantomData<P>,
+}
+
+impl<P: KemCore> AsRef<[u8]> for MlKemEncapsulationKey<P>
+where
+    <P as KemCore>::EncapsulationKey: ml_kem::EncodedSizeUser,
+{
+    fn as_ref(&self) -> &[u8] {
+        self.bytes
+            .get_or_init(|| self.key.as_bytes().as_slice().to_vec())
+    }
+}
+
+impl<'a, P: KemCore> TryFrom<&'a [u8]> for MlKemEncapsulationKey<P>
+where
+    <P as KemCore>::EncapsulationKey: ml_kem::EncodedSizeUser,
+{
+    type Error = PublicKeyError;
+
+    fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
+        let array: Array<u8, <<P as KemCore>::EncapsulationKey as ml_kem::EncodedSizeUser>::EncodedSize> =
+            bytes.try_into().map_err(|_| {
+                PublicKeyError
+            })?;
+        let key = <P as KemCore>::EncapsulationKey::from_bytes(&array);
+        Ok(MlKemEncapsulationKey {
+            key,
+            bytes: OnceLock::new(),
+            _phantom: PhantomData,
+        })
+    }
+}
+
+pub struct AeadMlKemBuilder<S, P, R = OsRng>
+where
+    P: MlKemGenerate,
+{
+    decapsulation_key: Option<<P as MlKemGenerate>::MlKemDecapsulationKey>,
+    encapsulation_key_bytes: Vec<u8>, // Store bytes for public_key() method
+    shared_secrets: Pairs<(SharedSecret, Vec<u8>, Vec<u8>), usize>,
+    rng: R,
+    marker: PhantomData<(S, P)>,
+}
+
+/// The implementation of EncryptionScheme that uses ML-KEM for key
+/// exchange and any implementation of `AeadInPlace`.
+pub struct AeadMlKem<S, P: KemCore> {
+    encapsulation_key_bytes: Vec<u8>, // Own public key bytes (for decryption key derivation)
+    shared_secrets: Pairs<(SharedSecret, Vec<u8>), usize>, // (shared_secret, receiver_pk_bytes)
+    counter: NonceCounter,
+    marker: PhantomData<(S, P)>,
+}
+
+pub struct AeadMlKemMessageKey<S: KeyInit + AeadCore> {
+    cipher: S,
+    nonce: Nonce<S>,
+}
+
+impl<S, P, R> AeadMlKemBuilder<S, P, R>
+where
+    P: MlKemGenerate,
+    R: TryCryptoRng,
+{
+    /// Generate a new [`AeadMlKem`] with the supplied RNG and parameter set.
+    /// generate requires CryptoRng (infallible)
+    pub fn new(mut rng: R) -> Self
+    where
+        R: rand_core_09::CryptoRng,
+    {
+        let (dk, ek) = <P as MlKemGenerate>::generate(&mut rng);
+        let ek_bytes = ek.as_bytes().as_slice().to_vec();
+
+        Self {
+            decapsulation_key: Some(dk),
+            encapsulation_key_bytes: ek_bytes,
+            shared_secrets: Pairs::new(),
+            rng,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<S, P, R> KeyExchange for AeadMlKemBuilder<S, P, R>
+where
+    S: AeadInPlace + KeyInit + Send,
+    P: MlKemGenerate,
+    R: TryCryptoRng,
+{
+    type PublicKey = MlKemEncapsulationKey<P>;
+    type SharedSecret = SharedSecret;
+    type KeyMaterial = Vec<u8>;
+    type Error = MlKemError;
+
+    fn establish_shared_secret(
+        &mut self,
+        receiver_pk: &Self::PublicKey,
+    ) -> Result<(Self::SharedSecret, Vec<u8>), Self::Error> {
+        let ek = &receiver_pk.key;
+        let (ct, k_send) = ek
+            .encapsulate(&mut self.rng)
+            .map_err(|_| MlKemError::EncapsulationFailed)?;
+        Ok((
+            Zeroizing::new(k_send.as_slice().to_vec()),
+            ct.as_slice().to_vec(),
+        ))
+    }
+    /// Receive and decapsulate a shared secret using the receiver's private key.
+    /// Security note:
+    /// - `sender_pk` is intentionally **not** used during ML-KEM decapsulation.
+    /// - ML-KEM ciphertexts are not bound to the sender's public key, so this
+    ///   function does **not** provide sender authentication or key confirmation
+    ///   on its own.
+    /// - Callers **MUST** provide sender authentication and bind the sender's
+    ///   public key to the ciphertext at a higher protocol layer with PQ safe signatures.
+    ///   Failing to do so can enable public-key substitution attacks where an
+    ///   attacker replaces the expected sender's public key with their own.
+    fn receive_shared_secret(
+        &mut self,
+        _sender_pk: &Self::PublicKey, // Not used for decapsulation
+        key_material: &Vec<u8>,       // Ciphertext
+    ) -> Result<Self::SharedSecret, Self::Error> {
+        let dk = self
+            .decapsulation_key
+            .as_ref()
+            .ok_or(MlKemError::MissingDecapsulationKey)?;
+
+        let expected_ct_size = P::ciphertext_size();
+        let ct: <P as MlKemGenerate>::MlKemCiphertext = key_material
+            .as_slice()
+            .try_into()
+            .map_err(|_| MlKemError::InvalidCiphertext {
+                expected_size: Some(expected_ct_size),
+                actual_size: key_material.len(),
+            })?;
+
+        let k_recv = P::decapsulate(dk, &ct)
+            .map_err(|_| MlKemError::DecapsulationFailed)?;
+
+        Ok(Zeroizing::new(k_recv.as_slice().to_vec()))
+    }
+}
+
+impl<S, P, R> EncryptionSchemeBuilder for AeadMlKemBuilder<S, P, R>
+where
+    S: AeadInPlace + KeyInit + Send,
+    P: MlKemGenerate,
+    R: TryCryptoRng,
+{
+    type Scheme = AeadMlKem<S, P>;
+
+    // Error type is inherited from KeyExchange (MlKemError)
+
+    fn public_key(&self) -> &[u8] {
+        &self.encapsulation_key_bytes
+    }
+
+    fn receiver_public_key(
+        &mut self,
+        receiver_index: usize,
+        pk: &[u8],
+    ) -> Result<(), Self::Error> {
+        let receiver_pk = Self::PublicKey::try_from(pk)
+            .map_err(|_| MlKemError::InvalidPublicKey {
+                expected_size: Some(
+                    <<P as KemCore>::EncapsulationKey as ml_kem::EncodedSizeUser>::EncodedSize::USIZE,
+                ),
+                actual_size: pk.len(),
+            })?;
+
+        // This performs: (shared_secret, ciphertext) = encapsulate(receiver_pk)
+        let (shared_secret, ciphertext) =
+            self.establish_shared_secret(&receiver_pk)?;
+
+        // The ciphertext will be sent to the receiver later via get_key_material_for_receiver()
+        self.shared_secrets
+            .push(receiver_index, (shared_secret, ciphertext, pk.to_vec()));
+        Ok(())
+    }
+
+    // Override defaults for ML-KEM
+    fn get_key_material_for_receiver(
+        &self,
+        receiver_index: usize,
+    ) -> Option<&[u8]> {
+        // Return the stored ciphertext
+        self.shared_secrets
+            .find_pair_or_err(receiver_index, ())
+            .ok()
+            .map(|(_, ct, _)| ct.as_slice())
+    }
+
+    fn receive_key_material(
+        &mut self,
+        sender_pk_bytes: &[u8],
+        sender_index: usize,
+        key_material: &[u8],
+    ) -> Result<(), Self::Error> {
+        let sender_pk = Self::PublicKey::try_from(sender_pk_bytes)
+            .map_err(|_| MlKemError::InvalidPublicKey {
+                expected_size: Some(
+                    <<P as KemCore>::EncapsulationKey as ml_kem::EncodedSizeUser>::EncodedSize::USIZE,
+                ),
+                actual_size: sender_pk_bytes.len(),
+            })?;
+
+        // Decapsulate using KeyExchange trait method
+        let shared_secret =
+            self.receive_shared_secret(&sender_pk, &key_material.to_vec())?;
+
+        self.shared_secrets.push(
+            sender_index,
+            (shared_secret, Vec::new(), sender_pk_bytes.to_vec()),
+        );
+        Ok(())
+    }
+
+    fn build(self) -> Self::Scheme {
+        // Convert stored entries: (shared_secret, ciphertext, pk_bytes) -> (shared_secret, pk_bytes)
+        let encapsulation_key_bytes = self.encapsulation_key_bytes;
+        let shared_secrets = self.shared_secrets;
+
+        let mut scheme_secrets = Pairs::new();
+        for (idx, (shared_secret, _, pk_bytes)) in shared_secrets.into_iter()
+        {
+            scheme_secrets.push(idx, (shared_secret, pk_bytes));
+        }
+
+        Self::Scheme {
+            encapsulation_key_bytes,
+            shared_secrets: scheme_secrets,
+            counter: NonceCounter::new(),
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<S> MessageKey for AeadMlKemMessageKey<S>
+where
+    S: AeadInPlace + KeyInit,
+{
+    fn message_footer(&self) -> usize {
+        S::TagSize::USIZE + S::NonceSize::USIZE
+    }
+
+    fn encrypt(
+        self,
+        associated_data: &[u8],
+        buffer: &mut [u8],
+    ) -> Result<(), EncryptionError> {
+        let (buffer, tail) = buffer
+            .len()
+            .checked_sub(S::TagSize::USIZE + S::NonceSize::USIZE)
+            .and_then(|mid| buffer.split_at_mut_checked(mid))
+            .ok_or(EncryptionError)?;
+
+        let tag = self
+            .cipher
+            .encrypt_in_place_detached(&self.nonce, associated_data, buffer)
+            .map_err(|_| EncryptionError)?;
+
+        tail[..S::TagSize::USIZE].copy_from_slice(&tag);
+        tail[S::TagSize::USIZE..].copy_from_slice(&self.nonce);
+
+        Ok(())
+    }
+}
+
+impl<S, P> EncryptionScheme for AeadMlKem<S, P>
+where
+    S: AeadInPlace + KeyInit + Send,
+    P: KemCore + Send,
+{
+    type Key = AeadMlKemMessageKey<S>;
+
+    fn encryption_key(
+        &mut self,
+        receiver: usize,
+    ) -> Result<Self::Key, EncryptionError> {
+        // Same as X25519: get (shared_secret, receiver_pk_bytes)
+        let (shared_secret, receiver_pk_bytes) = self
+            .shared_secrets
+            .find_pair_or_err(receiver, EncryptionError)?;
+
+        // Same key derivation as X25519: Sha256(receiver_pk || shared_secret)
+        let key = Zeroizing::new(
+            Sha256::new_with_prefix(receiver_pk_bytes.as_slice())
+                .chain_update(shared_secret.as_slice())
+                .finalize(),
+        );
+
+        let key = Key::<S>::from_slice(key.as_slice());
+        let nonce = self.counter.next_nonce::<S>();
+        let cipher = S::new(key);
+
+        Ok(AeadMlKemMessageKey { cipher, nonce })
+    }
+
+    fn decrypt_message<'m>(
+        &self,
+        associated_data: &[u8],
+        buffer: &'m mut [u8],
+        sender: usize,
+    ) -> Result<&'m mut [u8], EncryptionError> {
+        let (buffer, tail) = buffer
+            .len()
+            .checked_sub(S::TagSize::USIZE + S::NonceSize::USIZE)
+            .and_then(|mid| buffer.split_at_mut_checked(mid))
+            .ok_or(EncryptionError)?;
+
+        // Same as X25519: get (shared_secret, _sender_pk_bytes) but use own public key
+        let (shared_secret, _sender_pk_bytes) = self
+            .shared_secrets
+            .find_pair_or_err(sender, EncryptionError)?;
+
+        // Same key derivation as X25519: Sha256(own_pk || shared_secret)
+        let key = Zeroizing::new(
+            Sha256::new_with_prefix(self.encapsulation_key_bytes.as_slice())
+                .chain_update(shared_secret.as_slice())
+                .finalize(),
+        );
+
+        let key = Key::<S>::from_slice(key.as_slice());
+        let nonce = Nonce::<S>::from_slice(&tail[S::TagSize::USIZE..]);
+        let tag = Tag::<S>::from_slice(&tail[..S::TagSize::USIZE]);
+
+        S::new(key)
+            .decrypt_in_place_detached(nonce, associated_data, buffer, tag)
+            .map_err(|_| EncryptionError)?;
+
+        Ok(buffer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chacha20poly1305::ChaCha20Poly1305;
+    use rand::{RngCore as RandRngCore, rngs::ThreadRng, thread_rng};
+    use rand_core_09::{CryptoRng, RngCore};
+
+    struct ThreadRngAdapter(ThreadRng);
+
+    impl RngCore for ThreadRngAdapter {
+        fn next_u32(&mut self) -> u32 {
+            RandRngCore::next_u32(&mut self.0)
+        }
+        fn next_u64(&mut self) -> u64 {
+            RandRngCore::next_u64(&mut self.0)
+        }
+        fn fill_bytes(&mut self, dest: &mut [u8]) {
+            RandRngCore::fill_bytes(&mut self.0, dest)
+        }
+    }
+
+    impl CryptoRng for ThreadRngAdapter {}
+
+    #[test]
+    fn test_mlkem_key_exchange_and_encryption()
+    -> Result<(), Box<dyn std::error::Error>> {
+        // 1. Setup Sender and Receiver Builders
+        let rng = ThreadRngAdapter(thread_rng());
+
+        let mut sender_builder =
+            AeadMlKemBuilder::<ChaCha20Poly1305, MlKem1024, _>::new(rng);
+
+        let mut receiver_builder =
+            AeadMlKemBuilder::<ChaCha20Poly1305, MlKem1024, _>::new(
+                ThreadRngAdapter(thread_rng()),
+            );
+
+        // 2. Exchange Keys
+        let receiver_pk_bytes = receiver_builder.public_key();
+
+        // Sender adds receiver's public key -> generates ciphertext (encapsulated key)
+        let receiver_index = 1;
+        sender_builder
+            .receiver_public_key(receiver_index, receiver_pk_bytes)
+            .map_err(|e| {
+                format!("sender failed to ingest receiver pk: {:?}", e)
+            })?;
+
+        let sender_pk_bytes = sender_builder.public_key();
+
+        // Sender gets the ciphertext to send to receiver
+        let key_material = sender_builder
+            .get_key_material_for_receiver(receiver_index)
+            .ok_or("sender should have ciphertext")?;
+
+        // Receiver ingests sender's ciphertext
+        let sender_index = 2;
+        receiver_builder
+            .receive_key_material(sender_pk_bytes, sender_index, key_material)
+            .map_err(|e| {
+                format!("receiver failed to ingest key material: {:?}", e)
+            })?;
+
+        // 3. Build Schemes
+        let mut sender_scheme = sender_builder.build();
+        let receiver_scheme = receiver_builder.build();
+
+        // 4. Encrypt (Sender -> Receiver)
+        let msg = b"Come on Quantum!!!";
+        let aad = b"context";
+
+        // Sender gets encryption key for receiver
+        let mut encryption_buffer = vec![0u8; msg.len() + 16 + 12]; // msg + tag(16) + nonce(12)
+        encryption_buffer[..msg.len()].copy_from_slice(msg);
+
+        let sender_key =
+            sender_scheme.encryption_key(receiver_index).map_err(|e| {
+                format!("sender failed to get encryption key: {:?}", e)
+            })?;
+
+        // Encrypt in place
+        sender_key
+            .encrypt(aad, &mut encryption_buffer)
+            .map_err(|e| format!("encryption failed: {:?}", e))?;
+
+        assert_ne!(
+            &encryption_buffer[..msg.len()],
+            msg,
+            "Ciphertext should differ from plaintext"
+        );
+
+        // 5. Decrypt (Receiver <- Sender)
+        // Receiver decrypts
+        let decrypted = receiver_scheme
+            .decrypt_message(aad, &mut encryption_buffer, sender_index)
+            .map_err(|e| format!("decryption failed: {:?}", e))?;
+
+        assert_eq!(decrypted, msg, "Decrypted message should match original");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_mlkem_encapsulation_key_try_from_all_parameter_sets() {
+        let mut rng = ThreadRngAdapter(thread_rng());
+
+        // Test MlKem512
+        let (_, ek512) = <MlKem512 as MlKemGenerate>::generate(&mut rng);
+        let bytes512 = ek512.as_bytes().as_slice().to_vec();
+        let key512 =
+            MlKemEncapsulationKey::<MlKem512>::try_from(bytes512.as_slice())
+                .expect("Should parse MlKem512 key");
+        assert_eq!(key512.as_ref(), bytes512.as_slice());
+
+        // Test MlKem768
+        let (_, ek768) = <MlKem768 as MlKemGenerate>::generate(&mut rng);
+        let bytes768 = ek768.as_bytes().as_slice().to_vec();
+        let key768 =
+            MlKemEncapsulationKey::<MlKem768>::try_from(bytes768.as_slice())
+                .expect("Should parse MlKem768 key");
+        assert_eq!(key768.as_ref(), bytes768.as_slice());
+
+        // Test MlKem1024
+        let (_, ek1024) = <MlKem1024 as MlKemGenerate>::generate(&mut rng);
+        let bytes1024 = ek1024.as_bytes().as_slice().to_vec();
+        let key1024 = MlKemEncapsulationKey::<MlKem1024>::try_from(
+            bytes1024.as_slice(),
+        )
+        .expect("Should parse MlKem1024 key");
+        assert_eq!(key1024.as_ref(), bytes1024.as_slice());
+
+        // Verify different parameter sets have different sizes
+        assert_ne!(bytes512.len(), bytes768.len());
+        assert_ne!(bytes768.len(), bytes1024.len());
+        assert_ne!(bytes512.len(), bytes1024.len());
+    }
+}

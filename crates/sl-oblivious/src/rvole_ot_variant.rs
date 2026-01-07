@@ -95,7 +95,7 @@ impl Default for RVOLEMsg2 {
     }
 }
 
-///
+/// RVOLE receiver state
 #[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 #[repr(C)]
 pub struct RVOLEReceiver {
@@ -103,7 +103,6 @@ pub struct RVOLEReceiver {
     beta: [u8; XI_BYTES],
 }
 
-///
 impl RVOLEReceiver {
     /// Create a new RVOLE receiver
     pub fn new<R: CryptoRngCore>(
@@ -169,7 +168,7 @@ impl RVOLEReceiver {
 }
 
 impl RVOLEReceiver {
-    ///
+    /// Process RVOLE message 2 and return receiver output
     pub fn process(
         &self,
         rvole_output_2: &RVOLEMsg2,
@@ -315,11 +314,11 @@ impl RVOLEReceiver {
     }
 }
 
-///
+/// RVOLE sender
 pub struct RVOLESender;
 
 impl RVOLESender {
-    ///
+    /// Process RVOLE protocol and return sender output
     pub fn process<R: CryptoRngCore>(
         session_id: &[u8],
         a: &[Scalar; L_BATCH],

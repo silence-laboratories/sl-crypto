@@ -4,15 +4,20 @@
 use crate::proto::encrypted::MessageKey;
 
 pub mod aead;
+pub mod key_exchange;
+pub mod mlkem;
 pub mod passthrough;
+pub mod rng_compat;
 
-#[derive(Debug)]
+pub use key_exchange::KeyExchange;
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct PublicKeyError;
 
 #[derive(Debug)]
 pub struct EncryptionError;
 
-pub trait EncryptionSchemeBuilder {
+pub trait EncryptionSchemeBuilder: KeyExchange {
     type Scheme: EncryptionScheme;
 
     /// Return external representation of own public key
@@ -38,18 +43,39 @@ pub trait EncryptionSchemeBuilder {
     ///
     /// # Errors
     ///
-    /// - `PublicKeyError`: An error is returned if the public key cannot be
-    ///   set due to invalid formatting, an invalid receiver index, or any
-    ///   other issue encountered in the operation. The precise error variant
-    ///   provides further details on the nature of the failure.
+    /// Returns the error type from the underlying `KeyExchange` implementation.
+    /// For X25519: `PublicKeyError`
+    /// For ML-KEM: `MlKemError`
     ///
     fn receiver_public_key(
         &mut self,
         receiver_index: usize,
         public_key: &[u8],
-    ) -> Result<(), PublicKeyError>;
+    ) -> Result<(), <Self as KeyExchange>::Error>;
 
     fn build(self) -> Self::Scheme;
+
+    /// Get key material that needs to be sent to receiver.
+    /// For X25519: Returns `None` (no material to exchange)
+    /// For ML-KEM: Returns `Some(ciphertext)` that needs to be sent to receiver
+    fn get_key_material_for_receiver(
+        &self,
+        _receiver_index: usize,
+    ) -> Option<&[u8]> {
+        None // Default: no material for symmetric exchanges
+    }
+
+    /// Receive and process key material from sender.
+    /// For X25519: No-op (shared secret already computed)
+    /// For ML-KEM: Decapsulates ciphertext and stores shared secret
+    fn receive_key_material(
+        &mut self,
+        _sender_pk_bytes: &[u8],
+        _sender_index: usize,
+        _key_material: &[u8],
+    ) -> Result<(), <Self as KeyExchange>::Error> {
+        Ok(()) // Default: no-op for symmetric exchanges
+    }
 }
 
 /// Represents an encryption scheme interface for in-place AEAD and

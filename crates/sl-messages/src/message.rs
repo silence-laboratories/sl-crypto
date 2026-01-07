@@ -76,7 +76,7 @@ impl fmt::Debug for MsgId {
 impl fmt::UpperHex for MsgId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for b in &self.0 {
-            write!(f, "{:02X}", b)?;
+            write!(f, "{b:02X}")?;
         }
         Ok(())
     }
@@ -85,7 +85,7 @@ impl fmt::UpperHex for MsgId {
 impl fmt::LowerHex for MsgId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for b in &self.0 {
-            write!(f, "{:02x}", b)?;
+            write!(f, "{b:02x}")?;
         }
         Ok(())
     }
@@ -245,7 +245,7 @@ impl MsgHdr {
         let ttl = match ttl {
             0..256 => ttl as u16,
             256..Self::MAX_TTL => {
-                let ttl = (ttl + 9) / 10 - 26;
+                let ttl = ttl.div_ceil(10) - 26;
                 let ttl = ttl + 256;
 
                 ttl as u16

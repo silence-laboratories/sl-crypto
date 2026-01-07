@@ -10,17 +10,20 @@ bytes = "1.5"
 chacha20 = { version = "0.9" }
 chacha20poly1305 = { version = "0.10.1" }
 generic-array = { version = "0.14.7", features = [ "zeroize" ] }
-rand_core = "0.6"
+rand_core = { version = "0.6", features = ["std"] }
+rand_core_09 = { package = "rand_core", version = "0.9.3", features = ["std", "os_rng"] }
+x25519-dalek = { version = "2.0.0", features = ["reusable_secrets", "zeroize"] }
 sha2 = { version = "0.10" }
 signature = { version = "2.2.0" }
-x25519-dalek = { version = "2.0.0", features = ["reusable_secrets", "zeroize"] }
 zeroize = { version = "1.6", features = [ "derive" ] }
+ml-kem = "0.3.0-pre.2"
 
 fastwebsockets = { version = "0.10", features = ["unstable-split"], optional = true }
 tokio = { version = "1.43", optional = true }
 
 [dev-dependencies]
 rand = "0.8"
+
 tokio = { version = "1.43", features = ["sync", "macros", "rt-multi-thread", "net", "time"] }
 
 [features]
