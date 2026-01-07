@@ -145,11 +145,12 @@ where
     type PublicKey = X25519PublicKey;
     type SharedSecret = SharedKey;
     type KeyMaterial = EmptyKeyMaterial; // No additional material for X25519
+    type Error = PublicKeyError;
 
     fn establish_shared_secret(
         &mut self,
         receiver_pk: &Self::PublicKey,
-    ) -> Result<(Self::SharedSecret, EmptyKeyMaterial), PublicKeyError> {
+    ) -> Result<(Self::SharedSecret, EmptyKeyMaterial), Self::Error> {
         // DH computation using our secret key and receiver's public key
         let pk: PublicKey = receiver_pk.0;
         let shared_secret = self.secret.diffie_hellman(&pk);
@@ -167,7 +168,7 @@ where
         &mut self,
         sender_pk: &Self::PublicKey,
         _key_material: &EmptyKeyMaterial,
-    ) -> Result<Self::SharedSecret, PublicKeyError> {
+    ) -> Result<Self::SharedSecret, Self::Error> {
         // For DH, same as establish (symmetric)
         self.establish_shared_secret(sender_pk).map(|(ss, _)| ss)
     }
@@ -187,7 +188,7 @@ where
         &mut self,
         receiver_index: usize,
         pk: &[u8],
-    ) -> Result<(), PublicKeyError> {
+    ) -> Result<(), Self::Error> {
         let receiver_pk = Self::PublicKey::try_from(pk)?;
 
         // This calls the establish_shared_secret() we implemented above

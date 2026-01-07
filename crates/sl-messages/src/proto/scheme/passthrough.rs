@@ -50,11 +50,12 @@ impl KeyExchange for PassThroughEncryptionBuilder {
     type PublicKey = PassthroughPublicKey;
     type SharedSecret = Vec<u8>;
     type KeyMaterial = PassthroughKeyMaterial;
+    type Error = PublicKeyError;
 
     fn establish_shared_secret(
         &mut self,
         _receiver_pk: &Self::PublicKey,
-    ) -> Result<(Self::SharedSecret, PassthroughKeyMaterial), PublicKeyError>
+    ) -> Result<(Self::SharedSecret, PassthroughKeyMaterial), Self::Error>
     {
         Ok((Vec::new(), PassthroughKeyMaterial))
     }
@@ -63,7 +64,7 @@ impl KeyExchange for PassThroughEncryptionBuilder {
         &mut self,
         _sender_pk: &Self::PublicKey,
         _key_material: &PassthroughKeyMaterial,
-    ) -> Result<Self::SharedSecret, PublicKeyError> {
+    ) -> Result<Self::SharedSecret, Self::Error> {
         Ok(Vec::new())
     }
 }
@@ -79,7 +80,7 @@ impl EncryptionSchemeBuilder for PassThroughEncryptionBuilder {
         &mut self,
         _receiver_index: usize,
         public_key: &[u8],
-    ) -> Result<(), PublicKeyError> {
+    ) -> Result<(), Self::Error> {
         if !public_key.is_empty() {
             return Err(PublicKeyError);
         }

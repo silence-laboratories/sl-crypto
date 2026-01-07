@@ -43,16 +43,15 @@ pub trait EncryptionSchemeBuilder: KeyExchange {
     ///
     /// # Errors
     ///
-    /// - `PublicKeyError`: An error is returned if the public key cannot be
-    ///   set due to invalid formatting, an invalid receiver index, or any
-    ///   other issue encountered in the operation. The precise error variant
-    ///   provides further details on the nature of the failure.
+    /// Returns the error type from the underlying `KeyExchange` implementation.
+    /// For X25519: `PublicKeyError`
+    /// For ML-KEM: `MlKemError`
     ///
     fn receiver_public_key(
         &mut self,
         receiver_index: usize,
         public_key: &[u8],
-    ) -> Result<(), PublicKeyError>;
+    ) -> Result<(), <Self as KeyExchange>::Error>;
 
     fn build(self) -> Self::Scheme;
 
@@ -74,7 +73,7 @@ pub trait EncryptionSchemeBuilder: KeyExchange {
         _sender_pk_bytes: &[u8],
         _sender_index: usize,
         _key_material: &[u8],
-    ) -> Result<(), PublicKeyError> {
+    ) -> Result<(), <Self as KeyExchange>::Error> {
         Ok(()) // Default: no-op for symmetric exchanges
     }
 }

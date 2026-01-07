@@ -23,6 +23,31 @@ use super::{
     MessageKey, PublicKeyError,
 };
 
+/// ML-KEM specific error types that provide more context than generic PublicKeyError
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MlKemError {
+    /// Decapsulation key is missing (not initialized)
+    MissingDecapsulationKey,
+    /// Failed to parse ciphertext from bytes (invalid size or format)
+    InvalidCiphertext {
+        /// Expected size in bytes (if known)
+        expected_size: Option<usize>,
+        /// Actual size received
+        actual_size: usize,
+    },
+    /// Decapsulation operation failed (corrupted ciphertext, invalid key, etc.)
+    DecapsulationFailed,
+    /// Encapsulation operation failed
+    EncapsulationFailed,
+    /// Failed to parse public key from bytes
+    InvalidPublicKey {
+        /// Expected size in bytes (if known)
+        expected_size: Option<usize>,
+        /// Actual size received
+        actual_size: usize,
+    },
+}
+
 // Counter to create a unique nonce.
 struct NonceCounter(u32);
 
@@ -55,6 +80,9 @@ pub trait MlKemGenerate: KemCore + Send {
     type MlKemEncapsulationKey: ml_kem::EncodedSizeUser;
     type MlKemCiphertext: for<'a> TryFrom<&'a [u8]>;
 
+    /// Get the expected size of the ciphertext in bytes
+    fn ciphertext_size() -> usize;
+
     fn generate<R: CryptoRng>(
         rng: &mut R,
     ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey);
@@ -72,6 +100,11 @@ impl MlKemGenerate for MlKem512 {
     type MlKemEncapsulationKey =
         ml_kem::kem::EncapsulationKey<ml_kem::MlKem512Params>;
     type MlKemCiphertext = ml_kem::Ciphertext<MlKem512>;
+
+    fn ciphertext_size() -> usize {
+        768 // ML-KEM-512 ciphertext size
+    }
+
     fn generate<R: CryptoRng>(
         rng: &mut R,
     ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey) {
@@ -93,6 +126,11 @@ impl MlKemGenerate for MlKem768 {
     type MlKemEncapsulationKey =
         ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>;
     type MlKemCiphertext = ml_kem::Ciphertext<MlKem768>;
+
+    fn ciphertext_size() -> usize {
+        1088 // ML-KEM-768 ciphertext size
+    }
+
     fn generate<R: CryptoRng>(
         rng: &mut R,
     ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey) {
@@ -114,6 +152,11 @@ impl MlKemGenerate for MlKem1024 {
     type MlKemEncapsulationKey =
         ml_kem::kem::EncapsulationKey<ml_kem::MlKem1024Params>;
     type MlKemCiphertext = ml_kem::Ciphertext<MlKem1024>;
+
+    fn ciphertext_size() -> usize {
+        1568 // ML-KEM-1024 ciphertext size
+    }
+
     fn generate<R: CryptoRng>(
         rng: &mut R,
     ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey) {
@@ -153,8 +196,18 @@ where
     type Error = PublicKeyError;
 
     fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
+        let expected_size = <<P as KemCore>::EncapsulationKey as ml_kem::EncodedSizeUser>::EncodedSize::USIZE;
         let array: Array<u8, <<P as KemCore>::EncapsulationKey as ml_kem::EncodedSizeUser>::EncodedSize> =
-            bytes.try_into().map_err(|_| PublicKeyError)?;
+            bytes.try_into().map_err(|_| {
+                // Log context before converting to PublicKeyError
+                let _err = MlKemError::InvalidPublicKey {
+                    expected_size: Some(expected_size),
+                    actual_size: bytes.len(),
+                };
+                // Note: In production, consider using a logging framework here
+                // e.g., tracing::warn!("Failed to parse ML-KEM public key: {:?}", _err);
+                PublicKeyError
+            })?;
         let key = <P as KemCore>::EncapsulationKey::from_bytes(&array);
         Ok(MlKemEncapsulationKey {
             key,
@@ -222,14 +275,16 @@ where
     type PublicKey = MlKemEncapsulationKey<P>;
     type SharedSecret = SharedSecret;
     type KeyMaterial = Vec<u8>;
+    type Error = MlKemError;
 
     fn establish_shared_secret(
         &mut self,
         receiver_pk: &Self::PublicKey,
-    ) -> Result<(Self::SharedSecret, Vec<u8>), PublicKeyError> {
+    ) -> Result<(Self::SharedSecret, Vec<u8>), Self::Error> {
         let ek = &receiver_pk.key;
-        let (ct, k_send) =
-            ek.encapsulate(&mut self.rng).map_err(|_| PublicKeyError)?;
+        let (ct, k_send) = ek
+            .encapsulate(&mut self.rng)
+            .map_err(|_| MlKemError::EncapsulationFailed)?;
         Ok((
             Zeroizing::new(k_send.as_slice().to_vec()),
             ct.as_slice().to_vec(),
@@ -240,16 +295,28 @@ where
         &mut self,
         _sender_pk: &Self::PublicKey, // Not used for decapsulation
         key_material: &Vec<u8>,       // Ciphertext
-    ) -> Result<Self::SharedSecret, PublicKeyError> {
+    ) -> Result<Self::SharedSecret, Self::Error> {
         // Decapsulate: receiver recovers shared secret using own secret key
-        let dk = self.decapsulation_key.as_ref().ok_or(PublicKeyError)?;
+        let dk = self
+            .decapsulation_key
+            .as_ref()
+            .ok_or_else(|| MlKemError::MissingDecapsulationKey)?;
+
         // Use generic ciphertext type from trait - parse directly without type alias
+        // Get expected ciphertext size for better error reporting
+        let expected_ct_size = P::ciphertext_size();
         let ct: <P as MlKemGenerate>::MlKemCiphertext = key_material
             .as_slice()
             .try_into()
-            .map_err(|_| PublicKeyError)?;
+            .map_err(|_| MlKemError::InvalidCiphertext {
+                expected_size: Some(expected_ct_size),
+                actual_size: key_material.len(),
+            })?;
+
         // Decapsulate using the trait method
-        let k_recv = P::decapsulate(dk, &ct).map_err(|_| PublicKeyError)?;
+        let k_recv = P::decapsulate(dk, &ct)
+            .map_err(|_| MlKemError::DecapsulationFailed)?;
+
         // The decapsulated shared secret is an Array type; convert it to Vec<u8> and wrap in Zeroizing
         Ok(Zeroizing::new(k_recv.as_slice().to_vec()))
     }
@@ -263,6 +330,8 @@ where
 {
     type Scheme = AeadMlKem<S, P>;
 
+    // Error type is inherited from KeyExchange (MlKemError)
+
     fn public_key(&self) -> &[u8] {
         &self.encapsulation_key_bytes
     }
@@ -271,8 +340,14 @@ where
         &mut self,
         receiver_index: usize,
         pk: &[u8],
-    ) -> Result<(), PublicKeyError> {
-        let receiver_pk = Self::PublicKey::try_from(pk)?;
+    ) -> Result<(), Self::Error> {
+        let receiver_pk = Self::PublicKey::try_from(pk)
+            .map_err(|_| MlKemError::InvalidPublicKey {
+                expected_size: Some(
+                    <<P as KemCore>::EncapsulationKey as ml_kem::EncodedSizeUser>::EncodedSize::USIZE,
+                ),
+                actual_size: pk.len(),
+            })?;
 
         // This performs: (shared_secret, ciphertext) = encapsulate(receiver_pk)
         let (shared_secret, ciphertext) =
@@ -301,8 +376,14 @@ where
         sender_pk_bytes: &[u8],
         sender_index: usize,
         key_material: &[u8],
-    ) -> Result<(), PublicKeyError> {
-        let sender_pk = Self::PublicKey::try_from(sender_pk_bytes)?;
+    ) -> Result<(), Self::Error> {
+        let sender_pk = Self::PublicKey::try_from(sender_pk_bytes)
+            .map_err(|_| MlKemError::InvalidPublicKey {
+                expected_size: Some(
+                    <<P as KemCore>::EncapsulationKey as ml_kem::EncodedSizeUser>::EncodedSize::USIZE,
+                ),
+                actual_size: sender_pk_bytes.len(),
+            })?;
 
         // Decapsulate using KeyExchange trait method
         let shared_secret =
@@ -321,7 +402,8 @@ where
         let shared_secrets = self.shared_secrets;
 
         let mut scheme_secrets = Pairs::new();
-        for (idx, (shared_secret, _, pk_bytes)) in shared_secrets.into_iter() {
+        for (idx, (shared_secret, _, pk_bytes)) in shared_secrets.into_iter()
+        {
             scheme_secrets.push(idx, (shared_secret, pk_bytes));
         }
 
@@ -469,7 +551,7 @@ mod tests {
             AeadMlKemBuilder::<ChaCha20Poly1305, MlKem1024, _>::new(rng);
 
         let mut receiver_builder =
-            AeadMlKemBuilder::<ChaCha20Poly1305, MlKem1024, _>::new(
+            AeadMlKemBuilder::<ChaCha20Poly1305, MlKem512, _>::new(
                 InfallibleOsRng(OsRng),
             );
 
