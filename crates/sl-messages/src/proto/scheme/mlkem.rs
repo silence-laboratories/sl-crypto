@@ -555,7 +555,7 @@ mod tests {
             AeadMlKemBuilder::<ChaCha20Poly1305, MlKem1024, _>::new(rng);
 
         let mut receiver_builder =
-            AeadMlKemBuilder::<ChaCha20Poly1305, MlKem512, _>::new(
+            AeadMlKemBuilder::<ChaCha20Poly1305, MlKem1024, _>::new(
                 InfallibleOsRng(OsRng),
             );
 
