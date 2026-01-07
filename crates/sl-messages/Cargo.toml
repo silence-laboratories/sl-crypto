@@ -10,15 +10,9 @@ bytes = "1.5"
 chacha20 = { version = "0.9" }
 chacha20poly1305 = { version = "0.10.1" }
 generic-array = { version = "0.14.7", features = [ "zeroize" ] }
-# Modern side (ML-KEM and your traits)
 rand_core = { version = "0.9.3", features = ["std", "os_rng"] }
-
 rand_core_06 = { package = "rand_core", version = "0.6.4" }
-
-rand = { version = "0.9.0-alpha.2", features = ["std"] }
-
-getrandom = { version = "0.3", features = ["std"] }
-x25519-dalek = { version = "2.0", features = ["reusable_secrets", "static_secrets"] }
+x25519-dalek = { version = "2.0.0", features = ["reusable_secrets", "zeroize"] }
 sha2 = { version = "0.10" }
 signature = { version = "2.2.0" }
 zeroize = { version = "1.6", features = [ "derive" ] }
