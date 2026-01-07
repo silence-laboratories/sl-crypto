@@ -158,22 +158,6 @@ where
         }
     }
 
-    // Internal implementation that uses trait object for ml-kem compatibility
-    // ml-kem's encapsulate requires TryCryptoRng + ?Sized
-    fn establish_shared_secret_impl(
-        &mut self,
-        receiver_pk: &MlKemEncapsulationKey,
-    ) -> Result<(SharedSecret, Vec<u8>), PublicKeyError> {
-        use Encapsulate as _;
-        let ek = &receiver_pk.key;
-        let (ct, k_send) =
-            ek.encapsulate(&mut self.rng).map_err(|_| PublicKeyError)?;
-        // SharedKey and Ciphertext are Array types, convert to Vec<u8>
-        Ok((
-            Zeroizing::new(k_send.as_slice().to_vec()),
-            ct.as_slice().to_vec(),
-        ))
-    }
 }
 
 impl<S, R> KeyExchange for AeadMlKemBuilder<S, R>
@@ -189,7 +173,13 @@ where
         &mut self,
         receiver_pk: &Self::PublicKey,
     ) -> Result<(Self::SharedSecret, Vec<u8>), PublicKeyError> {
-        self.establish_shared_secret_impl(receiver_pk)
+        let ek = &receiver_pk.key;
+        let (ct, k_send) =
+            ek.encapsulate(&mut self.rng).map_err(|_| PublicKeyError)?;
+        Ok((
+            Zeroizing::new(k_send.as_slice().to_vec()),
+            ct.as_slice().to_vec(),
+        ))
     }
 
     fn receive_shared_secret(
@@ -198,7 +188,6 @@ where
         key_material: &Vec<u8>,       // Ciphertext
     ) -> Result<Self::SharedSecret, PublicKeyError> {
         // Decapsulate: receiver recovers shared secret using own secret key
-        use Decapsulate as _;
         let dk = self.decapsulation_key.as_ref().ok_or(PublicKeyError)?;
         type Ct = ml_kem::Ciphertext<MlKem768>;
         if key_material.len() != 1088 {
@@ -419,17 +408,11 @@ mod tests {
     fn test_mlkem_key_exchange_and_encryption()
     -> Result<(), Box<dyn std::error::Error>> {
         // 1. Setup Sender and Receiver Builders
-        // Use InfallibleOsRng to satisfy CryptoRng requirement (OsRng is TryCryptoRng)
         let rng = InfallibleOsRng(OsRng);
 
         let mut sender_builder =
             AeadMlKemBuilder::<ChaCha20Poly1305, _>::new(rng);
-        // Create a new RNG-like instance for receiver (since new consumes it)
-        // In real code they would have separate RNGs anyway.
-        // For test with InfallibleOsRng wrapper we need to recreate it.
-        // But since InfallibleOsRng wraps OsRng which is ZST/global-ish we can just make another one
-        // IF OsRng is copy/clone. But InfallibleOsRng might not be.
-        // Let's just create a new one.
+
 
         let mut receiver_builder =
             AeadMlKemBuilder::<ChaCha20Poly1305, _>::new(InfallibleOsRng(
@@ -437,7 +420,6 @@ mod tests {
             ));
 
         // 2. Exchange Keys
-        // Receiver exposes public key
         let receiver_pk_bytes = receiver_builder.public_key();
 
         // Sender adds receiver's public key -> generates ciphertext (encapsulated key)
