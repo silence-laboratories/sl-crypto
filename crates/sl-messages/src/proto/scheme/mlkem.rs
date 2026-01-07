@@ -250,7 +250,7 @@ where
             .map_err(|_| PublicKeyError)?;
         // Decapsulate using the trait method
         let k_recv = P::decapsulate(dk, &ct).map_err(|_| PublicKeyError)?;
-        // SharedKey is an Array type, convert to Vec<u8>
+        // The decapsulated shared secret is an Array type; convert it to Vec<u8> and wrap in Zeroizing
         Ok(Zeroizing::new(k_recv.as_slice().to_vec()))
     }
 }
