@@ -296,14 +296,12 @@ where
         _sender_pk: &Self::PublicKey, // Not used for decapsulation
         key_material: &Vec<u8>,       // Ciphertext
     ) -> Result<Self::SharedSecret, Self::Error> {
-        // Decapsulate: receiver recovers shared secret using own secret key
         let dk = self
             .decapsulation_key
             .as_ref()
-            .ok_or_else(|| MlKemError::MissingDecapsulationKey)?;
+            .ok_or(MlKemError::MissingDecapsulationKey)?;
 
-        // Use generic ciphertext type from trait - parse directly without type alias
-        // Get expected ciphertext size for better error reporting
+     
         let expected_ct_size = P::ciphertext_size();
         let ct: <P as MlKemGenerate>::MlKemCiphertext = key_material
             .as_slice()
@@ -313,11 +311,9 @@ where
                 actual_size: key_material.len(),
             })?;
 
-        // Decapsulate using the trait method
         let k_recv = P::decapsulate(dk, &ct)
             .map_err(|_| MlKemError::DecapsulationFailed)?;
 
-        // The decapsulated shared secret is an Array type; convert it to Vec<u8> and wrap in Zeroizing
         Ok(Zeroizing::new(k_recv.as_slice().to_vec()))
     }
 }
