@@ -290,7 +290,16 @@ where
             ct.as_slice().to_vec(),
         ))
     }
-
+    /// Receive and decapsulate a shared secret using the receiver's private key.
+    /// Security note:
+    /// - `sender_pk` is intentionally **not** used during ML-KEM decapsulation.
+    /// - ML-KEM ciphertexts are not bound to the sender's public key, so this
+    ///   function does **not** provide sender authentication or key confirmation
+    ///   on its own.
+    /// - Callers **MUST** provide sender authentication and bind the sender's
+    ///   public key to the ciphertext at a higher protocol layer with PQ safe signatures.
+    ///   Failing to do so can enable public-key substitution attacks where an
+    ///   attacker replaces the expected sender's public key with their own.
     fn receive_shared_secret(
         &mut self,
         _sender_pk: &Self::PublicKey, // Not used for decapsulation
@@ -301,7 +310,6 @@ where
             .as_ref()
             .ok_or(MlKemError::MissingDecapsulationKey)?;
 
-     
         let expected_ct_size = P::ciphertext_size();
         let ct: <P as MlKemGenerate>::MlKemCiphertext = key_material
             .as_slice()
