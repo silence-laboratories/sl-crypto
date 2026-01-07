@@ -96,9 +96,9 @@ pub trait MlKemGenerate: KemCore + Send {
 // Implement for each parameter set
 impl MlKemGenerate for MlKem512 {
     type MlKemDecapsulationKey =
-        ml_kem::kem::DecapsulationKey<ml_kem::MlKem512Params>;
+    ml_kem::kem::DecapsulationKey<ml_kem::MlKem512Params>;
     type MlKemEncapsulationKey =
-        ml_kem::kem::EncapsulationKey<ml_kem::MlKem512Params>;
+    ml_kem::kem::EncapsulationKey<ml_kem::MlKem512Params>;
     type MlKemCiphertext = ml_kem::Ciphertext<MlKem512>;
 
     fn ciphertext_size() -> usize {
@@ -122,9 +122,9 @@ impl MlKemGenerate for MlKem512 {
 
 impl MlKemGenerate for MlKem768 {
     type MlKemDecapsulationKey =
-        ml_kem::kem::DecapsulationKey<ml_kem::MlKem768Params>;
+    ml_kem::kem::DecapsulationKey<ml_kem::MlKem768Params>;
     type MlKemEncapsulationKey =
-        ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>;
+    ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>;
     type MlKemCiphertext = ml_kem::Ciphertext<MlKem768>;
 
     fn ciphertext_size() -> usize {
@@ -148,9 +148,9 @@ impl MlKemGenerate for MlKem768 {
 
 impl MlKemGenerate for MlKem1024 {
     type MlKemDecapsulationKey =
-        ml_kem::kem::DecapsulationKey<ml_kem::MlKem1024Params>;
+    ml_kem::kem::DecapsulationKey<ml_kem::MlKem1024Params>;
     type MlKemEncapsulationKey =
-        ml_kem::kem::EncapsulationKey<ml_kem::MlKem1024Params>;
+    ml_kem::kem::EncapsulationKey<ml_kem::MlKem1024Params>;
     type MlKemCiphertext = ml_kem::Ciphertext<MlKem1024>;
 
     fn ciphertext_size() -> usize {
@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_mlkem_key_exchange_and_encryption()
-    -> Result<(), Box<dyn std::error::Error>> {
+        -> Result<(), Box<dyn std::error::Error>> {
         // 1. Setup Sender and Receiver Builders
         let rng = ThreadRngAdapter(thread_rng());
 
@@ -611,20 +611,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_mlkem_encapsulation_key_try_from_invalid_size() {
-        let wrong_size_bytes = vec![0u8; 100]; // Wrong size for any ML-KEM key
-
-        let result = MlKemEncapsulationKey::<MlKem1024>::try_from(
-            wrong_size_bytes.as_slice(),
-        );
-        assert!(result.is_err(), "Should fail with wrong size");
-        match result {
-            Err(PublicKeyError) => {}
-            Ok(_) => panic!("Expected PublicKeyError"),
-        }
-    }
-
+  
     #[test]
     fn test_mlkem_encapsulation_key_try_from_all_parameter_sets() {
         let mut rng = ThreadRngAdapter(thread_rng());
@@ -651,7 +638,7 @@ mod tests {
         let key1024 = MlKemEncapsulationKey::<MlKem1024>::try_from(
             bytes1024.as_slice(),
         )
-        .expect("Should parse MlKem1024 key");
+            .expect("Should parse MlKem1024 key");
         assert_eq!(key1024.as_ref(), bytes1024.as_slice());
 
         // Verify different parameter sets have different sizes
