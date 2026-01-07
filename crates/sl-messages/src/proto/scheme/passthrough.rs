@@ -1,8 +1,6 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use rand_core_09::TryCryptoRng;
-
 use super::{
     EncryptionError, EncryptionScheme, EncryptionSchemeBuilder, KeyExchange,
     MessageKey, PublicKeyError,
@@ -56,7 +54,6 @@ impl KeyExchange for PassThroughEncryptionBuilder {
     fn establish_shared_secret(
         &mut self,
         _receiver_pk: &Self::PublicKey,
-        _rng: &mut impl TryCryptoRng,
     ) -> Result<(Self::SharedSecret, PassthroughKeyMaterial), PublicKeyError>
     {
         Ok((Vec::new(), PassthroughKeyMaterial))

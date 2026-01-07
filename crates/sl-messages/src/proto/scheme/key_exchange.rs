@@ -1,8 +1,6 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use rand_core_09::TryCryptoRng;
-
 use super::PublicKeyError;
 
 /// Trait for key exchange mechanisms.
@@ -23,7 +21,6 @@ pub trait KeyExchange {
     fn establish_shared_secret(
         &mut self,
         receiver_pk: &Self::PublicKey,
-        rng: &mut impl TryCryptoRng,
     ) -> Result<(Self::SharedSecret, Self::KeyMaterial), PublicKeyError>;
 
     /// For X25519: Same as establish (symmetric)

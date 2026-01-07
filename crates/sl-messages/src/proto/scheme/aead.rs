@@ -11,7 +11,7 @@ use aead::{
 use chacha20::hchacha;
 
 use rand_core::CryptoRngCore;
-use rand_core_09::{OsRng, TryCryptoRng};
+
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, ReusableSecret};
 use zeroize::Zeroizing;
@@ -149,7 +149,6 @@ where
     fn establish_shared_secret(
         &mut self,
         receiver_pk: &Self::PublicKey,
-        _rng: &mut impl TryCryptoRng,
     ) -> Result<(Self::SharedSecret, EmptyKeyMaterial), PublicKeyError> {
         // DH computation using our secret key and receiver's public key
         let pk: PublicKey = receiver_pk.0;
@@ -170,9 +169,7 @@ where
         _key_material: &EmptyKeyMaterial,
     ) -> Result<Self::SharedSecret, PublicKeyError> {
         // For DH, same as establish (symmetric)
-        let mut rng = OsRng;
-        self.establish_shared_secret(sender_pk, &mut rng)
-            .map(|(ss, _)| ss)
+        self.establish_shared_secret(sender_pk).map(|(ss, _)| ss)
     }
 }
 
@@ -194,10 +191,8 @@ where
         let receiver_pk = Self::PublicKey::try_from(pk)?;
 
         // This calls the establish_shared_secret() we implemented above
-        // TODO: there is no need to use rng here and call establish_shared_secret
-        let mut rng = OsRng;
         let (shared_secret, _key_material) =
-            self.establish_shared_secret(&receiver_pk, &mut rng)?;
+            self.establish_shared_secret(&receiver_pk)?;
 
         // Convert X25519PublicKey wrapper back to PublicKey for storage
         let pk_inner: PublicKey = receiver_pk.into();

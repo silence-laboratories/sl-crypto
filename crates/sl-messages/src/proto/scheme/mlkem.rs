@@ -113,11 +113,12 @@ impl From<MlKemEncapsulationKey>
     }
 }
 
-pub struct AeadMlKemBuilder<S> {
+pub struct AeadMlKemBuilder<S, R = OsRng> {
     decapsulation_key:
         Option<ml_kem::kem::DecapsulationKey<ml_kem::MlKem768Params>>,
     encapsulation_key_bytes: Vec<u8>, // Store bytes for public_key() method
     shared_secrets: Pairs<(SharedSecret, Vec<u8>, Vec<u8>), usize>,
+    rng: R,
     marker: PhantomData<S>,
 }
 
@@ -135,17 +136,24 @@ pub struct AeadMlKemMessageKey<S: KeyInit + AeadCore> {
     nonce: Nonce<S>,
 }
 
-impl<S> AeadMlKemBuilder<S> {
+impl<S, R> AeadMlKemBuilder<S, R>
+where
+    R: TryCryptoRng,
+{
     /// Generate a new [`AeadMlKem`] with the supplied RNG.
     /// generate requires CryptoRng (infallible)
-    pub fn new(rng: &mut impl rand_core_09::CryptoRng) -> Self {
-        let (dk, ek) = MlKem768::generate(rng);
+    pub fn new(mut rng: R) -> Self
+    where
+        R: rand_core_09::CryptoRng,
+    {
+        let (dk, ek) = MlKem768::generate(&mut rng);
         let ek_bytes = ek.as_bytes().as_slice().to_vec();
 
         Self {
             decapsulation_key: Some(dk),
             encapsulation_key_bytes: ek_bytes,
             shared_secrets: Pairs::new(),
+            rng,
             marker: PhantomData,
         }
     }
@@ -155,11 +163,11 @@ impl<S> AeadMlKemBuilder<S> {
     fn establish_shared_secret_impl(
         &mut self,
         receiver_pk: &MlKemEncapsulationKey,
-        rng: &mut impl TryCryptoRng,
     ) -> Result<(SharedSecret, Vec<u8>), PublicKeyError> {
         use Encapsulate as _;
         let ek = &receiver_pk.key;
-        let (ct, k_send) = ek.encapsulate(rng).map_err(|_| PublicKeyError)?;
+        let (ct, k_send) =
+            ek.encapsulate(&mut self.rng).map_err(|_| PublicKeyError)?;
         // SharedKey and Ciphertext are Array types, convert to Vec<u8>
         Ok((
             Zeroizing::new(k_send.as_slice().to_vec()),
@@ -168,9 +176,10 @@ impl<S> AeadMlKemBuilder<S> {
     }
 }
 
-impl<S> KeyExchange for AeadMlKemBuilder<S>
+impl<S, R> KeyExchange for AeadMlKemBuilder<S, R>
 where
     S: AeadInPlace + KeyInit + Send,
+    R: TryCryptoRng,
 {
     type PublicKey = MlKemEncapsulationKey;
     type SharedSecret = SharedSecret; // 32 bytes for ML-KEM-768
@@ -179,9 +188,8 @@ where
     fn establish_shared_secret(
         &mut self,
         receiver_pk: &Self::PublicKey,
-        rng: &mut impl TryCryptoRng,
     ) -> Result<(Self::SharedSecret, Vec<u8>), PublicKeyError> {
-        self.establish_shared_secret_impl(receiver_pk, rng)
+        self.establish_shared_secret_impl(receiver_pk)
     }
 
     fn receive_shared_secret(
@@ -206,9 +214,10 @@ where
     }
 }
 
-impl<S> EncryptionSchemeBuilder for AeadMlKemBuilder<S>
+impl<S, R> EncryptionSchemeBuilder for AeadMlKemBuilder<S, R>
 where
     S: AeadInPlace + KeyInit + Send,
+    R: TryCryptoRng,
 {
     type Scheme = AeadMlKem<S>;
 
@@ -225,7 +234,7 @@ where
 
         // This performs: (shared_secret, ciphertext) = encapsulate(receiver_pk)
         let (shared_secret, ciphertext) =
-            self.establish_shared_secret(&receiver_pk, &mut OsRng)?;
+            self.establish_shared_secret(&receiver_pk)?;
 
         // The ciphertext will be sent to the receiver later via get_key_material_for_receiver()
         self.shared_secrets
@@ -411,12 +420,21 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         // 1. Setup Sender and Receiver Builders
         // Use InfallibleOsRng to satisfy CryptoRng requirement (OsRng is TryCryptoRng)
-        let mut rng = InfallibleOsRng(OsRng);
+        let rng = InfallibleOsRng(OsRng);
 
         let mut sender_builder =
-            AeadMlKemBuilder::<ChaCha20Poly1305>::new(&mut rng);
+            AeadMlKemBuilder::<ChaCha20Poly1305, _>::new(rng);
+        // Create a new RNG-like instance for receiver (since new consumes it)
+        // In real code they would have separate RNGs anyway.
+        // For test with InfallibleOsRng wrapper we need to recreate it.
+        // But since InfallibleOsRng wraps OsRng which is ZST/global-ish we can just make another one
+        // IF OsRng is copy/clone. But InfallibleOsRng might not be.
+        // Let's just create a new one.
+
         let mut receiver_builder =
-            AeadMlKemBuilder::<ChaCha20Poly1305>::new(&mut rng);
+            AeadMlKemBuilder::<ChaCha20Poly1305, _>::new(InfallibleOsRng(
+                OsRng,
+            ));
 
         // 2. Exchange Keys
         // Receiver exposes public key
