@@ -406,8 +406,6 @@ mod tests {
 
     impl CryptoRng for InfallibleOsRng {}
 
-
-
     #[test]
     fn test_mlkem_key_exchange_and_encryption()
     -> Result<(), Box<dyn std::error::Error>> {

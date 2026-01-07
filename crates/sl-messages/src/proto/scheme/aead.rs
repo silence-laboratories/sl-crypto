@@ -10,8 +10,8 @@ use aead::{
 };
 use chacha20::hchacha;
 
-use rand_core_09::{OsRng, TryCryptoRng};
 use rand_core::{CryptoRng as CryptoRng06, RngCore as RngCore06};
+use rand_core_09::{OsRng, TryCryptoRng};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, ReusableSecret};
 use zeroize::Zeroizing;
@@ -314,11 +314,7 @@ mod tests {
     use chacha20poly1305::ChaCha20Poly1305;
     // We need traits from rand_core_06 (which AeadX25519Builder uses)
     // and we can bridge them using rand_core (v0.9) OsRng which is available
-    use rand_core::{
-        CryptoRng as CryptoRng06, Error as Error06, RngCore as RngCore06, OsRng
-    }; // v0.6.4 with std features
-
-
+    use rand_core::OsRng;
 
     #[test]
     fn test_x25519_key_exchange_and_encryption()

@@ -1,8 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use rand_core_09::{TryCryptoRng, TryRngCore};
 use rand_core::{CryptoRng as CryptoRng06, RngCore as RngCore06};
+use rand_core_09::{TryCryptoRng, TryRngCore};
 
 /// Wrapper to adapt a rand_core 0.9 RNG to implement rand_core 0.6 traits
 pub struct RngCompat09To06<R>(pub R);
