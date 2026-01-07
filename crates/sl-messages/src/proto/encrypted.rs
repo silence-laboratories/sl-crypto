@@ -106,7 +106,7 @@ pub trait EncryptedMessage: EncryptionScheme {
     }
 }
 
-///
+/// Trait for message encryption keys
 pub trait MessageKey: Sized {
     /// Size of message footer.
     fn message_footer(&self) -> usize;

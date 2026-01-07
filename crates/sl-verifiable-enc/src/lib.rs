@@ -299,7 +299,7 @@ where
                 return Err("Inconsistent number of proofs, must be equal to the security parameter");
             }
 
-            if remaining_data % (proof_size + scalar_size) != 0 {
+            if !remaining_data.is_multiple_of(proof_size + scalar_size) {
                 return Err("Inconsistent data length");
             }
 

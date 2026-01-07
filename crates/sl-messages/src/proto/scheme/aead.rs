@@ -10,8 +10,8 @@ use aead::{
 };
 use chacha20::hchacha;
 
-use rand_core::{OsRng, TryCryptoRng};
-use rand_core_06::{CryptoRng as CryptoRng06, RngCore as RngCore06};
+use rand_core_09::{OsRng, TryCryptoRng};
+use rand_core::{CryptoRng as CryptoRng06, RngCore as RngCore06};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, ReusableSecret};
 use zeroize::Zeroizing;
@@ -314,48 +314,17 @@ mod tests {
     use chacha20poly1305::ChaCha20Poly1305;
     // We need traits from rand_core_06 (which AeadX25519Builder uses)
     // and we can bridge them using rand_core (v0.9) OsRng which is available
-    use rand_core::{OsRng, TryRngCore};
-    use rand_core_06::{
-        CryptoRng as CryptoRng06, Error as Error06, RngCore as RngCore06,
-    }; // v0.9
+    use rand_core::{
+        CryptoRng as CryptoRng06, Error as Error06, RngCore as RngCore06, OsRng
+    }; // v0.6.4 with std features
 
-    struct CompatOsRng(OsRng);
 
-    impl RngCore06 for CompatOsRng {
-        fn next_u32(&mut self) -> u32 {
-            // In tests, OsRng should never fail, but handle gracefully
-            self.0.try_next_u32().unwrap_or_else(|_| {
-                panic!("OsRng failed in test - this should never happen")
-            })
-        }
-        fn next_u64(&mut self) -> u64 {
-            self.0.try_next_u64().unwrap_or_else(|_| {
-                panic!("OsRng failed in test - this should never happen")
-            })
-        }
-        fn fill_bytes(&mut self, dest: &mut [u8]) {
-            self.0.try_fill_bytes(dest).unwrap_or_else(|_| {
-                panic!("OsRng failed in test - this should never happen")
-            })
-        }
-        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error06> {
-            self.0.try_fill_bytes(dest).map_err(|_e| {
-                // In tests, this should never happen, but handle gracefully
-                let nz = core::num::NonZeroU32::new(1).unwrap_or_else(|| {
-                    panic!("Failed to create NonZeroU32 in test")
-                });
-                Error06::from(nz)
-            })
-        }
-    }
-
-    impl CryptoRng06 for CompatOsRng {}
 
     #[test]
     fn test_x25519_key_exchange_and_encryption()
     -> Result<(), Box<dyn std::error::Error>> {
         // 1. Setup Sender and Receiver Builders
-        let mut rng = CompatOsRng(OsRng);
+        let mut rng = OsRng;
 
         let mut sender_builder =
             AeadX25519Builder::<ChaCha20Poly1305>::new(&mut rng);

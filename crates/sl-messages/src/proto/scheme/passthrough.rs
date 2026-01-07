@@ -1,7 +1,7 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use rand_core::TryCryptoRng;
+use rand_core_09::TryCryptoRng;
 
 use super::{
     EncryptionError, EncryptionScheme, EncryptionSchemeBuilder, KeyExchange,

@@ -245,7 +245,7 @@ impl MsgHdr {
         let ttl = match ttl {
             0..256 => ttl as u16,
             256..Self::MAX_TTL => {
-                let ttl = (ttl + 9) / 10 - 26;
+                let ttl = ttl.div_ceil(10) - 26;
                 let ttl = ttl + 256;
 
                 ttl as u16

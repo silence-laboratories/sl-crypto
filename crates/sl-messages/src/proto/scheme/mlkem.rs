@@ -10,7 +10,7 @@ use aead::{
 };
 use ml_kem::kem::{Decapsulate, Encapsulate};
 use ml_kem::{EncodedSizeUser, KemCore, MlKem768, array::Array};
-use rand_core::{OsRng, TryCryptoRng};
+use rand_core_09::{OsRng, TryCryptoRng};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -138,7 +138,7 @@ pub struct AeadMlKemMessageKey<S: KeyInit + AeadCore> {
 impl<S> AeadMlKemBuilder<S> {
     /// Generate a new [`AeadMlKem`] with the supplied RNG.
     /// generate requires CryptoRng (infallible)
-    pub fn new(rng: &mut impl rand_core::CryptoRng) -> Self {
+    pub fn new(rng: &mut impl rand_core_09::CryptoRng) -> Self {
         let (dk, ek) = MlKem768::generate(rng);
         let ek_bytes = ek.as_bytes().as_slice().to_vec();
 
@@ -382,13 +382,12 @@ where
 mod tests {
     use super::*;
     use chacha20poly1305::ChaCha20Poly1305;
-    use rand_core::{CryptoRng, OsRng, RngCore, TryRngCore};
+    use rand_core_09::{CryptoRng, OsRng, RngCore, TryRngCore};
 
     struct InfallibleOsRng(OsRng);
 
     impl RngCore for InfallibleOsRng {
         fn next_u32(&mut self) -> u32 {
-            // In tests, OsRng should never fail, but handle gracefully
             self.0.try_next_u32().unwrap_or_else(|_| {
                 panic!("OsRng failed in test - this should never happen")
             })
@@ -406,6 +405,8 @@ mod tests {
     }
 
     impl CryptoRng for InfallibleOsRng {}
+
+
 
     #[test]
     fn test_mlkem_key_exchange_and_encryption()

@@ -184,7 +184,7 @@ impl RVOLEReceiver {
 
         for j in 0..XI {
             let j_bit = self.beta.extract_bit(j);
-            for i in 0..L_BATCH {
+            for (i, d_val) in d_dot[j].iter_mut().enumerate().take(L_BATCH) {
                 let option_0 = decode_scalar::<C>(
                     &self.receiver_extended_output.v_x[j][i],
                 );
@@ -194,9 +194,9 @@ impl RVOLEReceiver {
                     &option_1,
                     Choice::from(j_bit as u8),
                 );
-                d_dot[j][i] = chosen
+                *d_val = chosen
             }
-            for k in 0..RHO {
+            for (k, d_hat_val) in d_hat[j].iter_mut().enumerate().take(RHO) {
                 let option_0 = decode_scalar::<C>(
                     &self.receiver_extended_output.v_x[j][L_BATCH + k],
                 );
@@ -207,7 +207,7 @@ impl RVOLEReceiver {
                     &option_1,
                     Choice::from(j_bit as u8),
                 );
-                d_hat[j][k] = chosen
+                *d_hat_val = chosen
             }
         }
 
