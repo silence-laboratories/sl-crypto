@@ -317,15 +317,16 @@ where
 
     fn build(self) -> Self::Scheme {
         // Convert stored entries: (shared_secret, ciphertext, pk_bytes) -> (shared_secret, pk_bytes)
+        let encapsulation_key_bytes = self.encapsulation_key_bytes;
+        let shared_secrets = self.shared_secrets;
+
         let mut scheme_secrets = Pairs::new();
-        for (idx, (shared_secret, _, pk_bytes)) in self.shared_secrets.iter()
-        {
-            scheme_secrets
-                .push(*idx, (shared_secret.clone(), pk_bytes.clone()));
+        for (idx, (shared_secret, _, pk_bytes)) in shared_secrets.into_iter() {
+            scheme_secrets.push(idx, (shared_secret, pk_bytes));
         }
 
         Self::Scheme {
-            encapsulation_key_bytes: self.encapsulation_key_bytes,
+            encapsulation_key_bytes,
             shared_secrets: scheme_secrets,
             counter: NonceCounter::new(),
             marker: PhantomData,
