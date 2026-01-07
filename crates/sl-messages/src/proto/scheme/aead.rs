@@ -10,7 +10,7 @@ use aead::{
 };
 use chacha20::hchacha;
 
-use rand_core::{CryptoRng as CryptoRng06, RngCore as RngCore06};
+use rand_core::CryptoRngCore;
 use rand_core_09::{OsRng, TryCryptoRng};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, ReusableSecret};
@@ -113,7 +113,7 @@ pub struct AeadMessageKey<S: KeyInit + AeadCore> {
 
 impl<S> AeadX25519Builder<S> {
     /// Generate a new [`AeadX25519`] with the supplied RNG.
-    pub fn new(rng: &mut (impl RngCore06 + CryptoRng06)) -> Self {
+    pub fn new(rng: &mut impl CryptoRngCore) -> Self {
         let secret = ReusableSecret::random_from_rng(rng);
         let public_key = PublicKey::from(&secret);
 
