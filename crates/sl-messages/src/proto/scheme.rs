@@ -11,7 +11,7 @@ pub mod rng_compat;
 
 pub use key_exchange::KeyExchange;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PublicKeyError;
 
 #[derive(Debug)]

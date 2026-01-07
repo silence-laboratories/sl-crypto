@@ -196,16 +196,8 @@ where
     type Error = PublicKeyError;
 
     fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
-        let expected_size = <<P as KemCore>::EncapsulationKey as ml_kem::EncodedSizeUser>::EncodedSize::USIZE;
         let array: Array<u8, <<P as KemCore>::EncapsulationKey as ml_kem::EncodedSizeUser>::EncodedSize> =
             bytes.try_into().map_err(|_| {
-                // Log context before converting to PublicKeyError
-                let _err = MlKemError::InvalidPublicKey {
-                    expected_size: Some(expected_size),
-                    actual_size: bytes.len(),
-                };
-                // Note: In production, consider using a logging framework here
-                // e.g., tracing::warn!("Failed to parse ML-KEM public key: {:?}", _err);
                 PublicKeyError
             })?;
         let key = <P as KemCore>::EncapsulationKey::from_bytes(&array);
@@ -521,42 +513,37 @@ where
 mod tests {
     use super::*;
     use chacha20poly1305::ChaCha20Poly1305;
-    use rand_core_09::{CryptoRng, OsRng, RngCore, TryRngCore};
+    use rand::{RngCore as RandRngCore, rngs::ThreadRng, thread_rng};
+    use rand_core_09::{CryptoRng, RngCore};
 
-    struct InfallibleOsRng(OsRng);
+    struct ThreadRngAdapter(ThreadRng);
 
-    impl RngCore for InfallibleOsRng {
+    impl RngCore for ThreadRngAdapter {
         fn next_u32(&mut self) -> u32 {
-            self.0.try_next_u32().unwrap_or_else(|_| {
-                panic!("OsRng failed in test - this should never happen")
-            })
+            RandRngCore::next_u32(&mut self.0)
         }
         fn next_u64(&mut self) -> u64 {
-            self.0.try_next_u64().unwrap_or_else(|_| {
-                panic!("OsRng failed in test - this should never happen")
-            })
+            RandRngCore::next_u64(&mut self.0)
         }
         fn fill_bytes(&mut self, dest: &mut [u8]) {
-            self.0.try_fill_bytes(dest).unwrap_or_else(|_| {
-                panic!("OsRng failed in test - this should never happen")
-            })
+            RandRngCore::fill_bytes(&mut self.0, dest)
         }
     }
 
-    impl CryptoRng for InfallibleOsRng {}
+    impl CryptoRng for ThreadRngAdapter {}
 
     #[test]
     fn test_mlkem_key_exchange_and_encryption()
     -> Result<(), Box<dyn std::error::Error>> {
         // 1. Setup Sender and Receiver Builders
-        let rng = InfallibleOsRng(OsRng);
+        let rng = ThreadRngAdapter(thread_rng());
 
         let mut sender_builder =
             AeadMlKemBuilder::<ChaCha20Poly1305, MlKem1024, _>::new(rng);
 
         let mut receiver_builder =
             AeadMlKemBuilder::<ChaCha20Poly1305, MlKem1024, _>::new(
-                InfallibleOsRng(OsRng),
+                ThreadRngAdapter(thread_rng()),
             );
 
         // 2. Exchange Keys
@@ -622,5 +609,54 @@ mod tests {
         assert_eq!(decrypted, msg, "Decrypted message should match original");
 
         Ok(())
+    }
+
+    #[test]
+    fn test_mlkem_encapsulation_key_try_from_invalid_size() {
+        let wrong_size_bytes = vec![0u8; 100]; // Wrong size for any ML-KEM key
+
+        let result = MlKemEncapsulationKey::<MlKem1024>::try_from(
+            wrong_size_bytes.as_slice(),
+        );
+        assert!(result.is_err(), "Should fail with wrong size");
+        match result {
+            Err(PublicKeyError) => {}
+            Ok(_) => panic!("Expected PublicKeyError"),
+        }
+    }
+
+    #[test]
+    fn test_mlkem_encapsulation_key_try_from_all_parameter_sets() {
+        let mut rng = ThreadRngAdapter(thread_rng());
+
+        // Test MlKem512
+        let (_, ek512) = <MlKem512 as MlKemGenerate>::generate(&mut rng);
+        let bytes512 = ek512.as_bytes().as_slice().to_vec();
+        let key512 =
+            MlKemEncapsulationKey::<MlKem512>::try_from(bytes512.as_slice())
+                .expect("Should parse MlKem512 key");
+        assert_eq!(key512.as_ref(), bytes512.as_slice());
+
+        // Test MlKem768
+        let (_, ek768) = <MlKem768 as MlKemGenerate>::generate(&mut rng);
+        let bytes768 = ek768.as_bytes().as_slice().to_vec();
+        let key768 =
+            MlKemEncapsulationKey::<MlKem768>::try_from(bytes768.as_slice())
+                .expect("Should parse MlKem768 key");
+        assert_eq!(key768.as_ref(), bytes768.as_slice());
+
+        // Test MlKem1024
+        let (_, ek1024) = <MlKem1024 as MlKemGenerate>::generate(&mut rng);
+        let bytes1024 = ek1024.as_bytes().as_slice().to_vec();
+        let key1024 = MlKemEncapsulationKey::<MlKem1024>::try_from(
+            bytes1024.as_slice(),
+        )
+        .expect("Should parse MlKem1024 key");
+        assert_eq!(key1024.as_ref(), bytes1024.as_slice());
+
+        // Verify different parameter sets have different sizes
+        assert_ne!(bytes512.len(), bytes768.len());
+        assert_ne!(bytes768.len(), bytes1024.len());
+        assert_ne!(bytes512.len(), bytes1024.len());
     }
 }
