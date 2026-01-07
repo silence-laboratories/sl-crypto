@@ -307,8 +307,6 @@ where
 mod tests {
     use super::*;
     use chacha20poly1305::ChaCha20Poly1305;
-    // We need traits from rand_core_06 (which AeadX25519Builder uses)
-    // and we can bridge them using rand_core (v0.9) OsRng which is available
     use rand_core::OsRng;
 
     #[test]

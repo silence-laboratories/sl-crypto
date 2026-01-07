@@ -9,8 +9,10 @@ use aead::{
     generic_array::typenum::Unsigned,
 };
 use ml_kem::kem::{Decapsulate, Encapsulate};
-use ml_kem::{EncodedSizeUser, KemCore, MlKem768, array::Array};
-use rand_core_09::{OsRng, TryCryptoRng};
+use ml_kem::{
+    EncodedSizeUser, KemCore, MlKem512, MlKem768, MlKem1024, array::Array,
+};
+use rand_core_09::{CryptoRng, OsRng, TryCryptoRng};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -45,90 +47,141 @@ impl NonceCounter {
     }
 }
 
-type SharedSecret = Zeroizing<Vec<u8>>; // 32 bytes for ML-KEM-768
+type SharedSecret = Zeroizing<Vec<u8>>; // 32 bytes for all ML-KEM parameter sets
 
-/// Wrapper that computes bytes on-demand from the key to save space
-/// Bytes are lazily computed and cached only when AsRef is called
-pub struct MlKemEncapsulationKey {
-    key: ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>,
-    bytes: OnceLock<Vec<u8>>, // Lazily computed bytes, only allocated if AsRef is called
+/// Trait to abstract over ML-KEM parameter to be generic over parameter
+pub trait MlKemGenerate: KemCore + Send {
+    type MlKemDecapsulationKey;
+    type MlKemEncapsulationKey: ml_kem::EncodedSizeUser;
+    type MlKemCiphertext: for<'a> TryFrom<&'a [u8]>;
+
+    fn generate<R: CryptoRng>(
+        rng: &mut R,
+    ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey);
+
+    fn decapsulate(
+        dk: &Self::MlKemDecapsulationKey,
+        ct: &Self::MlKemCiphertext,
+    ) -> Result<SharedSecret, ()>;
 }
 
-impl Clone for MlKemEncapsulationKey {
-    fn clone(&self) -> Self {
-        // Clone the key, but create a new empty OnceLock (bytes will be recomputed if needed)
-        Self {
-            key: self.key.clone(),
-            bytes: OnceLock::new(),
-        }
+// Implement for each parameter set
+impl MlKemGenerate for MlKem512 {
+    type MlKemDecapsulationKey =
+        ml_kem::kem::DecapsulationKey<ml_kem::MlKem512Params>;
+    type MlKemEncapsulationKey =
+        ml_kem::kem::EncapsulationKey<ml_kem::MlKem512Params>;
+    type MlKemCiphertext = ml_kem::Ciphertext<MlKem512>;
+    fn generate<R: CryptoRng>(
+        rng: &mut R,
+    ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey) {
+        <MlKem512 as KemCore>::generate(rng)
+    }
+
+    fn decapsulate(
+        dk: &Self::MlKemDecapsulationKey,
+        ct: &Self::MlKemCiphertext,
+    ) -> Result<SharedSecret, ()> {
+        let shared_key = dk.decapsulate(ct).map_err(|_| ())?;
+        Ok(Zeroizing::new(shared_key.as_slice().to_vec()))
     }
 }
 
-impl AsRef<[u8]> for MlKemEncapsulationKey {
+impl MlKemGenerate for MlKem768 {
+    type MlKemDecapsulationKey =
+        ml_kem::kem::DecapsulationKey<ml_kem::MlKem768Params>;
+    type MlKemEncapsulationKey =
+        ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>;
+    type MlKemCiphertext = ml_kem::Ciphertext<MlKem768>;
+    fn generate<R: CryptoRng>(
+        rng: &mut R,
+    ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey) {
+        <MlKem768 as KemCore>::generate(rng)
+    }
+
+    fn decapsulate(
+        dk: &Self::MlKemDecapsulationKey,
+        ct: &Self::MlKemCiphertext,
+    ) -> Result<SharedSecret, ()> {
+        let shared_key = dk.decapsulate(ct).map_err(|_| ())?;
+        Ok(Zeroizing::new(shared_key.as_slice().to_vec()))
+    }
+}
+
+impl MlKemGenerate for MlKem1024 {
+    type MlKemDecapsulationKey =
+        ml_kem::kem::DecapsulationKey<ml_kem::MlKem1024Params>;
+    type MlKemEncapsulationKey =
+        ml_kem::kem::EncapsulationKey<ml_kem::MlKem1024Params>;
+    type MlKemCiphertext = ml_kem::Ciphertext<MlKem1024>;
+    fn generate<R: CryptoRng>(
+        rng: &mut R,
+    ) -> (Self::MlKemDecapsulationKey, Self::MlKemEncapsulationKey) {
+        <MlKem1024 as KemCore>::generate(rng)
+    }
+
+    fn decapsulate(
+        dk: &Self::MlKemDecapsulationKey,
+        ct: &Self::MlKemCiphertext,
+    ) -> Result<SharedSecret, ()> {
+        let shared_key = dk.decapsulate(ct).map_err(|_| ())?;
+        Ok(Zeroizing::new(shared_key.as_slice().to_vec()))
+    }
+}
+
+/// Wrapper that computes bytes on-demand from the key
+pub struct MlKemEncapsulationKey<P: KemCore> {
+    key: <P as KemCore>::EncapsulationKey,
+    bytes: OnceLock<Vec<u8>>, // Lazily computed bytes, only allocated if AsRef is called
+    _phantom: PhantomData<P>,
+}
+
+impl<P: KemCore> AsRef<[u8]> for MlKemEncapsulationKey<P>
+where
+    <P as KemCore>::EncapsulationKey: ml_kem::EncodedSizeUser,
+{
     fn as_ref(&self) -> &[u8] {
-        // Compute bytes on-demand and cache them
         self.bytes
             .get_or_init(|| self.key.as_bytes().as_slice().to_vec())
     }
 }
 
-impl<'a> TryFrom<&'a [u8]> for MlKemEncapsulationKey {
+impl<'a, P: KemCore> TryFrom<&'a [u8]> for MlKemEncapsulationKey<P>
+where
+    <P as KemCore>::EncapsulationKey: ml_kem::EncodedSizeUser,
+{
     type Error = PublicKeyError;
 
     fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
-        // ML-KEM-768 encapsulation key is 1184 bytes
-        type Ek = <MlKem768 as KemCore>::EncapsulationKey;
-        if bytes.len() != 1184 {
-            return Err(PublicKeyError);
-        }
-        let array: Array<u8, _> =
+        let array: Array<u8, <<P as KemCore>::EncapsulationKey as ml_kem::EncodedSizeUser>::EncodedSize> =
             bytes.try_into().map_err(|_| PublicKeyError)?;
-        let key = Ek::from_bytes(&array);
+        let key = <P as KemCore>::EncapsulationKey::from_bytes(&array);
         Ok(MlKemEncapsulationKey {
             key,
             bytes: OnceLock::new(),
+            _phantom: PhantomData,
         })
     }
 }
 
-impl From<ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>>
-    for MlKemEncapsulationKey
+pub struct AeadMlKemBuilder<S, P, R = OsRng>
+where
+    P: MlKemGenerate,
 {
-    fn from(
-        ek: ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>,
-    ) -> Self {
-        // Bytes will be computed lazily when AsRef is first called
-        MlKemEncapsulationKey {
-            key: ek,
-            bytes: OnceLock::new(),
-        }
-    }
-}
-
-impl From<MlKemEncapsulationKey>
-    for ml_kem::kem::EncapsulationKey<ml_kem::MlKem768Params>
-{
-    fn from(wrapper: MlKemEncapsulationKey) -> Self {
-        wrapper.key
-    }
-}
-
-pub struct AeadMlKemBuilder<S, R = OsRng> {
-    decapsulation_key:
-        Option<ml_kem::kem::DecapsulationKey<ml_kem::MlKem768Params>>,
+    decapsulation_key: Option<<P as MlKemGenerate>::MlKemDecapsulationKey>,
     encapsulation_key_bytes: Vec<u8>, // Store bytes for public_key() method
     shared_secrets: Pairs<(SharedSecret, Vec<u8>, Vec<u8>), usize>,
     rng: R,
-    marker: PhantomData<S>,
+    marker: PhantomData<(S, P)>,
 }
 
 /// The implementation of EncryptionScheme that uses ML-KEM for key
 /// exchange and any implementation of `AeadInPlace`.
-pub struct AeadMlKem<S> {
+pub struct AeadMlKem<S, P: KemCore> {
     encapsulation_key_bytes: Vec<u8>, // Own public key bytes (for decryption key derivation)
     shared_secrets: Pairs<(SharedSecret, Vec<u8>), usize>, // (shared_secret, receiver_pk_bytes)
     counter: NonceCounter,
-    marker: PhantomData<S>,
+    marker: PhantomData<(S, P)>,
 }
 
 pub struct AeadMlKemMessageKey<S: KeyInit + AeadCore> {
@@ -136,17 +189,18 @@ pub struct AeadMlKemMessageKey<S: KeyInit + AeadCore> {
     nonce: Nonce<S>,
 }
 
-impl<S, R> AeadMlKemBuilder<S, R>
+impl<S, P, R> AeadMlKemBuilder<S, P, R>
 where
+    P: MlKemGenerate,
     R: TryCryptoRng,
 {
-    /// Generate a new [`AeadMlKem`] with the supplied RNG.
+    /// Generate a new [`AeadMlKem`] with the supplied RNG and parameter set.
     /// generate requires CryptoRng (infallible)
     pub fn new(mut rng: R) -> Self
     where
         R: rand_core_09::CryptoRng,
     {
-        let (dk, ek) = MlKem768::generate(&mut rng);
+        let (dk, ek) = <P as MlKemGenerate>::generate(&mut rng);
         let ek_bytes = ek.as_bytes().as_slice().to_vec();
 
         Self {
@@ -157,17 +211,17 @@ where
             marker: PhantomData,
         }
     }
-
 }
 
-impl<S, R> KeyExchange for AeadMlKemBuilder<S, R>
+impl<S, P, R> KeyExchange for AeadMlKemBuilder<S, P, R>
 where
     S: AeadInPlace + KeyInit + Send,
+    P: MlKemGenerate,
     R: TryCryptoRng,
 {
-    type PublicKey = MlKemEncapsulationKey;
-    type SharedSecret = SharedSecret; // 32 bytes for ML-KEM-768
-    type KeyMaterial = Vec<u8>; // Ciphertext (1088 bytes for ML-KEM-768)
+    type PublicKey = MlKemEncapsulationKey<P>;
+    type SharedSecret = SharedSecret;
+    type KeyMaterial = Vec<u8>;
 
     fn establish_shared_secret(
         &mut self,
@@ -189,26 +243,25 @@ where
     ) -> Result<Self::SharedSecret, PublicKeyError> {
         // Decapsulate: receiver recovers shared secret using own secret key
         let dk = self.decapsulation_key.as_ref().ok_or(PublicKeyError)?;
-        type Ct = ml_kem::Ciphertext<MlKem768>;
-        if key_material.len() != 1088 {
-            return Err(PublicKeyError);
-        }
-        let ct: Ct = key_material
+        // Use generic ciphertext type from trait - parse directly without type alias
+        let ct: <P as MlKemGenerate>::MlKemCiphertext = key_material
             .as_slice()
             .try_into()
             .map_err(|_| PublicKeyError)?;
-        let k_recv = dk.decapsulate(&ct).map_err(|_| PublicKeyError)?;
+        // Decapsulate using the trait method
+        let k_recv = P::decapsulate(dk, &ct).map_err(|_| PublicKeyError)?;
         // SharedKey is an Array type, convert to Vec<u8>
         Ok(Zeroizing::new(k_recv.as_slice().to_vec()))
     }
 }
 
-impl<S, R> EncryptionSchemeBuilder for AeadMlKemBuilder<S, R>
+impl<S, P, R> EncryptionSchemeBuilder for AeadMlKemBuilder<S, P, R>
 where
     S: AeadInPlace + KeyInit + Send,
+    P: MlKemGenerate,
     R: TryCryptoRng,
 {
-    type Scheme = AeadMlKem<S>;
+    type Scheme = AeadMlKem<S, P>;
 
     fn public_key(&self) -> &[u8] {
         &self.encapsulation_key_bytes
@@ -311,9 +364,10 @@ where
     }
 }
 
-impl<S> EncryptionScheme for AeadMlKem<S>
+impl<S, P> EncryptionScheme for AeadMlKem<S, P>
 where
     S: AeadInPlace + KeyInit + Send,
+    P: KemCore + Send,
 {
     type Key = AeadMlKemMessageKey<S>;
 
@@ -411,13 +465,12 @@ mod tests {
         let rng = InfallibleOsRng(OsRng);
 
         let mut sender_builder =
-            AeadMlKemBuilder::<ChaCha20Poly1305, _>::new(rng);
-
+            AeadMlKemBuilder::<ChaCha20Poly1305, MlKem1024, _>::new(rng);
 
         let mut receiver_builder =
-            AeadMlKemBuilder::<ChaCha20Poly1305, _>::new(InfallibleOsRng(
-                OsRng,
-            ));
+            AeadMlKemBuilder::<ChaCha20Poly1305, MlKem1024, _>::new(
+                InfallibleOsRng(OsRng),
+            );
 
         // 2. Exchange Keys
         let receiver_pk_bytes = receiver_builder.public_key();
