@@ -257,7 +257,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::proto::scheme::{
-        EncryptionSchemeBuilder, passthrough::PassThroughEncryptionBuilder,
+        passthrough::PassThroughEncryptionBuilder, EncryptionSchemeBuilder,
     };
 
     use super::*;

@@ -1,3 +1,6 @@
+// Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
+// This software is licensed under the Silence Laboratories License Agreement.
+
 /// Trait that defines a state transition for any round based protocol.
 pub trait Round {
     /// Output of the state transition.
