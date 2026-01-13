@@ -9,7 +9,7 @@ publish = ["silencelaboratories"]
 
 [dependencies]
 rsa = "0.9.3"
-num-bigint-dig = "0.8.4"
+crypto-bigint = { version = "0.6.0-rc.0", features = ["alloc", "rand_core"] }
 num-traits = "0.2"
 group = "0.13.0"
 ff = "0.13.0"
