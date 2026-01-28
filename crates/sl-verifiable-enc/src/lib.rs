@@ -21,6 +21,9 @@ use thiserror::Error;
 
 const VERSION: u8 = 1;
 
+/// Maximum byte length of (m * label) mod n when m and label are 32-byte values.
+const PLAINTEXT_FIXED_LEN: usize = 64;
+
 /// Trait for hash functions used in verifiable RSA encryption.
 ///
 /// This trait defines the security properties of a hash function:
@@ -530,35 +533,6 @@ where
     }
 }
 
-/// Constant-time trim of leading zeros from a byte slice.
-/// The computation of the first non-zero index is constant-time. The final
-/// copy operation timing depends on the result length, but this is acceptable
-/// as the result length is public information (the encrypted message size).
-/// Returns a vector containing the bytes from the first non-zero byte onwards.
-/// If all bytes are zero, returns an empty vector.
-fn ct_trim_leading_zeros(bytes: &[u8]) -> Vec<u8> {
-    let len = bytes.len();
-    let mut first_idx = 0u32;
-    let mut found = Choice::from(0u8);
-    
-    for i in 0..len {
-        let is_nonzero = Choice::from((bytes[i] != 0) as u8);
-        // the moment we hit 1 is_nonzero = 1  and haven't seen 1: (!found) we set 
-        // is_first = 1. Otherwise is_first = 0. If that is the case then first_idx = first_idx.
-        let is_first = is_nonzero & !found;
-        first_idx = u32::conditional_select(&first_idx, &(i as u32), is_first);
-        found |= is_nonzero;
-    }
-    
-    // We are leaking plaintext length here and if all bytes are 0.
-    // That is used to encrypt scalars from k256 or 25519 curves. Already leaked.
-    if bool::from(found) {
-        bytes[first_idx as usize..].to_vec()
-    } else {
-        Vec::new()
-    }
-}
-
 fn rsa_encrypt_with_label<H: HashFunction>(
     m: impl AsRef<[u8]>,
     label: &[u8],
@@ -589,19 +563,19 @@ fn rsa_encrypt_with_label<H: HashFunction>(
     // Compute plaintext = (m * label) % n
     let plaintext = m_int.mul_mod(&label_int, &n_odd);
 
-    //  We multiply m_int with label_int both of which are BoxedUint with  32 bytes.
-    // So we need max 64 bytes. But BoxedUint returns full precision bytes since initialized
-    // from n = 2048 or 4096.
-    // RSA Key Size: 2048 bits (256 bytes).
-    // e.g: OAEP Padding Overhead: Requires roughly 2 * HashSize + 2 bytes overhead. For SHA-256, that is 2 * 32 + 2 = 66$ bytes.
-    // Maximum Encryptable Message: 256 - 66 = 190 bytes.
-    // Untrimmed Message Size: BoxedUint returns 256 bytes (full key width), even if the actual value is small 64 bytes.
     let plaintext_bytes = plaintext.to_be_bytes();
-    let trimmed_plaintext = ct_trim_leading_zeros(&plaintext_bytes);
+    // (m * label) mod n is at most 64 bytes and is always in the least significant
+    // bytes of the full-width representation.
+    // Extract the last 64 bytes in constant time.
+
+    let len = plaintext_bytes.len();
+    let start = len - PLAINTEXT_FIXED_LEN;
+    let mut fixed_plaintext = [0u8; PLAINTEXT_FIXED_LEN];
+    fixed_plaintext.copy_from_slice(&plaintext_bytes[start..]);
 
     let padding = Oaep::new::<H>();
     rsa_pubkey
-        .encrypt(&mut rng, padding, &trimmed_plaintext)
+        .encrypt(&mut rng, padding, &fixed_plaintext)
         .map_err(|_| RsaError::EncError)
 }
 
@@ -634,15 +608,31 @@ fn rsa_decrypt_with_label<H: HashFunction>(
     }
     let label_inv = label_inv.unwrap();
 
+    // Pad plaintext_bytes to n_size for full-width representation
+    let n_size = n_bytes.len();
+    let mut padded_plaintext = vec![0u8; n_size];
+    if plaintext_bytes.len() <= n_size {
+        padded_plaintext[n_size - plaintext_bytes.len()..]
+            .copy_from_slice(&plaintext_bytes);
+    } else {
+        // This shouldn't happen, but handle it gracefully
+        return Err(RsaError::DecError);
+    }
+
     let plaintext_int =
-        BoxedUint::from_be_slice(&plaintext_bytes, n.bits() as u32)
+        BoxedUint::from_be_slice(&padded_plaintext, n.bits() as u32)
             .expect("Failed to create BoxedUint from plaintext");
 
     let message = plaintext_int.mul_mod(&label_inv, &n_odd);
 
-    // Convert back to bytes trimming leading zeros (constant-time)
+    // Extract the least-significant 32 bytes (scalar size) in constant-time.
+    // The copy length is fixed and depends only on the public modulus size.
     let msg_bytes = message.to_be_bytes();
-    Ok(ct_trim_leading_zeros(&msg_bytes))
+    let len = msg_bytes.len();
+    let start = len - 32;
+    let mut fixed = [0u8; 32];
+    fixed.copy_from_slice(&msg_bytes[start..]);
+    Ok(fixed.to_vec())
 }
 
 fn label_int_from_bytes<H: HashFunction>(
@@ -707,34 +697,6 @@ mod tests {
     use subtle::Choice;
 
     use crate::*;
-
-    #[test]
-    fn test_ct_trim_leading_zeros_empty() {
-        let input: [u8; 0] = [];
-        let result = crate::ct_trim_leading_zeros(&input);
-        assert_eq!(result, Vec::<u8>::new());
-    }
-
-    #[test]
-    fn test_ct_trim_leading_zeros_all_zeros() {
-        let input = [0u8, 0, 0, 0];
-        let result = crate::ct_trim_leading_zeros(&input);
-        assert_eq!(result, Vec::<u8>::new());
-    }
-
-    #[test]
-    fn test_ct_trim_leading_zeros_some_leading_zeros() {
-        let input = [0u8, 0, 1, 2, 0, 3];
-        let result = crate::ct_trim_leading_zeros(&input);
-        assert_eq!(result, vec![1u8, 2, 0, 3]);
-    }
-
-    #[test]
-    fn test_ct_trim_leading_zeros_no_leading_zeros() {
-        let input = [1u8, 2, 0, 3];
-        let result = crate::ct_trim_leading_zeros(&input);
-        assert_eq!(result, input.to_vec());
-    }
 
     #[test]
     fn test_verifiable_rsa_ecdsa() -> Result<(), RsaError> {
