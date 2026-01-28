@@ -530,6 +530,35 @@ where
     }
 }
 
+/// Constant-time trim of leading zeros from a byte slice.
+/// The computation of the first non-zero index is constant-time. The final
+/// copy operation timing depends on the result length, but this is acceptable
+/// as the result length is public information (the encrypted message size).
+/// Returns a vector containing the bytes from the first non-zero byte onwards.
+/// If all bytes are zero, returns an empty vector.
+fn ct_trim_leading_zeros(bytes: &[u8]) -> Vec<u8> {
+    let len = bytes.len();
+    let mut first_idx = 0u32;
+    let mut found = Choice::from(0u8);
+    
+    for i in 0..len {
+        let is_nonzero = Choice::from((bytes[i] != 0) as u8);
+        // the moment we hit 1 is_nonzero = 1  and haven't seen 1: (!found) we set 
+        // is_first = 1. Otherwise is_first = 0. If that is the case then first_idx = first_idx.
+        let is_first = is_nonzero & !found;
+        first_idx = u32::conditional_select(&first_idx, &(i as u32), is_first);
+        found |= is_nonzero;
+    }
+    
+    // We are leaking plaintext length here and if all bytes are 0.
+    // That is used to encrypt scalars from k256 or 25519 curves. Already leaked.
+    if bool::from(found) {
+        bytes[first_idx as usize..].to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
 fn rsa_encrypt_with_label<H: HashFunction>(
     m: impl AsRef<[u8]>,
     label: &[u8],
@@ -568,15 +597,11 @@ fn rsa_encrypt_with_label<H: HashFunction>(
     // Maximum Encryptable Message: 256 - 66 = 190 bytes.
     // Untrimmed Message Size: BoxedUint returns 256 bytes (full key width), even if the actual value is small 64 bytes.
     let plaintext_bytes = plaintext.to_be_bytes();
-    let mut i = 0;
-    while i < plaintext_bytes.len() && plaintext_bytes[i] == 0 {
-        i += 1;
-    }
-    let trimmed_plaintext = &plaintext_bytes[i..];
+    let trimmed_plaintext = ct_trim_leading_zeros(&plaintext_bytes);
 
     let padding = Oaep::new::<H>();
     rsa_pubkey
-        .encrypt(&mut rng, padding, trimmed_plaintext)
+        .encrypt(&mut rng, padding, &trimmed_plaintext)
         .map_err(|_| RsaError::EncError)
 }
 
@@ -615,14 +640,9 @@ fn rsa_decrypt_with_label<H: HashFunction>(
 
     let message = plaintext_int.mul_mod(&label_inv, &n_odd);
 
-    // Convert back to bytes trimming leading zeros
-
+    // Convert back to bytes trimming leading zeros (constant-time)
     let msg_bytes = message.to_be_bytes();
-    let mut i = 0;
-    while i < msg_bytes.len() && msg_bytes[i] == 0 {
-        i += 1;
-    }
-    Ok(msg_bytes[i..].to_vec())
+    Ok(ct_trim_leading_zeros(&msg_bytes))
 }
 
 fn label_int_from_bytes<H: HashFunction>(
@@ -687,6 +707,34 @@ mod tests {
     use subtle::Choice;
 
     use crate::*;
+
+    #[test]
+    fn test_ct_trim_leading_zeros_empty() {
+        let input: [u8; 0] = [];
+        let result = crate::ct_trim_leading_zeros(&input);
+        assert_eq!(result, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn test_ct_trim_leading_zeros_all_zeros() {
+        let input = [0u8, 0, 0, 0];
+        let result = crate::ct_trim_leading_zeros(&input);
+        assert_eq!(result, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn test_ct_trim_leading_zeros_some_leading_zeros() {
+        let input = [0u8, 0, 1, 2, 0, 3];
+        let result = crate::ct_trim_leading_zeros(&input);
+        assert_eq!(result, vec![1u8, 2, 0, 3]);
+    }
+
+    #[test]
+    fn test_ct_trim_leading_zeros_no_leading_zeros() {
+        let input = [1u8, 2, 0, 3];
+        let result = crate::ct_trim_leading_zeros(&input);
+        assert_eq!(result, input.to_vec());
+    }
 
     #[test]
     fn test_verifiable_rsa_ecdsa() -> Result<(), RsaError> {
