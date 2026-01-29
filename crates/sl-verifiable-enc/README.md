@@ -9,29 +9,6 @@ We use the verifiable encryption scheme from https://eprint.iacr.org/1999/008
 - Generic over elliptic curves
 - Uses RSA to be HSM-friendly
 
-<<<<<<< HEAD
-## Installation
-Add the following to your cargo.toml file in order to use the crate
-```toml
-[dependencies]
-sl-verifiable-enc = { version = "0.1.0", registry = "silencelaboratories" }
-```
-
-Add a config.toml file under ```your_project_dir/.cargo/config.toml``` with the following content:
-
-```toml
-[registries]
-silencelaboratories = { index = "ssh://git@ssh.shipyard.rs/silencelaboratories/crate-index.git" }
-
-[net]
-git-fetch-with-cli = true
-
-[registry]
-global-credential-providers = ["cargo:token", "cargo:macos-keychain", "cargo:wincred"]
-```
-Ask credentials to shipyard from a silencelabs members according to your git email
-=======
->>>>>>> main
 ## Usage
 
 Here's a basic example of how to use the library with the `secp256k1` curve:
@@ -54,11 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Encrypt with proof
     let label = b"example-label";
-<<<<<<< HEAD
     let verifiable_rsa: VerifiableRsaEncryption<ProjectivePoint, Sha256> = 
-=======
-    let verifiable_rsa =
->>>>>>> main
         VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
@@ -102,11 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Encrypt with proof
     let label = b"example-label";
-<<<<<<< HEAD
     let verifiable_rsa: VerifiableRsaEncryption<EdwardsPoint, Sha256> = 
-=======
-    let verifiable_rsa =
->>>>>>> main
         VerifiableRsaEncryption::encrypt_with_proof(
             &private_key,
             &rsa_public_key,
