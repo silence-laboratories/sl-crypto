@@ -48,12 +48,11 @@ impl<R: Relay> RelayStats<R> {
 }
 
 fn count_feed(stats: &Mutex<Stats>, message_len: usize) {
-    if let Ok(mut stats) = stats.lock() {
-        stats.send_size += message_len;
-        if message_len == MESSAGE_HEADER_SIZE {
-            stats.ask_count += 1;
+    if message_len > MESSAGE_HEADER_SIZE {
+        if let Ok(mut stats) = stats.lock() {
+            stats.send_size += message_len;
+            stats.send_count += 1;
         }
-        stats.send_count += 1;
     }
 }
 
@@ -95,6 +94,9 @@ impl<R: Relay + Send + Sync> Relay for RelayStats<R> {
         id: &MsgId,
         ttl: Duration,
     ) -> Result<(), MessageSendError> {
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.ask_count += 1;
+        }
         self.relay.ask(id, ttl).await
     }
 }

@@ -1,14 +1,15 @@
 [package]
 name = "sl-mpc-traits"
-version = "0.1.0"
+version = "1.0.1-beta.1"
 edition = "2021"
 license-file = "../../LICENSE"
+rust-version = "1.88"
+repository = "https://github.com/silence-laboratories/sl-crypto"
+description = "small utility traits"
 
 [dependencies]
-bincode = { version = "1", optional = true }
-serde = { version = "1.0", default-features = false, features = [
-  "derive",
-], optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+bincode = { workspace = true, optional = true }
 
 [features]
 default = []

@@ -1,0 +1,16 @@
+[package]
+name = "sl-compute-common"
+version = "1.1.0"
+edition = "2021"
+license-file = "../../LICENSE"
+rust-version = "1.88"
+repository = "https://github.com/silence-laboratories/sl-crypto"
+description = "Utilities for secure compute"
+
+[dependencies]
+aead = { workspace = true }
+chacha20 = { workspace = true }
+crypto-bigint = { workspace = true, features = ["serde", "alloc"] }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+serde = { workspace = true, features = ["derive"] }

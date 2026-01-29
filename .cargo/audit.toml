@@ -1,6 +1,5 @@
 [advisories]
 ignore = [
-       # secp256k1@0.20.3 is used by curv-kzen@0.10.0
-       # which is dev dependency, benchmarks only.
-       "RUSTSEC-2022-0070"
+       # rsa 0.9.9, used by sl-verifiable-enc
+       "RUSTSEC-2023-0071"
 ]

@@ -1,3 +1,6 @@
+// Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
+// This software is licensed under the Silence Laboratories License Agreement.
+
 //! Shamir Secret Sharing implementation using GF(256)
 //!
 //! This crate provides a secure implementation of Shamir's Secret Sharing scheme

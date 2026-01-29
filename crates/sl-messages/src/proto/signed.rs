@@ -9,11 +9,6 @@ use signature::{SignatureEncoding, Signer, Verifier};
 
 use crate::message::*;
 
-// pub struct Payload<'m, T> {
-//     body: &'m mut T,
-//     tailer: &'m mut [u8],
-// }
-
 /// A wrapper for a message of type T with support inplace
 /// signing and verifying
 pub struct SignedMessage<T, S: SignatureEncoding> {

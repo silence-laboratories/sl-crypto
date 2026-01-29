@@ -13,8 +13,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use crate::{
     message::*,
     relay::{
-        MessageRelayService, MessageSendError, Relay, Sender, SplitSender,
-        simple::MessageQueueHandle,
+        simple::MessageQueueHandle, MessageRelayService, MessageSendError,
+        Relay, Sender, SplitSender,
     },
 };
 
@@ -208,7 +208,7 @@ mod test {
     use std::time::Duration;
 
     use crate::{
-        message::{InstanceId, MessageTag, MsgId, allocate_message},
+        message::{allocate_message, InstanceId, MessageTag, MsgId},
         relay::SimpleMessageRelay,
     };
 
