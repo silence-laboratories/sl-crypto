@@ -22,4 +22,4 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 curve25519-dalek = { workspace = true, features = ["group"] }
-k256 = { workspace = true, features = ["alloc", "serde"] }
+k256 = { workspace = true, features = ["alloc", "arithmetic", "serde"] }
