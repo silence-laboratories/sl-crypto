@@ -1,24 +1,25 @@
 [package]
 name = "sl-verifiable-enc"
 license-file = "../../LICENSE"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2021"
-publish = ["silencelaboratories"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+rust-version = "1.88"
+repository = "https://github.com/silence-laboratories/sl-crypto"
+description = "Verifierable encryption"
 
 [dependencies]
-rsa = "0.9.3"
-crypto-bigint = { version = "0.6.0-rc.0", features = ["alloc", "rand_core"] }
-num-traits = "0.2"
-group = "0.13.0"
-ff = "0.13.0"
-subtle = "2.5.0"
-rand = { version = "0.8" }
-rand_chacha = "0.3"
-thiserror = "1"
-sha2 = "0.10.8"
-digest = "0.10"
+crypto-bigint = { workspace = true }
+digest = { workspace = true }
+ff = { workspace = true }
+group = { workspace = true }
+num-traits = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rsa = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
+thiserror = { workspace = true }
+
 
 [dev-dependencies]
 k256 = { version = "0.13.2", features = ["alloc", "serde"] }
