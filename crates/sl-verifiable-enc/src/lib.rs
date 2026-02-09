@@ -114,12 +114,13 @@ where
         x: &G::Scalar,
         rsa_pubkey: &RsaPublicKey,
         label: &[u8],
-        security_param: Option<u16>,
+        security_param: Option<usize>,
         rng: &mut R,
     ) -> Result<Self, RsaError> {
         let seed = rng.gen::<[u8; 32]>();
-        let security_param =
-            security_param.unwrap_or(H::DEFAULT_SECURITY_PARAM);
+        let security_param: u16 = security_param
+            .map(|s| s as u16)
+            .unwrap_or(H::DEFAULT_SECURITY_PARAM);
 
         if security_param < H::COLLISION_RESISTANCE_BITS {
             return Err(RsaError::InvalidSecurityParam);
@@ -545,7 +546,7 @@ fn rsa_encrypt_with_label<H: HashFunction>(
     let n = rsa_pubkey.n();
     let n_bytes = n.to_bytes_be();
     let n_uint = BoxedUint::from_be_slice(&n_bytes, n.bits() as u32)
-        .expect("Failed to create BoxedUint from n");
+        .map_err(|_| RsaError::EncError)?;
 
     // Montgomery reduction (which makes constant-time modulo possible) mathematically
     // requires the modulus n to be coprime to the "base" used for representation
@@ -568,7 +569,11 @@ fn rsa_encrypt_with_label<H: HashFunction>(
     // bytes of the full-width representation.
     // Extract the last 64 bytes in constant time.
 
+    //len is the length of the plaintext in bytes which is the mod size.
     let len = plaintext_bytes.len();
+    if len < PLAINTEXT_FIXED_LEN {
+        return Err(RsaError::EncError);
+    }
     let start = len - PLAINTEXT_FIXED_LEN;
     let mut fixed_plaintext = [0u8; PLAINTEXT_FIXED_LEN];
     fixed_plaintext.copy_from_slice(&plaintext_bytes[start..]);
@@ -593,7 +598,7 @@ fn rsa_decrypt_with_label<H: HashFunction>(
     let n_bytes = n.to_bytes_be();
     // Using n bits precision
     let n_uint = BoxedUint::from_be_slice(&n_bytes, n.bits() as u32)
-        .expect("Failed to create BoxedUint from n");
+        .map_err(|_| RsaError::DecError)?;
 
     let n_odd = n_uint.to_odd().into_option().ok_or(RsaError::DecError)?;
 
@@ -627,10 +632,15 @@ fn rsa_decrypt_with_label<H: HashFunction>(
 
     // Extract the least-significant 32 bytes (scalar size) in constant-time.
     // The copy length is fixed and depends only on the public modulus size.
+    const SCALAR_BYTES: usize = 32;
     let msg_bytes = message.to_be_bytes();
+    // len in the mod size. Not supporting mod <32 bytes.
     let len = msg_bytes.len();
-    let start = len - 32;
-    let mut fixed = [0u8; 32];
+    if len < SCALAR_BYTES {
+        return Err(RsaError::DecError);
+    }
+    let start = len - SCALAR_BYTES;
+    let mut fixed = [0u8; SCALAR_BYTES];
     fixed.copy_from_slice(&msg_bytes[start..]);
     Ok(fixed.to_vec())
 }
