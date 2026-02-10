@@ -8,9 +8,11 @@ repository = "https://github.com/silence-laboratories/sl-crypto"
 description = "Verifierable encryption"
 
 [dependencies]
+crypto-bigint = { workspace = true, features = ["alloc", "rand_core"] }
+digest = { workspace = true }
 ff = { workspace = true }
 group = { workspace = true }
-num-bigint-dig = { workspace = true }
+num-traits = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 rsa = { workspace = true }
@@ -20,4 +22,4 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 curve25519-dalek = { workspace = true, features = ["group"] }
-k256 = { workspace = true, features = ["alloc", "serde"] }
+k256 = { workspace = true, features = ["alloc", "arithmetic", "serde"] }

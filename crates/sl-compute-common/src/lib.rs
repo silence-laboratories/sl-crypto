@@ -5,7 +5,7 @@ use std::mem;
 use std::ops::Index;
 
 use aead::rand_core::SeedableRng;
-use crypto_bigint::{Encoding, U64};
+use crypto_bigint::U64;
 use rand::Rng;
 use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
@@ -272,8 +272,9 @@ impl BinaryArithmeticShare {
     }
 
     pub fn left_shift(&self, shift: usize) -> BinaryArithmeticShare {
-        let v1 = FieldElement::from_le_slice(&self.value1).shl(shift);
-        let v2 = FieldElement::from_le_slice(&self.value2).shl(shift);
+        let shift_u32 = u32::try_from(shift).expect("shift out of range");
+        let v1 = FieldElement::from_le_slice(&self.value1).shl(shift_u32);
+        let v2 = FieldElement::from_le_slice(&self.value2).shl(shift_u32);
 
         BinaryArithmeticShare {
             value1: v1.to_le_bytes(),
