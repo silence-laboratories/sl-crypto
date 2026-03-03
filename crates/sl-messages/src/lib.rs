@@ -8,6 +8,9 @@ pub(crate) mod proto;
 
 pub mod pairs;
 
+#[cfg(feature = "setup")]
+pub mod setup;
+
 pub use bytes::{Bytes, BytesMut};
 
 pub mod signed {
