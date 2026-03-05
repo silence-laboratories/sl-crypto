@@ -1,6 +1,6 @@
 [package]
 name = "sl-messages"
-version = "1.2.0-pre.1"
+version = "1.2.0-pre.2"
 license-file = "../../LICENSE"
 edition = "2021"
 rust-version = "1.88"
@@ -27,7 +27,7 @@ rand = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time"] }
 
 [features]
-default = [ "fast-ws", "mux" ]
+default = [ "fast-ws", "mux", "setup" ]
 mux = [ "tokio/sync", "tokio/rt" ]
 fast-ws = [ "fastwebsockets", "tokio/macros", "tokio/sync", "tokio/rt" ]
 setup = []
