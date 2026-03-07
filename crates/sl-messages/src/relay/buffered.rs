@@ -3,6 +3,15 @@
 
 use std::ops::{Deref, DerefMut};
 
+#[cfg(feature = "setup")]
+use bytemuck::{AnyBitPattern, NoUninit};
+
+#[cfg(feature = "setup")]
+use crate::{
+    setup::{validate_abort_message, MessageRound, ProtocolParticipant},
+    signed::SignedMessage,
+};
+
 use crate::relay::*;
 
 pub struct BufferedMsgRelay<R: Relay> {
@@ -31,30 +40,50 @@ impl<R: Relay> BufferedMsgRelay<R> {
         &mut self,
         predicate: impl Fn(&MsgId) -> bool,
     ) -> Option<BytesMut> {
-        self.wait_for_bounded(0, predicate).await
+        self.wait_for_limited(0, |id| predicate(id).then_some(()))
+            .await
+            .map(|(msg, _)| msg)
     }
 
-    /// Wait for messages based on a predicate, with an optional buffer bound.
+    /// Wait for a message whose `MsgId` matches `predicate`, with an optional
+    /// bound on how many unmatched messages may be buffered.
     ///
-    /// If `max_buffered == 0`, this behaves exactly like `wait_for`.
-    /// If there is no buffered match and the current buffer has already reached
-    /// `max_buffered`, return `None` immediately.
-    /// Otherwise, if buffering another unmatched message would reach or exceed
-    /// `max_buffered`, return `None`.
-    pub async fn wait_for_bounded(
+    /// The predicate maps a `MsgId` to `Option<O>`:
+    /// - `Some(out)` means a match and this returns `Some((message, out))`.
+    /// - `None` means no match and the message may be buffered.
+    ///
+    /// If `max_buffered == 0`, buffering is unbounded (same behavior as
+    /// `wait_for`).
+    ///
+    /// For `max_buffered > 0`, this returns `None` when there is no buffered
+    /// match and:
+    /// - the current buffer is already full (`buffer.len() >= max_buffered`), or
+    /// - receiving one more unmatched message fills the buffer.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel-safe only if the wrapped [`Relay`] is cancel-safe
+    /// for [`Relay::next`] (and [`Relay::flush`], which is awaited before
+    /// receiving). `BufferedMsgRelay` does not add extra cancellation hazards,
+    /// but it cannot strengthen the guarantees of the underlying relay.
+    pub async fn wait_for_limited<O, F>(
         &mut self,
         max_buffered: usize,
-        predicate: impl Fn(&MsgId) -> bool,
-    ) -> Option<BytesMut> {
+        mut predicate: F,
+    ) -> Option<(BytesMut, O)>
+    where
+        F: FnMut(&MsgId) -> Option<O>,
+    {
         // First, look into the input buffer.
-        if let Some(idx) = self.buffer.iter().position(|msg| {
-            <&MsgHdr>::try_from(msg.as_ref())
-                .ok()
-                .filter(|hdr| predicate(hdr.id()))
-                .is_some()
-        }) {
+        if let Some((idx, out)) =
+            self.buffer.iter().enumerate().find_map(|(idx, msg)| {
+                let hdr = <&MsgHdr>::try_from(msg.as_ref()).ok()?;
+                let out = predicate(hdr.id())?;
+                Some((idx, out))
+            })
+        {
             // there is a buffered message matching the predicate.
-            return Some(self.buffer.swap_remove(idx));
+            return Some((self.buffer.swap_remove(idx), out));
         }
 
         // Must have room for at least one unmatched message.
@@ -69,9 +98,9 @@ impl<R: Relay> BufferedMsgRelay<R> {
             let msg = self.relay.next().await?;
 
             if let Ok(hdr) = <&MsgHdr>::try_from(msg.as_ref()) {
-                if predicate(hdr.id()) {
+                if let Some(out) = predicate(hdr.id()) {
                     // good, return it
-                    return Some(msg);
+                    return Some((msg, out));
                 } else {
                     // push into the buffer
                     self.buffer.push(msg);
@@ -132,6 +161,12 @@ impl<R: Relay> Relay for BufferedMsgRelay<R> {
     }
 }
 
+impl<R: Relay + SplitSender> SplitSender for BufferedMsgRelay<R> {
+    fn split_sender(&self) -> impl Sender + 'static {
+        self.relay.split_sender()
+    }
+}
+
 impl<R: Relay> Deref for BufferedMsgRelay<R> {
     type Target = R;
 
@@ -143,6 +178,160 @@ impl<R: Relay> Deref for BufferedMsgRelay<R> {
 impl<R: Relay> DerefMut for BufferedMsgRelay<R> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.relay
+    }
+}
+
+/// Errors returned by `BufferedMsgRelay::process_signed`.
+#[cfg(feature = "setup")]
+pub enum BufferedError {
+    /// A valid abort message was received from this party.
+    Abort(usize),
+    /// No matching message could be received.
+    Recv,
+    /// Send/ask error.
+    Send,
+    /// Invalid message format.
+    InvalidMessage,
+}
+
+#[cfg(feature = "setup")]
+#[derive(Clone, Copy)]
+enum WaitForRoundMessage {
+    Abort { party_id: usize },
+    Round { party_id: usize },
+}
+
+#[cfg(feature = "setup")]
+fn match_round_message(
+    round: &MessageRound,
+    abort: Option<&MessageRound>,
+    id: &MsgId,
+) -> Option<WaitForRoundMessage> {
+    abort
+        .and_then(|abort| abort.pending_sender(id))
+        .map(|party_id| WaitForRoundMessage::Abort { party_id })
+        .or_else(|| {
+            round
+                .pending_sender(id)
+                .map(|party_id| WaitForRoundMessage::Round { party_id })
+        })
+}
+
+#[cfg(feature = "setup")]
+impl<R: Relay> BufferedMsgRelay<R> {
+    /// Processes all pending messages for `round`, optionally observing an
+    /// `abort` round at the same time.
+    ///
+    /// The method receives messages until `round` is complete. For each
+    /// matching round message, `handler` is called with `(message, party_id)`.
+    ///
+    /// If `handler` returns `Ok(true)`, the message is treated as ignored and
+    /// the sender is not marked as received for `round`. Returning `Ok(false)`
+    /// marks the sender as received.
+    ///
+    /// Abort messages are validated with `setup`; a valid abort returns
+    /// `BufferedError::Abort` for the aborting party.
+    ///
+    /// # Errors
+    ///
+    /// Returns `BufferedError::Recv` when no matching message can be received,
+    /// and propagates errors from abort validation and `handler`.
+    pub async fn process_round<P, E, F>(
+        &mut self,
+        setup: &P,
+        limit: usize,
+        mut round: MessageRound,
+        abort: Option<&MessageRound>,
+        mut handler: F,
+    ) -> Result<(), E>
+    where
+        P: ProtocolParticipant,
+        F: FnMut(BytesMut, usize) -> Result<bool, E>,
+        E: From<BufferedError>,
+    {
+        while !round.is_complete() {
+            let (msg, wait_match) = self
+                .wait_for_limited(limit, |id| {
+                    match_round_message(&round, abort, id)
+                })
+                .await
+                .ok_or(BufferedError::Recv)?;
+
+            let party_id = match wait_match {
+                WaitForRoundMessage::Abort { party_id } => {
+                    validate_abort_message(
+                        setup,
+                        &msg,
+                        party_id,
+                        BufferedError::Abort,
+                    )?;
+
+                    // At this point, we figured out that the received message
+                    // has a valid msg-id but invalid signature. Ignore it.
+                    continue;
+                }
+                WaitForRoundMessage::Round { party_id } => party_id,
+            };
+
+            let id = <&MsgId>::try_from(msg.as_ref())
+                .copied()
+                .unwrap_or(MsgId::ZERO_ID);
+
+            if handler(msg, party_id)? {
+                continue;
+            }
+
+            // Mark as received only after successful auth + parse.
+            round.mark_received(&id);
+        }
+
+        Ok(())
+    }
+
+    /// Processes a round of signed messages and calls `handler` for each valid
+    /// signed payload.
+    ///
+    /// This is a typed wrapper around [`Self::process_round`]:
+    /// messages are verified with `setup.verifier(party_id)` and decoded as
+    /// `SignedMessage<T, _>`. Invalid signatures or malformed payloads are
+    /// ignored and do not mark the sender as received.
+    ///
+    /// `handler` receives `(&value, trailer, party_id)` for each valid message.
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors returned by [`Self::process_round`] and by `handler`.
+    pub async fn process_signed<P, T, E, F>(
+        &mut self,
+        setup: &P,
+        limit: usize,
+        round: MessageRound,
+        abort: Option<&MessageRound>,
+        mut handler: F,
+    ) -> Result<(), E>
+    where
+        T: AnyBitPattern + NoUninit,
+        P: ProtocolParticipant,
+        F: FnMut(&T, &[u8], usize) -> Result<(), E>,
+        E: From<BufferedError>,
+    {
+        self.process_round(setup, limit, round, abort, |msg, party_id| {
+            let Some((val, trailer)) =
+                SignedMessage::<T, _>::verify_with_trailer(
+                    &msg,
+                    setup.verifier(party_id),
+                )
+            else {
+                return Ok(true);
+            };
+
+            handler(&val, trailer, party_id)?;
+
+            Ok::<_, E>(false)
+        })
+        .await?;
+
+        Ok(())
     }
 }
 
@@ -165,7 +354,7 @@ mod tests {
 
     const TEST_TIMEOUT: Duration = Duration::from_millis(250);
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn out_of_order_messages() {
         let instance = InstanceId::from([1u8; 32]);
 
@@ -207,8 +396,8 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn wait_for_bounded_returns_none_on_limit() {
+    #[tokio::test]
+    async fn wait_for_limited_returns_none_on_limit() {
         let instance = InstanceId::from([1u8; 32]);
 
         let r = SimpleMessageRelay::new();
@@ -231,7 +420,7 @@ mod tests {
 
         let m = timeout(
             TEST_TIMEOUT,
-            brelay.wait_for_bounded(2, |id| id == &id1),
+            brelay.wait_for_limited(2, |id| (id == &id1).then_some(())),
         )
         .await
         .unwrap();
@@ -239,8 +428,8 @@ mod tests {
         assert_eq!(brelay.buffered_len(), 2);
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn wait_for_bounded_returns_none_when_buffer_is_already_full() {
+    #[tokio::test]
+    async fn wait_for_limited_returns_none_when_buffer_is_already_full() {
         let instance = InstanceId::from([1u8; 32]);
 
         let r = SimpleMessageRelay::new();
@@ -264,7 +453,7 @@ mod tests {
 
         let m = timeout(
             TEST_TIMEOUT,
-            brelay.wait_for_bounded(1, |id| id == &id1),
+            brelay.wait_for_limited(1, |id| (id == &id1).then_some(())),
         )
         .await
         .unwrap();
@@ -280,8 +469,40 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn wait_for_bounded_returns_buffered_match_when_full() {
+    #[tokio::test]
+    async fn wait_for_limited_returns_live_match_and_mapped_output() {
+        let instance = InstanceId::from([1u8; 32]);
+
+        let r = SimpleMessageRelay::new();
+
+        let c = r.connect();
+        let mut brelay = BufferedMsgRelay::new(r.connect());
+
+        let sender = [1; 32];
+        let id1 = MsgId::new(&instance, &sender, None, MessageTag::tag(1));
+
+        brelay.ask(&id1, Duration::from_secs(10)).await.unwrap();
+        c.send(mk_msg(&id1)).await.unwrap();
+
+        let m = timeout(
+            TEST_TIMEOUT,
+            brelay.wait_for_limited(1, |id| (id == &id1).then_some(7u8)),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            m.as_ref()
+                .map(|(m, _)| m.as_ref())
+                .and_then(|m| <&MsgId>::try_from(m).ok()),
+            Some(&id1)
+        );
+        assert_eq!(m.as_ref().map(|(_, out)| *out), Some(7u8));
+        assert_eq!(brelay.buffered_len(), 0);
+    }
+
+    #[tokio::test]
+    async fn wait_for_limited_returns_buffered_match_when_full() {
         let instance = InstanceId::from([1u8; 32]);
 
         let r = SimpleMessageRelay::new();
@@ -299,14 +520,17 @@ mod tests {
         // Should return the matching buffered message even when buffer is full.
         let m = timeout(
             TEST_TIMEOUT,
-            brelay.wait_for_bounded(2, |id| id == &id1),
+            brelay.wait_for_limited(2, |id| (id == &id1).then_some(9u8)),
         )
         .await
         .unwrap();
         assert_eq!(
-            m.as_deref().and_then(|m| <&MsgId>::try_from(m).ok()),
+            m.as_ref()
+                .map(|(m, _)| m.as_ref())
+                .and_then(|m| <&MsgId>::try_from(m).ok()),
             Some(&id1)
         );
+        assert_eq!(m.as_ref().map(|(_, out)| *out), Some(9u8));
         assert_eq!(brelay.buffered_len(), 1);
 
         let m = timeout(TEST_TIMEOUT, brelay.next()).await.unwrap();

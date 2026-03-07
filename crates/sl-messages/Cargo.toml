@@ -1,6 +1,6 @@
 [package]
 name = "sl-messages"
-version = "1.2.0-pre.2"
+version = "1.2.0-pre.3"
 license-file = "../../LICENSE"
 edition = "2021"
 rust-version = "1.88"
@@ -13,6 +13,7 @@ bytemuck = { workspace = true, features = [ "derive", "min_const_generics", "ext
 bytes = { workspace = true }
 chacha20 = { workspace = true }
 chacha20poly1305 = { workspace = true }
+derivation-path = { workspace = true, optional = true }
 fastwebsockets = { workspace = true, features = ["unstable-split"], optional = true }
 generic-array = { workspace = true, features = [ "zeroize" ] }
 rand_core = { workspace = true }
@@ -30,6 +31,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "tim
 default = [ "fast-ws", "mux", "setup" ]
 mux = [ "tokio/sync", "tokio/rt" ]
 fast-ws = [ "fastwebsockets", "tokio/macros", "tokio/sync", "tokio/rt" ]
-setup = []
+setup = ["dep:derivation-path"]
 
 simple-relay = []
