@@ -35,7 +35,7 @@ impl<R: Relay> BufferedMsgRelay<R> {
         }
     }
 
-    /// Wait for particular messages based on predicate.
+    /// Wait for a particular message based on a predicate.
     pub async fn wait_for(
         &mut self,
         predicate: impl Fn(&MsgId) -> bool,

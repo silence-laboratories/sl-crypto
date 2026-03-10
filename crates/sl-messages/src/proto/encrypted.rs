@@ -22,17 +22,17 @@ pub struct DecryptedMessage<'m, T: AnyBitPattern + NoUninit> {
 }
 
 impl<T: AnyBitPattern + NoUninit> DecryptedMessage<'_, T> {
-    /// Return a reference to fixed-size portion of the message.
+    /// Return a reference to the fixed-size portion of the message.
     pub fn body(&self) -> &T {
         self.body
     }
 
-    /// Return a reference to a variable-size portion of the message.
+    /// Return a reference to the variable-size portion of the message.
     pub fn trailer(&self) -> &[u8] {
         self.trailer
     }
 
-    /// Return an additional data.
+    /// Return the additional data.
     pub fn data(&self) -> &[u8] {
         self.data
     }

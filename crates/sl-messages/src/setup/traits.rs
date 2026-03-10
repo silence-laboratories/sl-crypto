@@ -83,10 +83,10 @@ pub trait ProtocolParticipant {
     /// execution.
     fn instance_id(&self) -> &InstanceId;
 
-    /// Returns message Time To Live.
+    /// Returns the message time-to-live.
     fn message_ttl(&self) -> Duration;
 
-    /// Returns a reference to participant's own verifier.
+    /// Returns a reference to the participant's own verifier.
     fn participant_verifier(&self) -> &Self::MessageVerifier {
         self.verifier(self.participant_index())
     }
@@ -239,18 +239,18 @@ impl<M: KeygenSetupMessage> KeygenSetupMessage for &M {
 /// use `keyshare_extra()` as input for the access control policy.
 ///
 pub trait PreSignSetupMessage<KS>: ProtocolParticipant {
-    /// A shared reference to a Keyshare.
+    /// A shared reference to a key share.
     fn keyshare(&self) -> &KS;
 
-    /// Key chain path for this signature
+    /// Returns the key chain path for this signature.
     fn chain_path(&self) -> &DerivationPath;
 
-    /// Additional data to incorporate into resulting PreSignature.
+    /// Additional data to incorporate into the resulting pre-signature.
     fn presignature_extra(&self) -> &[u8] {
         &[]
     }
 
-    /// Return list of banned parties.
+    /// Returns the list of banned parties.
     fn banned_parties(&self) -> &[u8] {
         &[]
     }
@@ -276,14 +276,14 @@ pub trait PreSignSetupMessage<KS>: ProtocolParticipant {
 /// vulnerabilities.
 ///
 pub trait FinalSignSetupMessage<PS>: ProtocolParticipant {
-    /// Pre-signature created by sign::pre_signature()
+    /// Returns the pre-signature created by `sign::pre_signature()`.
     fn pre_signature(&self) -> &PS;
 
     /// Computes hash of a message to sign.
     fn message_hash(&self) -> [u8; 32];
 }
 
-/// A setup message for sign::run()
+/// A setup message for `sign::run()`.
 pub trait SignSetupMessage<KS>: PreSignSetupMessage<KS> {
     /// Hash of a message to sign.
     fn message_hash(&self) -> [u8; 32];
@@ -291,25 +291,25 @@ pub trait SignSetupMessage<KS>: PreSignSetupMessage<KS> {
 
 /// A setup message for key export.
 pub trait KeyExporterSetupMessage<PK, KS>: ProtocolParticipant {
-    /// Public key of a receiver party.
+    /// Returns the public key of the receiving party.
     fn receiver_public_key(&self) -> &PK;
 
-    /// A shared reference to a Keyshare.
+    /// A shared reference to a key share.
     fn keyshare(&self) -> &KS;
 }
 
-/// A setup message for a receiver of exported key.
+/// A setup message for a receiver of an exported key.
 pub trait KeyExportReceiverSetupMessage<KS, SK>: ProtocolParticipant {
     /// Private key to decrypt P2P messages.
     fn receiver_private_key(&self) -> &SK;
 
-    /// A shared reference to a Keyshare.
+    /// A shared reference to a key share.
     fn keyshare(&self) -> &KS;
 }
 
 /// A setup message for quorum_change::run()
 pub trait QuorumChangeSetupMessage<KS, PK>: ProtocolParticipant {
-    /// A shared reference to a Keyshare.
+    /// A shared reference to a key share.
     fn old_keyshare(&self) -> Option<&KS>;
 
     /// New threshold parameter.
@@ -339,12 +339,12 @@ pub trait QuorumChangeSetupMessage<KS, PK>: ProtocolParticipant {
     /// to new key shares.
     fn new_party_indices(&self) -> &[usize];
 
-    /// Additional data to incorporate into resulting Keyshare.
+    /// Additional data to incorporate into the resulting key share.
     fn keyshare_extra(&self) -> &[u8] {
         &[]
     }
 
-    /// Derive key_id from a public_key.
+    /// Derives a `key_id` from a public key.
     fn derive_key_id(&self, public_key: &[u8]) -> [u8; 32];
 }
 
@@ -376,7 +376,7 @@ impl<KS, PK, M: QuorumChangeSetupMessage<KS, PK>>
     }
 }
 
-/// A setup message for WTSS DKG
+/// A setup message for WTSS DKG.
 pub trait WeightedKeygenSetupMessage: ProtocolParticipant {
     /// Returns rank of a participant with the given index.
     /// May panic if index is out of range.
@@ -405,7 +405,7 @@ pub trait WeightedKeygenSetupMessage: ProtocolParticipant {
     }
 }
 
-/// A setup message for WTSS QC
+/// A setup message for WTSS QC.
 pub trait WeightedQuorumChangeSetupMessage<KS, PK>:
     QuorumChangeSetupMessage<KS, PK>
 {

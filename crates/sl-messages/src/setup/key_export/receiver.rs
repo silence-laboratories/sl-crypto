@@ -21,7 +21,7 @@ pub struct KeyExportReceiver<
 }
 
 impl<SK, VK, MS, KS> KeyExportReceiver<SK, VK, MS, KS> {
-    /// Create new setup message
+    /// Creates a new setup message.
     pub fn new(
         inst: InstanceId,
         sk: SK,
@@ -42,7 +42,7 @@ impl<SK, VK, MS, KS> KeyExportReceiver<SK, VK, MS, KS> {
         }
     }
 
-    /// Update TTL
+    /// Updates the TTL.
     pub fn with_ttl(mut self, ttl: Duration) -> Self {
         self.ttl = ttl;
         self

@@ -21,7 +21,7 @@ pub struct KeyExporter<
 }
 
 impl<SK, VK, MS, KS> KeyExporter<SK, VK, MS, KS> {
-    /// Create new setup message
+    /// Creates a new setup message.
     pub fn new(
         inst: InstanceId,
         sk: SK,
@@ -42,12 +42,12 @@ impl<SK, VK, MS, KS> KeyExporter<SK, VK, MS, KS> {
         }
     }
 
-    /// Keyshare
+    /// Returns the key share.
     pub fn keyshare(&self) -> &KS {
         &self.share
     }
 
-    /// Update TTL
+    /// Updates the TTL.
     pub fn with_ttl(mut self, ttl: Duration) -> Self {
         self.ttl = ttl;
         self
