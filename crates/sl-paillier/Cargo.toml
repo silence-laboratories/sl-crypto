@@ -15,7 +15,7 @@ serde = { workspace = true, features = ["derive"], optional = true }
 
 
 [dev-dependencies]
-bincode = { workspace = true }
+ciborium = { workspace = true }
 criterion = { workspace = true }
 lazy_static = { workspace = true }
 quickcheck = { workspace = true }

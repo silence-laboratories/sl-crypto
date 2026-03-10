@@ -883,8 +883,9 @@ mod tests {
         assert_eq!(s1, s2);
         assert_eq!(p1, p2);
 
-        let s1b = bincode::serialize(&sk).unwrap();
-        let sk1: SK2048 = bincode::deserialize(&s1b).unwrap();
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&sk, &mut bytes).unwrap();
+        let sk1: SK2048 = ciborium::from_reader(bytes.as_slice()).unwrap();
         assert_eq!(sk.to_minimal(), sk1.to_minimal());
     }
 }

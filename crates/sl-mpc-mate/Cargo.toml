@@ -27,7 +27,7 @@ rayon = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-bincode = { version = "1" }
+ciborium = { workspace = true }
 
 [features]
 serde = [
