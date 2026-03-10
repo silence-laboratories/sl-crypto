@@ -35,8 +35,8 @@ enum Output {
 /// A table mapping message IDs and destination internal connections
 /// is maintained to handle ASK messages.
 ///
-/// ASK messages from the external connection is broadcasted to all
-/// internal collections.
+/// ASK messages from the external connection are broadcast to all
+/// internal connections.
 ///
 ///
 pub struct MsgRelayMux {
@@ -170,7 +170,7 @@ impl Relay for InternalConnection {
                 msg = poll_fn(|cx| self.input.poll_recv(cx)) => return msg,
                 ask = self.br.recv() => {
                     // recv() can't fail because there are at least
-                    // two Senders: MsgRelayMux.br and and
+                    // two Senders: MsgRelayMux.br and
                     // `input_asks` inside task handling input
                     // messages from external connection.
                     if let Ok(bytes) = ask {

@@ -263,7 +263,7 @@ impl MsgHdr {
     }
 }
 
-/// Allocate message and initalize it from given parts.
+/// Allocate a message and initialize it from the given parts.
 pub fn allocate_message(
     id: &MsgId,
     ttl: Duration,

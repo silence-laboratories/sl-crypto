@@ -17,6 +17,8 @@ pub mod trace;
 #[cfg(feature = "mux")]
 pub mod mux;
 
+#[cfg(feature = "setup")]
+pub use buffered::BufferedError;
 pub use buffered::BufferedMsgRelay;
 pub use simple::SimpleMessageRelay;
 
@@ -41,7 +43,7 @@ pub trait Sender: Send + Sync {
         }
     }
 
-    /// Flush all pending/bufferred messages
+    /// Flush all pending/buffered messages.
     fn flush(
         &self,
     ) -> impl Future<Output = Result<(), MessageSendError>> + Send {
@@ -71,7 +73,7 @@ pub trait Relay: Send + Sync {
         message: Bytes,
     ) -> impl Future<Output = Result<(), MessageSendError>> + Send;
 
-    /// Flush all pending/bufferred messages
+    /// Flush all pending/buffered messages.
     fn flush(
         &self,
     ) -> impl Future<Output = Result<(), MessageSendError>> + Send {
@@ -86,7 +88,7 @@ pub trait Relay: Send + Sync {
         self.feed(allocate_message(id, ttl, 0, &[]))
     }
 
-    /// Receive a message. Return None is underlying connection is closed.
+    /// Receive a message. Returns `None` if the underlying connection is closed.
     fn next(&mut self) -> impl Future<Output = Option<BytesMut>> + Send;
 }
 

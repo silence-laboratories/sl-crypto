@@ -200,7 +200,7 @@ impl<Q: InputQueue> MsgRelay<Q> {
         }
     }
 
-    /// Create internal connection. I won't recevice ASK messages from
+    /// Creates an internal connection. It won't receive ASK messages from
     /// other connections.
     pub fn connect(&self) -> MsgRelayConnection<Q> {
         self.connection(false)
