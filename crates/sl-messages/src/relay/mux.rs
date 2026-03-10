@@ -136,13 +136,11 @@ impl MsgRelayMux {
                     // broadcast ASK message to all internal
                     // connections.
                     let _ = input_asks.send(msg.into());
-                } else {
-                    if let Some(q) = <&MsgId>::try_from(msg.as_ref())
-                        .ok()
-                        .and_then(|id| asks.lock().unwrap().remove(id))
-                    {
-                        q.push(msg);
-                    }
+                } else if let Some(q) = <&MsgId>::try_from(msg.as_ref())
+                    .ok()
+                    .and_then(|id| asks.lock().unwrap().remove(id))
+                {
+                    q.push(msg);
                 }
             }
         });

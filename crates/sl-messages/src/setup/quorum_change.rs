@@ -9,8 +9,7 @@ use crate::{
     message::InstanceId,
     setup::{
         keys::{NoSignature, NoSigningKey, NoVerifyingKey},
-        ProtocolParticipant,
-        QuorumChangeSetupMessage,
+        ProtocolParticipant, QuorumChangeSetupMessage,
         WeightedQuorumChangeSetupMessage,
     },
 };

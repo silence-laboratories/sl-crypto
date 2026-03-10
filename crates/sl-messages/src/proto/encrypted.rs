@@ -106,7 +106,7 @@ pub trait EncryptedMessage: EncryptionScheme {
     }
 }
 
-///
+/// Key material used to encrypt and decrypt framed messages.
 pub trait MessageKey: Sized {
     /// Size of message footer.
     fn message_footer(&self) -> usize;

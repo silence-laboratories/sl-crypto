@@ -18,9 +18,7 @@ const DEFAULT_TTL: u64 = 100; // smaller timeout might fail tests
 
 use crate::setup::{
     keys::{NoSignature, NoSigningKey, NoVerifyingKey},
-    KeygenSetupMessage,
-    ProtocolParticipant,
-    WeightedKeygenSetupMessage,
+    KeygenSetupMessage, ProtocolParticipant, WeightedKeygenSetupMessage,
 };
 
 /// Concrete setup context for key-generation rounds.

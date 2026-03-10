@@ -211,8 +211,10 @@ pub trait IntoRawPlaintext<const L: usize, T> {
     fn into_plaintext(self, msg: T) -> Option<RawPlaintext<L>>;
 }
 
-fn inv_mod_uint<const L: usize>(value: &Uint<L>, modulus: &Uint<L>) -> Uint<L>
-{
+fn inv_mod_uint<const L: usize>(
+    value: &Uint<L>,
+    modulus: &Uint<L>,
+) -> Uint<L> {
     let value = BoxedUint::from(value);
     let modulus = BoxedUint::from(modulus);
     let inverse = value
@@ -378,10 +380,7 @@ where
         // L_p(cp^{p-1} mod p^2) h_p mod p
         let p_wide_nz = NonZero::new(p.resize::<M>()).unwrap();
         let mp: Uint<P> = MontyForm::new(&cp, *param)
-            .pow_bounded_exp(
-                &p.wrapping_sub(&Uint::ONE),
-                Uint::<P>::BITS,
-            )
+            .pow_bounded_exp(&p.wrapping_sub(&Uint::ONE), Uint::<P>::BITS)
             .retrieve()
             .wrapping_sub(&Uint::ONE) // Lp(x) = (x-1)/p
             .wrapping_div(&p_wide_nz)
@@ -409,12 +408,7 @@ where
     pub fn extract_n_root(
         &self,
         z: &Uint<M>,
-        init_params: &(
-            Uint<P>,
-            Uint<P>,
-            MontyParams<P>,
-            MontyParams<P>,
-        ),
+        init_params: &(Uint<P>, Uint<P>, MontyParams<P>, MontyParams<P>),
     ) -> Uint<M> {
         let (zp, zq) = decompose(z, &self.p, &self.q);
         let rp = MontyForm::new(&zp, init_params.2)
@@ -609,7 +603,8 @@ where
         let r = MontyForm::new(&r.resize::<C>(), self.params);
 
         // r^N mod N^2
-        let r_pow_n = r.pow_bounded_exp(self.n.as_ref(), self.n.as_ref().bits_vartime());
+        let r_pow_n = r
+            .pow_bounded_exp(self.n.as_ref(), self.n.as_ref().bits_vartime());
 
         //
         // g == (1 + N)
@@ -621,7 +616,8 @@ where
         // 1 + m*N <= 1 + N^2 - N < N^2
         //
         let g_pow_m = MontyForm::new(
-            &Uint::<C>::from(m.0.split_mul(self.n.as_ref())).wrapping_add(&Uint::ONE),
+            &Uint::<C>::from(m.0.split_mul(self.n.as_ref()))
+                .wrapping_add(&Uint::ONE),
             self.params,
         );
 
