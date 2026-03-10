@@ -1,44 +1,75 @@
 # sl-crypto
 
-This repo contains libraries:
+`sl-crypto` is a Rust workspace with cryptographic and MPC-related crates used
+by Silence Laboratories.
 
-## sl-paillier
+## Workspace crates
 
-Implemention of Paillier encryption using fixed with big numbers
-from crypto-binint crate. This implemenation is slower that kzen-paillier
-but it is pure Rust and use constant-time computations.
+- `sl-compute-common`: utilities for secure compute
+- `sl-messages`: message exchange and relay components for MPC protocols
+- `sl-mpc-mate`: utilities for secure multi-party computation
+- `sl-mpc-traits`: small utility traits shared across crates
+- `sl-oblivious`: oblivious transfer protocols
+- `sl-paillier`: Paillier encryption built on `crypto-bigint`
+- `sl-shamir`: Shamir secret sharing
+- `sl-verifiable-enc`: verifiable encryption
 
-Also it is GPL/LGPL free.
+Additional crate-specific documentation is available in:
 
-## sl-mpc-mate
+- [`crates/sl-messages/README.md`](crates/sl-messages/README.md)
+- [`crates/sl-verifiable-enc/README.md`](crates/sl-verifiable-enc/README.md)
 
-Implementation of new "messaging scheme". Implements message relay or
-async coordinator.
+## Toolchain
 
-Key modules and types:
+The workspace currently targets Rust `1.88`.
 
-```rust
-message::MsgId
-message::Builder::<Signed>::encode(id, ttl, key, payload)
-message::builder::<Encrypted>::encode(id, ttl, key, payload)
+## Development
 
-message::Message::from_buffer(&mut buffer)
-message::Message::verify_and_decode()
-message::Message::decrypt_and_decode()
+This repository includes a workspace-local Cargo alias:
 
-coord::Relay
-coord::SimpleMessageRelay
+```bash
+cargo xtask ...
 ```
 
-## sl-oblivious
+The alias expands to:
 
-Base code for DKLs23
+```bash
+cargo run --locked --package xtask -- ...
+```
 
-## sl-verifiable-enc
+The main helper currently implemented in `xtask` is `feature-matrix`. It runs
+`cargo clippy` or `cargo test` for every workspace crate and every explicit
+feature combination of that crate.
 
-Verifiable encryption library
+Examples:
 
-Refer to it's [readme](/crates/sl-verifiable-enc/README.md) for usage
+```bash
+# Show the test matrix without executing it
+cargo xtask feature-matrix test --dry-run
 
+# Run clippy for every crate / feature combination
+cargo xtask feature-matrix clippy -- --locked
 
+# Run tests only for sl-messages across its feature combinations
+cargo xtask feature-matrix test --package sl-messages -- --locked --release
 
+# Inspect the generated commands for one crate
+cargo xtask feature-matrix test --package sl-paillier --dry-run
+```
+
+Arguments after `--` are forwarded to the underlying Cargo command. For
+example, `--release` and `--locked` are passed through to every generated
+`cargo test` invocation.
+
+## CI
+
+GitHub Actions runs the following checks on pushes and pull requests to `main`:
+
+```bash
+cargo fmt --all --check
+cargo deny --locked --all-features check
+cargo run --locked --package xtask -- feature-matrix clippy -- --locked
+cargo run --locked --package xtask -- feature-matrix test -- --locked --release
+```
+
+Running those commands locally is the closest way to reproduce CI.

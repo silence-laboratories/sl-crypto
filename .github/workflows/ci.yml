@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches:
+    - main
+
+  pull_request:
+    branches:
+    - main
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.88 --profile minimal --component rustfmt
+      - name: Use Rust 1.88
+        run: rustup default 1.88
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.88 --profile minimal
+      - name: Use Rust 1.88
+        run: rustup default 1.88
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: Run cargo deny
+        run: cargo deny --locked --all-features check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.88 --profile minimal --component clippy
+      - name: Use Rust 1.88
+        run: rustup default 1.88
+      - name: Run clippy for every crate and feature combination
+        run: cargo run --locked --package xtask -- feature-matrix clippy -- --locked
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.88 --profile minimal
+      - name: Use Rust 1.88
+        run: rustup default 1.88
+      - name: Run tests for every crate and feature combination
+        run: cargo run --locked --package xtask -- feature-matrix test -- --locked --release

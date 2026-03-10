@@ -3,13 +3,18 @@
 
 use std::ops::Deref;
 
-use crypto_bigint::modular::runtime_mod::{DynResidue, DynResidueParams};
-use crypto_bigint::{Bounded, Encoding, NonZero, RandomMod, Split, Uint};
+use crypto_bigint::modular::{MontyForm, MontyParams};
+use crypto_bigint::{
+    BoxedUint, Concat, Encoding, NonZero, RandomMod, Split, Uint,
+};
 use crypto_bigint::{U1024, U2048, U4096};
 
 use crypto_primes::generate_prime_with_rng;
 
 use rand_core::CryptoRngCore;
+
+#[cfg(feature = "serde")]
+use crypto_bigint::Bounded;
 
 // print-type-size type: `SK<64, 32, 16>`: 5400 bytes, alignment: 8 bytes
 // print-type-size     field `.phi`: 256 bytes
@@ -24,12 +29,16 @@ use rand_core::CryptoRngCore;
 
 pub type SK2048 = SK<{ U4096::LIMBS }, { U2048::LIMBS }, { U1024::LIMBS }>;
 pub type PK2048 = PK<{ U4096::LIMBS }, { U2048::LIMBS }>;
+
+#[cfg(feature = "serde")]
 pub type MinimalSK2048 = MinimalSK<{ U1024::LIMBS }>;
+#[cfg(feature = "serde")]
 pub type MinimalPK2048 = MinimalPK<{ U4096::LIMBS }, { U2048::LIMBS }>;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "serde")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MinimalSK<const P: usize>
@@ -40,6 +49,7 @@ where
     pub q: Uint<P>,
 }
 
+#[cfg(feature = "serde")]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MinimalPK<const NN: usize, const N: usize>
@@ -49,6 +59,7 @@ where
     pub n: NonZero<Uint<N>>,
 }
 
+#[cfg(feature = "serde")]
 impl<const NN: usize, const N: usize> MinimalPK<NN, N>
 where
     Uint<N>: Bounded + Encoding,
@@ -59,6 +70,7 @@ where
     }
 }
 
+#[cfg(feature = "serde")]
 impl<const NN: usize, const N: usize> From<MinimalPK<NN, N>> for PK<NN, N>
 where
     Uint<N>: Bounded + Encoding,
@@ -69,7 +81,7 @@ where
         let nn: Uint<NN> = value.n.square_wide().into();
         PK {
             n: value.n,
-            params: DynResidueParams::new(&nn),
+            params: MontyParams::<NN>::new_vartime(nn.to_odd().unwrap()),
         }
     }
 }
@@ -199,10 +211,26 @@ pub trait IntoRawPlaintext<const L: usize, T> {
     fn into_plaintext(self, msg: T) -> Option<RawPlaintext<L>>;
 }
 
+fn inv_mod_uint<const L: usize>(value: &Uint<L>, modulus: &Uint<L>) -> Uint<L>
+{
+    let value = BoxedUint::from(value);
+    let modulus = BoxedUint::from(modulus);
+    let inverse = value
+        .inv_mod(&modulus)
+        .expect("value should be invertible for the provided modulus");
+    Uint::<L>::from_words(
+        inverse
+            .to_words()
+            .as_ref()
+            .try_into()
+            .expect("boxed inverse should preserve limb width"),
+    )
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct PK<const C: usize, const M: usize> {
     n: NonZero<Uint<M>>,
-    params: DynResidueParams<C>, // mod N^2
+    params: MontyParams<C>, // mod N^2
 }
 
 #[derive(Debug, Clone)]
@@ -215,20 +243,22 @@ pub struct SK<const C: usize, const M: usize, const P: usize> {
     q: Uint<P>,
     hq: Uint<P>,
     pinv_q: Uint<P>,
-    pp_params: DynResidueParams<M>,
-    qq_params: DynResidueParams<M>,
+    pp_params: MontyParams<M>,
+    qq_params: MontyParams<M>,
 }
 
 impl<const C: usize, const M: usize, const P: usize> SK<C, M, P>
 where
     Uint<C>: Split<Output = Uint<M>>,
     Uint<C>: From<(Uint<M>, Uint<M>)>,
+    Uint<M>: Concat<Output = Uint<C>>,
     Uint<M>: From<(Uint<P>, Uint<P>)>,
+    Uint<P>: Concat<Output = Uint<M>>,
     Uint<M>: Encoding + Split<Output = Uint<P>>,
 {
     pub fn gen_pq(rng: &mut impl CryptoRngCore) -> (Uint<P>, Uint<P>) {
-        let q = generate_prime_with_rng(rng, None);
-        let p = generate_prime_with_rng(rng, None);
+        let q = generate_prime_with_rng(rng, Uint::<P>::BITS);
+        let p = generate_prime_with_rng(rng, Uint::<P>::BITS);
 
         (p, q)
     }
@@ -250,27 +280,27 @@ where
 
     pub fn from_pq(p: &Uint<P>, q: &Uint<P>) -> Self {
         // N = pq
-        let n: Uint<M> = q.mul_wide(p).into();
+        let n: Uint<M> = q.split_mul(p).into();
         let pk = PK::from_n(&n);
 
         // phi = (q-1)(p-1)
         let phi: Uint<M> = q
             .wrapping_sub(&Uint::ONE)
-            .mul_wide(&p.wrapping_sub(&Uint::ONE))
+            .split_mul(&p.wrapping_sub(&Uint::ONE))
             .into();
 
         // inv_phi = phi^-1 mod N
-        let inv_phi = phi.inv_odd_mod(&pk.n).0;
+        let inv_phi = inv_mod_uint::<M>(&phi, pk.n.as_ref());
 
-        let pinv_q = p.inv_odd_mod(q).0;
+        let pinv_q = inv_mod_uint::<P>(p, q);
 
         let pp: Uint<M> = p.square_wide().into();
-        let pp_params = DynResidueParams::new(&pp);
-        let hp = Self::h(p, pp_params.modulus(), &n);
+        let pp_params = MontyParams::new(pp.to_odd().unwrap());
+        let hp = Self::h(p, pp_params.modulus().as_ref(), &n);
 
         let qq: Uint<M> = q.square_wide().into();
-        let qq_params = DynResidueParams::new(&qq);
-        let hq = Self::h(q, qq_params.modulus(), &n);
+        let qq_params = MontyParams::new(qq.to_odd().unwrap());
+        let hq = Self::h(q, qq_params.modulus().as_ref(), &n);
 
         SK {
             phi,
@@ -294,26 +324,23 @@ where
     }
 
     pub fn decrypt(&self, c: &RawCiphertext<C>) -> RawPlaintext<M> {
-        let c = DynResidue::new(&c.0, self.params);
+        let c = MontyForm::new(&c.0, self.params);
+        let n_wide = NonZero::new(self.n.as_ref().resize::<C>()).unwrap();
 
         // m = (c^phi mod N^2 - 1) / N
         let m: Uint<M> = c
-            .pow_bounded_exp(&self.phi.resize::<M>(), Uint::<M>::BITS)
+            .pow_bounded_exp(&self.phi, Uint::<M>::BITS)
             .retrieve()
             .wrapping_sub(&Uint::ONE)
-            .wrapping_div(&self.n.resize::<C>())
+            .wrapping_div(&n_wide)
             .resize(); // drop top half of the value
 
         // m = (m * phi^-1) mod N
 
         // m_mod_n = m mod N
-        let m_mod_n = m.const_rem(&self.n).0;
+        let m_mod_n = m.rem(&self.n);
 
-        // (lo, hi) = m_n * phi^-1
-        let (lo, hi) = m_mod_n.mul_wide(&self.inv_phi);
-
-        // final reduce by N, variable time by N, but it's public value
-        RawPlaintext(Uint::const_rem_wide((lo, hi), &self.n).0)
+        RawPlaintext(m_mod_n.mul_mod::<C>(&self.inv_phi, &self.n))
     }
 
     pub(crate) fn h(p: &Uint<P>, pp: &Uint<M>, n: &Uint<M>) -> Uint<P> {
@@ -330,52 +357,51 @@ where
         // =   1 - n         mod p^2
         //
 
-        let n_mod_pp = n.const_rem(pp).0; // should be fast because N and p^2 are close
-
-        Uint::ONE
+        let n_mod_pp = n.rem(&NonZero::new(*pp).unwrap()); // should be fast because N and p^2 are close
+        let p_wide = p.resize::<M>();
+        let p_wide_nz = NonZero::new(p_wide).unwrap();
+        let value = Uint::ONE
             .sub_mod(&n_mod_pp, pp)
             .wrapping_sub(&Uint::ONE) // L_p(x) = (x-1)/p
-            .wrapping_div(&p.resize()) // FIXME: var time on P
-            .inv_odd_mod_bounded(
-                &p.resize(),
-                Uint::<M>::BITS,
-                Uint::<P>::BITS,
-            )
-            .0
-            .resize() // dropping top half of bits
+            .wrapping_div(&p_wide_nz);
+
+        inv_mod_uint::<M>(&value, &p_wide).resize() // dropping top half of bits
     }
 
     fn mp(
         &self,
         cp: Uint<M>,
-        p: &Uint<P>,
+        p: &NonZero<Uint<P>>,
         hp: &Uint<P>,
-        param: &DynResidueParams<M>,
+        param: &MontyParams<M>,
     ) -> Uint<P> {
         // L_p(cp^{p-1} mod p^2) h_p mod p
-        let mp: Uint<P> = DynResidue::new(&cp, *param)
+        let p_wide_nz = NonZero::new(p.resize::<M>()).unwrap();
+        let mp: Uint<P> = MontyForm::new(&cp, *param)
             .pow_bounded_exp(
-                &p.wrapping_sub(&Uint::ONE).resize::<P>(),
+                &p.wrapping_sub(&Uint::ONE),
                 Uint::<P>::BITS,
             )
             .retrieve()
             .wrapping_sub(&Uint::ONE) // Lp(x) = (x-1)/p
-            .wrapping_div(&p.resize())
+            .wrapping_div(&p_wide_nz)
             .resize();
 
-        let x: Uint<P> = mp.const_rem(p).0;
+        let x: Uint<P> = mp.rem(p);
 
-        Uint::const_rem_wide(x.mul_wide(hp), p).0
+        x.mul_mod::<M>(hp, p)
     }
 
     pub fn decrypt_fast(&self, c: &RawCiphertext<C>) -> RawPlaintext<M> {
         let pp = self.pp_params.modulus();
         let qq = self.qq_params.modulus();
+        let p = NonZero::new(self.p).unwrap();
+        let q = NonZero::new(self.q).unwrap();
 
         let (cp, cq) = decompose(&c.0, pp, qq);
 
-        let mp = self.mp(cp, &self.p, &self.hp, &self.pp_params);
-        let mq = self.mp(cq, &self.q, &self.hq, &self.qq_params);
+        let mp = self.mp(cp, &p, &self.hp, &self.pp_params);
+        let mq = self.mp(cq, &q, &self.hq, &self.qq_params);
 
         RawPlaintext(recombine(&self.pinv_q, &mp, &mq, &self.p, &self.q))
     }
@@ -386,15 +412,15 @@ where
         init_params: &(
             Uint<P>,
             Uint<P>,
-            DynResidueParams<P>,
-            DynResidueParams<P>,
+            MontyParams<P>,
+            MontyParams<P>,
         ),
     ) -> Uint<M> {
         let (zp, zq) = decompose(z, &self.p, &self.q);
-        let rp = DynResidue::new(&zp, init_params.2)
+        let rp = MontyForm::new(&zp, init_params.2)
             .pow(&init_params.0)
             .retrieve();
-        let rq = DynResidue::new(&zq, init_params.3)
+        let rq = MontyForm::new(&zq, init_params.3)
             .pow(&init_params.1)
             .retrieve();
 
@@ -404,20 +430,21 @@ where
     // To reduce recalculation of constant params
     pub fn extract_n_root_init_params(
         &self,
-    ) -> (Uint<P>, Uint<P>, DynResidueParams<P>, DynResidueParams<P>) {
+    ) -> (Uint<P>, Uint<P>, MontyParams<P>, MontyParams<P>) {
         let dk_qminusone = self.q.wrapping_sub(&Uint::ONE);
         let dk_pminusone = self.p.wrapping_sub(&Uint::ONE);
-        let dk_dn = self.n.inv_mod(&self.phi).0;
+        let dk_dn = inv_mod_uint::<M>(self.n.as_ref(), &self.phi);
 
         let (dk_dp, dk_dq) = decompose(&dk_dn, &dk_pminusone, &dk_qminusone);
 
-        let p_params = DynResidueParams::new(&self.p);
-        let q_params = DynResidueParams::new(&self.q);
+        let p_params = MontyParams::new(self.p.to_odd().unwrap());
+        let q_params = MontyParams::new(self.q.to_odd().unwrap());
 
         (dk_dp, dk_dq, p_params, q_params)
     }
 }
 
+#[cfg(feature = "serde")]
 impl<const C: usize, const M: usize, const P: usize> SK<C, M, P>
 where
     Uint<P>: Bounded + Encoding,
@@ -430,13 +457,16 @@ where
     }
 }
 
+#[cfg(feature = "serde")]
 impl<const C: usize, const M: usize, const P: usize> From<MinimalSK<P>>
     for SK<C, M, P>
 where
     Uint<P>: Bounded + Encoding,
     Uint<C>: Split<Output = Uint<M>>,
     Uint<C>: From<(Uint<M>, Uint<M>)>,
+    Uint<M>: Concat<Output = Uint<C>>,
     Uint<M>: From<(Uint<P>, Uint<P>)>,
+    Uint<P>: Concat<Output = Uint<M>>,
     Uint<M>: Encoding + Split<Output = Uint<P>>,
 {
     fn from(minimal: MinimalSK<P>) -> Self {
@@ -459,11 +489,16 @@ pub fn decompose<const C: usize, const M: usize>(
 ) -> (Uint<M>, Uint<M>)
 where
     Uint<C>: Split<Output = Uint<M>>,
+    Uint<C>: From<(Uint<M>, Uint<M>)>,
 {
-    let (hi, lo) = c.split();
+    let (lo, hi) = c.split();
 
-    let cp: Uint<M> = Uint::const_rem_wide((lo, hi), p).0;
-    let cq: Uint<M> = Uint::const_rem_wide((lo, hi), q).0;
+    let cp: Uint<M> = Uint::<C>::from((lo, hi))
+        .rem(&NonZero::new(p.resize::<C>()).unwrap())
+        .resize();
+    let cq: Uint<M> = Uint::<C>::from((lo, hi))
+        .rem(&NonZero::new(q.resize::<C>()).unwrap())
+        .resize();
 
     (cp, cq)
 }
@@ -477,7 +512,9 @@ pub fn recombine<const M: usize, const P: usize>(
     q: &Uint<P>,
 ) -> Uint<M>
 where
+    Uint<P>: Concat<Output = Uint<M>>,
     Uint<M>: From<(Uint<P>, Uint<P>)>,
+    Uint<M>: Split<Output = Uint<P>>,
 {
     // C_2 = p^-1 mod q
     // let c_2 = p.inv_odd_mod(q).0;
@@ -490,10 +527,10 @@ where
     let d = v2.sub_mod(&v1_less_q, q);
 
     // u = (v_2 - v_1) C_2 mod q
-    let u: Uint<P> = Uint::const_rem_wide(d.mul_wide(p_inv_q), q).0;
+    let u: Uint<P> = d.mul_mod::<M>(p_inv_q, &non_zero_q);
 
     // x = v_1 + u p
-    Uint::from(u.mul_wide(p)).wrapping_add(&v1.resize())
+    Uint::from(u.split_mul(p)).wrapping_add(&v1.resize())
 }
 
 impl<const C: usize, const M: usize> PK<C, M>
@@ -503,8 +540,8 @@ where
 {
     pub fn from_n(n: &Uint<M>) -> Self {
         // We generate N as half of L, so hi part of n.square_wide() is zero
-        let nn = n.square_wide().into();
-        let params = DynResidueParams::new(&nn);
+        let nn: Uint<C> = n.square_wide().into();
+        let params = MontyParams::<C>::new_vartime(nn.to_odd().unwrap());
 
         Self {
             n: NonZero::new(*n).unwrap(),
@@ -512,6 +549,7 @@ where
         }
     }
 
+    #[cfg(feature = "serde")]
     pub fn to_minimal(&self) -> MinimalPK<C, M>
     where
         Uint<M>: Bounded + Encoding,
@@ -525,7 +563,7 @@ where
     }
 
     pub fn get_nn(&self) -> &Uint<C> {
-        self.params.modulus()
+        self.params.modulus().as_ref()
     }
 
     pub fn gen_r(&self, rng: &mut impl CryptoRngCore) -> Uint<M> {
@@ -551,7 +589,7 @@ where
     }
 
     pub fn into_message(&self, m: &Uint<M>) -> Option<RawPlaintext<M>> {
-        m.lt(&self.n).then_some(RawPlaintext(*m))
+        m.lt(self.n.as_ref()).then_some(RawPlaintext(*m))
     }
 
     pub fn encrypt(
@@ -568,10 +606,10 @@ where
         m: &RawPlaintext<M>,
         r: &Uint<M>,
     ) -> RawCiphertext<C> {
-        let r = DynResidue::new(&r.resize(), self.params);
+        let r = MontyForm::new(&r.resize::<C>(), self.params);
 
         // r^N mod N^2
-        let r_pow_n = r.pow_bounded_exp(&self.n, self.n.bits_vartime());
+        let r_pow_n = r.pow_bounded_exp(self.n.as_ref(), self.n.as_ref().bits_vartime());
 
         //
         // g == (1 + N)
@@ -582,8 +620,8 @@ where
         //
         // 1 + m*N <= 1 + N^2 - N < N^2
         //
-        let g_pow_m = DynResidue::new(
-            &Uint::<C>::from(m.0.mul_wide(&self.n)).wrapping_add(&Uint::ONE),
+        let g_pow_m = MontyForm::new(
+            &Uint::<C>::from(m.0.split_mul(self.n.as_ref())).wrapping_add(&Uint::ONE),
             self.params,
         );
 
@@ -598,8 +636,8 @@ where
         c_2: &RawCiphertext<C>,
     ) -> RawCiphertext<C> {
         // c_1 * c_2 mod N^2
-        let c_1 = DynResidue::new(&c_1.0, self.params);
-        let c_2 = DynResidue::new(&c_2.0, self.params);
+        let c_1 = MontyForm::new(&c_1.0, self.params);
+        let c_2 = MontyForm::new(&c_2.0, self.params);
 
         RawCiphertext(c_1.mul(&c_2).retrieve())
     }
@@ -610,7 +648,7 @@ where
         m: &RawPlaintext<M>,
     ) -> RawCiphertext<C> {
         // c = c^m mod N^2
-        let c = DynResidue::new(&c.0, self.params).pow(&m.0).retrieve();
+        let c = MontyForm::new(&c.0, self.params).pow(&m.0).retrieve();
 
         RawCiphertext(c)
     }
@@ -623,8 +661,8 @@ where
         let bits = m.0.bits_vartime();
 
         // c = c^m mod N^2
-        let c = DynResidue::new(&c.0, self.params)
-            .pow_bounded_exp(&m.0.resize::<M>(), bits)
+        let c = MontyForm::new(&c.0, self.params)
+            .pow_bounded_exp(&m.0, bits)
             .retrieve();
 
         RawCiphertext(c)
@@ -637,7 +675,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use quickcheck::quickcheck;
 
     use super::*;

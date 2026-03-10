@@ -41,7 +41,7 @@ fn sl_pk() -> (U2048, PK) {
     let r: U2048 = from_hex(R);
     let p: U1024 = from_hex(P);
     let q: U1024 = from_hex(Q);
-    let n = p.mul_wide(&q).into();
+    let n = p.split_mul(&q).into();
 
     let pk = PK::from_n(&n);
 
