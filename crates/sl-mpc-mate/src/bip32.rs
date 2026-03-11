@@ -18,6 +18,11 @@ use thiserror::Error;
 
 /// 4-byte Key fingerprint
 pub type KeyFingerPrint = [u8; 4];
+pub type ChildPubkeyDerivation<C> = (
+    <C as CurveArithmetic>::Scalar,
+    <C as CurveArithmetic>::ProjectivePoint,
+    [u8; 32],
+);
 
 const KEY_SIZE: usize = 32;
 
@@ -147,7 +152,7 @@ pub fn derive_child_pubkey<C>(
     parent_pubkey: &C::ProjectivePoint,
     parent_chain_code: [u8; 32],
     child_number: &ChildIndex,
-) -> Result<(C::Scalar, C::ProjectivePoint, [u8; 32]), BIP32Error>
+) -> Result<ChildPubkeyDerivation<C>, BIP32Error>
 where
     C: CurveArithmetic<FieldBytesSize = U32>,
     C::FieldBytesSize: ModulusSize,

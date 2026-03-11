@@ -3,7 +3,7 @@
 
 use rand_core::CryptoRngCore;
 
-use crypto_bigint::modular::runtime_mod::DynResidueParams;
+use crypto_bigint::modular::MontyParams;
 use crypto_bigint::{Encoding, NonZero, RandomMod, Uint};
 
 pub trait PublicN<const L: usize>
@@ -25,5 +25,5 @@ where
 }
 
 pub trait PublicModParams<const L: usize> {
-    fn params(&self) -> DynResidueParams<L>;
+    fn params(&self) -> MontyParams<L>;
 }

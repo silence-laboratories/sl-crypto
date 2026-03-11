@@ -167,6 +167,12 @@ pub struct MsgRelay<Q> {
     inner: Arc<Mutex<Inner<Q>>>,
 }
 
+impl<Q: InputQueue> Default for MsgRelay<Q> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<Q: InputQueue> MsgRelay<Q> {
     pub fn new() -> Self {
         Self {

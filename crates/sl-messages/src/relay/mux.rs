@@ -136,13 +136,11 @@ impl MsgRelayMux {
                     // broadcast ASK message to all internal
                     // connections.
                     let _ = input_asks.send(msg.into());
-                } else {
-                    if let Some(q) = <&MsgId>::try_from(msg.as_ref())
-                        .ok()
-                        .and_then(|id| asks.lock().unwrap().remove(id))
-                    {
-                        q.push(msg);
-                    }
+                } else if let Some(q) = <&MsgId>::try_from(msg.as_ref())
+                    .ok()
+                    .and_then(|id| asks.lock().unwrap().remove(id))
+                {
+                    q.push(msg);
                 }
             }
         });
@@ -208,7 +206,10 @@ mod test {
     use std::time::Duration;
 
     use crate::{
-        message::{allocate_message, InstanceId, MessageTag, MsgId},
+        message::{
+            allocate_message, InstanceId, MessageTag, MsgId,
+            MESSAGE_HEADER_SIZE,
+        },
         relay::SimpleMessageRelay,
     };
 
@@ -216,6 +217,15 @@ mod test {
 
     fn mk_msg(id: &MsgId) -> Bytes {
         allocate_message(id, Duration::from_secs(10), 0, &[0, 255])
+    }
+
+    async fn next_message<R: Relay>(relay: &mut R) -> BytesMut {
+        loop {
+            let msg = relay.next().await.expect("relay closed unexpectedly");
+            if msg.len() > MESSAGE_HEADER_SIZE {
+                return msg;
+            }
+        }
     }
 
     //
@@ -253,7 +263,7 @@ mod test {
         // c2 -> s -> c1 -> m1
         c2.send(msg_0.clone()).await.unwrap();
 
-        let msg_0_in = m1.next().await.unwrap();
+        let msg_0_in = next_message(&mut m1).await;
 
         assert_eq!(msg_0, msg_0_in);
 

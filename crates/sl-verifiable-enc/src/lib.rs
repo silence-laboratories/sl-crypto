@@ -673,6 +673,11 @@ pub trait ExtractBit: Index<usize, Output = u8> {
 
     /// Get the length of the byte array.
     fn len(&self) -> usize;
+
+    /// Check whether the byte array is empty.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl<const N: usize> ExtractBit for [u8; N] {

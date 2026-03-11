@@ -325,7 +325,7 @@ impl<R: Relay> BufferedMsgRelay<R> {
                 return Ok(true);
             };
 
-            handler(&val, trailer, party_id)?;
+            handler(val, trailer, party_id)?;
 
             Ok::<_, E>(false)
         })

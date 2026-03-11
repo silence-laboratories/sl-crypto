@@ -1,5 +1,0 @@
-[advisories]
-ignore = [
-       # rsa 0.9.9, used by sl-verifiable-enc
-       "RUSTSEC-2023-0071"
-]

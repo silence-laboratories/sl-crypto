@@ -464,16 +464,18 @@ mod tests {
 
         let mut rng = rand::thread_rng();
         let poly1 = Polynomial::<ProjectivePoint>::random(&mut rng, 5);
-        let bytes = bincode::serialize(&poly1).unwrap();
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&poly1, &mut bytes).unwrap();
         let poly2: Polynomial<ProjectivePoint> =
-            bincode::deserialize(&bytes).unwrap();
+            ciborium::from_reader(bytes.as_slice()).unwrap();
 
         let g_poly1 = poly1.commit();
 
-        let bytes = bincode::serialize(&g_poly1).unwrap();
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&g_poly1, &mut bytes).unwrap();
 
         let g_poly2: GroupPolynomial<ProjectivePoint> =
-            bincode::deserialize(&bytes).unwrap();
+            ciborium::from_reader(bytes.as_slice()).unwrap();
 
         assert_eq!(poly1, poly2);
         assert_eq!(g_poly1, g_poly2);

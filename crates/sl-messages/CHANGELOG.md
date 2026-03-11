@@ -2,6 +2,14 @@
 
 All notable changes to `sl-messages` are documented in this file.
 
+## [1.2.1] - 2026-03-10
+
+### Fixed
+
+- Stabilized the `relay::mux::test::mux` test by ignoring echoed header-only
+  `ASK` frames before asserting on the relayed payload message.
+- Added the missing dependencies required to build with the `mux` feature.
+
 ## [1.2.0] - 2026-03-10
 
 ### Changed
