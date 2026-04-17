@@ -308,7 +308,6 @@ mod tests {
         enc_dec(sender, receiver);
     }
 
-
     #[test]
     fn aead_p256_aes256_gcm_derived_key_encrypt_decrypt() {
         use crate::proto::scheme::aead_p256::AeadP256Aes256GcmBuilder;
@@ -340,7 +339,8 @@ mod tests {
 
         let mut msg = BytesMut::from(msg);
 
-        let decrypted = bob.decrypt::<[u8; 32]>(&mut msg, ad.len(), 0).unwrap();
+        let decrypted =
+            bob.decrypt::<[u8; 32]>(&mut msg, ad.len(), 0).unwrap();
         assert_eq!(&*decrypted, &body);
     }
 }

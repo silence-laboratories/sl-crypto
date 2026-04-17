@@ -12,9 +12,8 @@ use aes_gcm::Aes256Gcm;
 use chacha20::hchacha;
 use chacha20poly1305::ChaCha20Poly1305;
 use p256::{
-    ecdh,
-    elliptic_curve::sec1::ToEncodedPoint,
-    EncodedPoint, PublicKey, SecretKey,
+    ecdh, elliptic_curve::sec1::ToEncodedPoint, EncodedPoint, PublicKey,
+    SecretKey,
 };
 use rand_core::CryptoRngCore;
 use sha2::{Digest, Sha256};
@@ -140,8 +139,12 @@ where
         receiver_index: usize,
         pk: &[u8],
     ) -> Result<(), PublicKeyError> {
-        let remote = PublicKey::from_sec1_bytes(pk).map_err(|_| PublicKeyError)?;
-        let shared = ecdh::diffie_hellman(self.secret.to_nonzero_scalar(), remote.as_affine());
+        let remote =
+            PublicKey::from_sec1_bytes(pk).map_err(|_| PublicKeyError)?;
+        let shared = ecdh::diffie_hellman(
+            self.secret.to_nonzero_scalar(),
+            remote.as_affine(),
+        );
 
         let shared_key = Zeroizing::new(hchacha::<U10>(
             GenericArray::from_slice(shared.raw_secret_bytes()),
