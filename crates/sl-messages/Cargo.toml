@@ -9,6 +9,7 @@ description = "Message exchange for MPC protocols"
 
 [dependencies]
 aead = { workspace = true }
+aes-gcm = { workspace = true }
 bytemuck = { workspace = true, features = [ "derive", "min_const_generics", "extern_crate_alloc" ] }
 bytes = { workspace = true }
 chacha20 = { workspace = true }
@@ -16,6 +17,7 @@ chacha20poly1305 = { workspace = true }
 derivation-path = { workspace = true, optional = true }
 fastwebsockets = { workspace = true, features = ["unstable-split"], optional = true }
 generic-array = { workspace = true, features = [ "zeroize" ] }
+p256 = { workspace = true, features = ["ecdh"] }
 rand_core = { workspace = true }
 sha2 = { workspace = true }
 signature = { workspace = true }

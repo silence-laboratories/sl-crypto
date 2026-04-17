@@ -24,6 +24,10 @@ pub mod encrypted {
             Scheme as DefaultEncryptionScheme,
         },
         scheme::aead::AeadX25519Builder,
+        scheme::aead_p256::{
+            AeadP256Aes256Gcm, AeadP256Aes256GcmBuilder, AeadP256Builder,
+            AeadP256ChaChaPoly1305, AeadP256ChaChaPoly1305Builder,
+        },
         scheme::passthrough::{
             PassThroughEncryption, PassThroughEncryptionBuilder,
         },
