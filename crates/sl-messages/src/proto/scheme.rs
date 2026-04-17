@@ -4,6 +4,7 @@
 use crate::proto::encrypted::MessageKey;
 
 pub mod aead;
+#[cfg(feature = "aead-p256")]
 pub mod aead_p256;
 pub mod passthrough;
 

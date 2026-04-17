@@ -308,6 +308,7 @@ mod tests {
         enc_dec(sender, receiver);
     }
 
+    #[cfg(feature = "aead-p256")]
     #[test]
     fn aead_p256_aes256_gcm_derived_key_encrypt_decrypt() {
         use crate::proto::scheme::aead_p256::AeadP256Aes256GcmBuilder;
