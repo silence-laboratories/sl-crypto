@@ -17,6 +17,7 @@ debug = true
 
 [workspace.dependencies]
 aead = { version = "0.5.2" }
+aes-gcm = { version = "0.10.3" }
 base64 = "0.22"
 bincode = "1"
 bs58 = "0.5.0"

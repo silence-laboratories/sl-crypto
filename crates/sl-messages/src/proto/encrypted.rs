@@ -307,4 +307,41 @@ mod tests {
 
         enc_dec(sender, receiver);
     }
+
+    #[cfg(feature = "aead-p256")]
+    #[test]
+    fn aead_p256_aes256_gcm_derived_key_encrypt_decrypt() {
+        use crate::proto::scheme::aead_p256::AeadP256Aes256GcmBuilder;
+
+        let msg_id = MsgId::from([1; 32]);
+        let ttl = Duration::from_secs(10);
+        let body = [2u8; 32];
+        let ad = [3u8; 23];
+
+        let mut rng = rand::thread_rng();
+
+        let mut alice = AeadP256Aes256GcmBuilder::new(&mut rng);
+        let mut bob = AeadP256Aes256GcmBuilder::new(&mut rng);
+
+        alice.receiver_public_key(1, bob.public_key()).unwrap();
+        bob.receiver_public_key(0, alice.public_key()).unwrap();
+
+        let mut alice = alice.build();
+        let bob = bob.build();
+
+        let msg = alice
+            .encryption_key(1)
+            .unwrap()
+            .message::<[u8; 32]>(Some(&ad), 0)
+            .with_header(&msg_id, ttl, 0)
+            .with_body(|b| b.copy_from_slice(&body))
+            .encrypt()
+            .unwrap();
+
+        let mut msg = BytesMut::from(msg);
+
+        let decrypted =
+            bob.decrypt::<[u8; 32]>(&mut msg, ad.len(), 0).unwrap();
+        assert_eq!(&*decrypted, &body);
+    }
 }
