@@ -46,7 +46,6 @@ impl NonceCounter {
     }
 }
 
-/// AEAD message key for [`AeadP256`] (ChaCha20-Poly1305 or AES-GCM, etc.).
 pub struct P256AeadMessageKey<S: KeyInit + AeadCore> {
     cipher: S,
     nonce: Nonce<S>,
