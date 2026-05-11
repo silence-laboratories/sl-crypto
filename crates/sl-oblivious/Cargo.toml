@@ -1,6 +1,6 @@
 [package]
 name = "sl-oblivious"
-version = "1.1.0"
+version = "1.1.1-pre.1"
 license-file = "../../LICENSE"
 edition = "2021"
 rust-version = "1.88"
@@ -11,12 +11,12 @@ description = "OT protocols"
 bytemuck = { workspace = true, features = [ "derive", "min_const_generics", "extern_crate_alloc" ] }
 elliptic-curve = { workspace = true }
 k256 = { workspace = true, features = [ "arithmetic" ]}
-merlin = { workspace = true }
+sl-transcript = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, optional = true }
 serde_arrays = { workspace = true, optional = true }
 thiserror = { workspace = true }
-zeroize = { workspace = true }
+zeroize = { workspace = true, features = ["zeroize_derive"] }
 
 [dev-dependencies]
 p256 = { workspace = true }

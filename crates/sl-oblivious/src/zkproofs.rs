@@ -3,6 +3,7 @@
 
 use elliptic_curve::{
     group::Curve,
+    sec1::{ModulusSize, ToEncodedPoint},
     subtle::{Choice, ConstantTimeEq},
     CurveArithmetic, Field,
 };
@@ -24,13 +25,14 @@ pub struct DLogProof<C: CurveArithmetic> {
 impl<C> DLogProof<C>
 where
     C: CurveArithmetic,
+    C::FieldBytesSize: ModulusSize,
+    C::ProjectivePoint: ToEncodedPoint<C>,
 {
     /// Prove knowledge of discrete logarithm.
-    // TODO: Do we need merlin?
     pub fn prove<R: CryptoRng + RngCore>(
         x: &C::Scalar,
         base_point: &C::ProjectivePoint,
-        transcript: &mut impl TranscriptProtocol<C>,
+        transcript: &mut impl TranscriptProtocol,
         rng: &mut R,
     ) -> Self {
         let r = C::Scalar::random(rng);
@@ -51,7 +53,7 @@ where
         &self,
         y: &C::ProjectivePoint,
         base_point: &C::ProjectivePoint,
-        transcript: &mut impl TranscriptProtocol<C>,
+        transcript: &mut impl TranscriptProtocol,
     ) -> Choice {
         let t = C::ProjectivePoint::from(self.t);
         let c = Self::fiat_shamir(y, &t, base_point, transcript);
@@ -66,28 +68,29 @@ where
         y: &C::ProjectivePoint,
         t: &C::ProjectivePoint,
         base_point: &C::ProjectivePoint,
-        transcript: &mut impl TranscriptProtocol<C>,
+        transcript: &mut impl TranscriptProtocol,
     ) -> C::Scalar {
-        transcript.append_point(b"y", y);
-        transcript.append_point(b"t", t);
-        transcript.append_point(b"base-point", base_point);
-        transcript.challenge_scalar(&DLOG_CHALLENGE_LABEL)
+        transcript.append_point::<C>(b"y", y);
+        transcript.append_point::<C>(b"t", t);
+        transcript.append_point::<C>(b"base-point", base_point);
+        transcript.challenge_scalar::<C>(&DLOG_CHALLENGE_LABEL)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use k256::{ProjectivePoint, Scalar, Secp256k1};
-    use merlin::Transcript;
     use rand::thread_rng;
+
+    use sl_transcript::Transcript;
 
     use super::DLogProof;
 
     #[test]
     pub fn dlog_proof() {
         use k256::{ProjectivePoint, Scalar};
-        use merlin::Transcript;
         use rand::thread_rng;
+        use sl_transcript::Transcript;
 
         let mut rng = thread_rng();
         let mut transcript = Transcript::new(b"test-dlog-proof");
@@ -143,7 +146,7 @@ mod tests {
     #[test]
     pub fn dlog_proof_fiat_shamir() {
         use k256::{ProjectivePoint, Scalar};
-        use merlin::Transcript;
+        use sl_transcript::Transcript;
 
         let mut rng = thread_rng();
         let mut transcript = Transcript::new(b"test-dlog-proof");

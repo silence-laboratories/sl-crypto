@@ -5,8 +5,9 @@ use std::{array, hint::black_box, ops::Neg};
 
 use elliptic_curve::{group::GroupEncoding, Field, Group};
 use k256::{ProjectivePoint, Scalar};
-use merlin::Transcript;
 use rand::prelude::*;
+
+use sl_transcript::{Transcript, TranscriptProtocol};
 
 use crate::{
     constants::ENDEMIC_OT_LABEL, params::consts::*, utils::ExtractBit,

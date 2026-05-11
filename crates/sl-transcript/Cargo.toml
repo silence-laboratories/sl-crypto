@@ -1,0 +1,18 @@
+[package]
+name = "sl-transcript"
+version = "0.1.0-pre.1"
+edition = "2021"
+rust-version = "1.88"
+license-file = "../../LICENSE"
+repository = "https://github.com/silence-laboratories/sl-crypto"
+description = "Transcript helpers"
+
+[dependencies]
+elliptic-curve = { workspace = true, features = ["sec1"] }
+merlin = { workspace = true, optional = true }
+sha3 = { version = "0.10", optional = true }
+
+[features]
+default = ["merlin"]
+merlin = ["dep:merlin"]
+shake128 = ["dep:sha3"]

@@ -20,7 +20,8 @@ use elliptic_curve::{
     subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
 };
 use k256::{Scalar, U256};
-use merlin::Transcript;
+
+use sl_transcript::{Transcript, TranscriptProtocol};
 
 use crate::endemic_ot::{
     EndemicOTMsg1, EndemicOTMsg2, EndemicOTReceiver, EndemicOTSender,

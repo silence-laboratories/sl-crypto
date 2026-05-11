@@ -2,7 +2,8 @@
 // This software is licensed under the Silence Laboratories License Agreement.
 
 use elliptic_curve::subtle::{ConditionallySelectable, ConstantTimeEq};
-use merlin::Transcript;
+
+use sl_transcript::{Transcript, TranscriptProtocol};
 
 use crate::{
     constants::*,
