@@ -1210,6 +1210,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha3"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77fd7028345d415a4034cf8777cd4f8ab1851274233b45f84e3d955502d93874"
+dependencies = [
+ "digest",
+ "keccak",
+]
+
+[[package]]
 name = "signature"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1293,16 +1303,16 @@ dependencies = [
 
 [[package]]
 name = "sl-oblivious"
-version = "1.1.0"
+version = "1.1.1-pre.1"
 dependencies = [
  "bytemuck",
  "elliptic-curve",
  "k256",
- "merlin",
  "p256",
  "rand",
  "serde",
  "serde_arrays",
+ "sl-transcript",
  "thiserror",
  "zeroize",
 ]
@@ -1329,6 +1339,15 @@ version = "1.1.0"
 dependencies = [
  "rand",
  "zeroize",
+]
+
+[[package]]
+name = "sl-transcript"
+version = "0.1.0-pre.1"
+dependencies = [
+ "elliptic-curve",
+ "merlin",
+ "sha3",
 ]
 
 [[package]]

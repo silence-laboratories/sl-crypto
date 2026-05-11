@@ -20,7 +20,8 @@ use elliptic_curve::{
     subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
     CurveArithmetic, FieldBytes, FieldBytesEncoding, PrimeField,
 };
-use merlin::Transcript;
+
+use sl_transcript::{Transcript, TranscriptProtocol};
 
 use crate::{
     constants::{

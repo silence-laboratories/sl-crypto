@@ -12,8 +12,9 @@
 use std::array;
 
 use elliptic_curve::{rand_core::CryptoRngCore, subtle::ConstantTimeEq};
-use merlin::Transcript;
 use rand::Rng;
+
+use sl_transcript::{Transcript, TranscriptProtocol};
 
 use crate::{
     constants::{
