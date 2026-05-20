@@ -1,11 +1,11 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::{array, hint::black_box, ops::Neg};
+use core::{array, hint::black_box, ops::Neg};
 
 use elliptic_curve::{group::GroupEncoding, Field, Group};
 use k256::{ProjectivePoint, Scalar};
-use rand::prelude::*;
+use rand_core::{CryptoRng, RngCore};
 
 use sl_transcript::{Transcript, TranscriptProtocol};
 
@@ -203,7 +203,7 @@ impl EndemicOTReceiver {
         rng: &mut R,
     ) -> Self {
         let next_state = Self {
-            packed_choice_bits: rng.gen(),
+            packed_choice_bits: random_bytes(rng),
             t_a_list: array::from_fn(|_| Scalar::random(&mut *rng)),
         };
 
@@ -286,8 +286,16 @@ impl ReceiverOutput {
     }
 }
 
+fn random_bytes<const N: usize, R: RngCore>(rng: &mut R) -> [u8; N] {
+    let mut out = [0u8; N];
+    rng.fill_bytes(&mut out);
+    out
+}
+
 #[cfg(test)]
 mod test {
+    use rand::Rng;
+
     use super::*;
 
     #[test]

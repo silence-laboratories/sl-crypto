@@ -10,7 +10,8 @@
 //! lambda_c = 256
 //! l = 2, rho = 1, OT_WIDTH = l + rho = 3
 
-use std::{array, ops::Neg};
+use alloc::boxed::Box;
+use core::{array, ops::Neg};
 
 use elliptic_curve::{
     consts::U32,

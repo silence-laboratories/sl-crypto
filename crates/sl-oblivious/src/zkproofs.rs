@@ -7,7 +7,7 @@ use elliptic_curve::{
     subtle::{Choice, ConstantTimeEq},
     CurveArithmetic, Field,
 };
-use rand::prelude::*;
+use rand_core::{CryptoRng, RngCore};
 
 use crate::{constants::DLOG_CHALLENGE_LABEL, utils::TranscriptProtocol};
 

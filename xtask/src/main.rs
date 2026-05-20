@@ -153,6 +153,7 @@ struct Package {
     name: String,
     features: Vec<String>,
     default_features: Vec<String>,
+    require_one_of: Vec<Vec<String>>,
 }
 
 fn implicit_optional_dependency_features(
@@ -198,14 +199,24 @@ fn workspace_packages(metadata: &Value) -> Result<Vec<Package>, String> {
         .as_array()
         .ok_or_else(|| "cargo metadata is missing packages".to_owned())?
         .iter()
-        .filter_map(|package| {
-            let id = package["id"].as_str()?;
+        .map(|package| -> Result<Option<Package>, String> {
+            let id = package["id"].as_str().ok_or_else(|| {
+                "cargo metadata package is missing id".to_owned()
+            })?;
             if !workspace_members.contains(id) {
-                return None;
+                return Ok(None);
             }
 
-            let name = package["name"].as_str()?.to_owned();
-            let feature_map = package["features"].as_object()?;
+            let name = package["name"]
+                .as_str()
+                .ok_or_else(|| {
+                    "cargo metadata package is missing name".to_owned()
+                })?
+                .to_owned();
+            let feature_map =
+                package["features"].as_object().ok_or_else(|| {
+                    "cargo metadata package is missing features".to_owned()
+                })?;
             let implicit_optional_features =
                 implicit_optional_dependency_features(package, feature_map);
             let mut features = feature_map
@@ -231,12 +242,22 @@ fn workspace_packages(metadata: &Value) -> Result<Vec<Package>, String> {
                 .collect::<Vec<_>>();
             default_features.sort();
 
-            Some(Package {
+            let feature_matrix =
+                &package["metadata"]["xtask"]["feature-matrix"];
+            let require_one_of = parse_require_one_of_groups(
+                &feature_matrix["require_one_of"],
+            )?;
+
+            Ok(Some(Package {
                 name,
                 features,
                 default_features,
-            })
+                require_one_of,
+            }))
         })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
         .collect::<Vec<_>>();
 
     packages.sort_by(|left, right| left.name.cmp(&right.name));
@@ -287,10 +308,12 @@ fn feature_combinations(
     let mut seen = BTreeSet::new();
 
     add_combination(
+        package,
         &mut combinations,
         &mut seen,
         "default".to_owned(),
         Vec::new(),
+        package.default_features.clone(),
     );
 
     if package.default_features.is_empty() {
@@ -300,17 +323,28 @@ fn feature_combinations(
             }
             let label = subset.join(",");
             let args = vec!["--features".to_owned(), label.clone()];
-            add_combination(&mut combinations, &mut seen, label, args);
+            add_combination(
+                package,
+                &mut combinations,
+                &mut seen,
+                label,
+                args,
+                subset,
+            );
         }
         return Ok(combinations);
     }
 
-    add_combination(
-        &mut combinations,
-        &mut seen,
-        "no-default".to_owned(),
-        vec!["--no-default-features".to_owned()],
-    );
+    if package.require_one_of.is_empty() {
+        add_combination(
+            package,
+            &mut combinations,
+            &mut seen,
+            "no-default".to_owned(),
+            vec!["--no-default-features".to_owned()],
+            Vec::new(),
+        );
+    }
 
     for subset in subsets(&package.features) {
         if subset.is_empty() {
@@ -318,6 +352,7 @@ fn feature_combinations(
         }
         let joined = subset.join(",");
         add_combination(
+            package,
             &mut combinations,
             &mut seen,
             format!("no-default+{joined}"),
@@ -326,6 +361,7 @@ fn feature_combinations(
                 "--features".to_owned(),
                 joined,
             ],
+            subset,
         );
     }
 
@@ -341,11 +377,15 @@ fn feature_combinations(
             continue;
         }
         let joined = subset.join(",");
+        let mut enabled_features = package.default_features.clone();
+        enabled_features.extend(subset.iter().cloned());
         add_combination(
+            package,
             &mut combinations,
             &mut seen,
             format!("default+{joined}"),
             vec!["--features".to_owned(), joined],
+            enabled_features,
         );
     }
 
@@ -353,14 +393,81 @@ fn feature_combinations(
 }
 
 fn add_combination(
+    package: &Package,
     combinations: &mut Vec<(String, Vec<String>)>,
     seen: &mut BTreeSet<Vec<String>>,
     label: String,
     args: Vec<String>,
+    enabled_features: Vec<String>,
 ) {
+    if !satisfies_require_one_of(&enabled_features, &package.require_one_of) {
+        return;
+    }
+
     if seen.insert(args.clone()) {
         combinations.push((label, args));
     }
+}
+
+fn satisfies_require_one_of(
+    enabled_features: &[String],
+    groups: &[Vec<String>],
+) -> bool {
+    groups.iter().all(|group| {
+        group
+            .iter()
+            .any(|feature| enabled_features.contains(feature))
+    })
+}
+
+fn parse_require_one_of_groups(
+    value: &Value,
+) -> Result<Vec<Vec<String>>, String> {
+    let Some(entries) = value.as_array() else {
+        return Ok(Vec::new());
+    };
+
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if entries.iter().all(|entry| entry.is_string()) {
+        let group = entries
+            .iter()
+            .map(|entry| {
+                entry.as_str().map(ToOwned::to_owned).ok_or_else(|| {
+                    "require_one_of entries must be strings".to_owned()
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if group.is_empty() {
+            return Err("require_one_of group cannot be empty".to_owned());
+        }
+        return Ok(vec![group]);
+    }
+
+    let mut groups = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let group = entry
+            .as_array()
+            .ok_or_else(|| {
+                "require_one_of must be an array of arrays of strings"
+                    .to_owned()
+            })?
+            .iter()
+            .map(|feature| {
+                feature.as_str().map(ToOwned::to_owned).ok_or_else(|| {
+                    "require_one_of entries must be strings".to_owned()
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if group.is_empty() {
+            return Err("require_one_of group cannot be empty".to_owned());
+        }
+        groups.push(group);
+    }
+
+    Ok(groups)
 }
 
 fn subsets(items: &[String]) -> Vec<Vec<String>> {
@@ -494,5 +601,41 @@ mod tests {
             implicit,
             BTreeSet::from(["fastwebsockets".to_owned(), "tokio".to_owned()])
         );
+    }
+
+    #[test]
+    fn require_one_of_skips_bare_no_default() {
+        let package = Package {
+            name: "demo".to_owned(),
+            features: vec!["a".to_owned(), "b".to_owned()],
+            default_features: vec!["a".to_owned()],
+            require_one_of: vec![vec!["a".to_owned()]],
+        };
+
+        let combinations = feature_combinations(&package).unwrap();
+        let labels = combinations
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect::<Vec<_>>();
+
+        assert!(!labels.contains(&"no-default".to_owned()));
+        assert!(labels.contains(&"default".to_owned()));
+        assert!(labels.contains(&"default+b".to_owned()));
+        assert!(labels.contains(&"no-default+a".to_owned()));
+        assert!(!labels.contains(&"no-default+b".to_owned()));
+    }
+
+    #[test]
+    fn requires_at_least_one_feature_from_each_group() {
+        let enabled = vec!["std".to_owned(), "shake128".to_owned()];
+        let groups = vec![
+            vec!["std".to_owned(), "merlin".to_owned()],
+            vec!["shake128".to_owned()],
+        ];
+
+        assert!(satisfies_require_one_of(&enabled, &groups));
+
+        let missing = vec!["shake128".to_owned()];
+        assert!(!satisfies_require_one_of(&missing, &groups));
     }
 }

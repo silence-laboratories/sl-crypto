@@ -6,19 +6,24 @@ This crate provides:
 
 - `message`: deterministic message IDs (`MsgId`), tags, headers, and message allocation.
 - `relay`: async relay abstraction (`Relay`) with in-memory, buffered, and optional mux/websocket backends.
-- `signed`: typed signed message verification helpers.
-- `encrypted`: encryption scheme abstractions and message builders.
+- `signed` (feature-gated): typed signed message verification helpers (`signature` dependency).
+- `encrypted` (feature-gated): encryption scheme abstractions and message builders (crypto deps).
 - `setup` (feature-gated): protocol participant setup, round tracking, and abort-message validation.
   Includes `setup::keys` with no-op key/signature types for trusted transports.
 
 ## Features
 
-Default features: `fast-ws`, `mux`, `setup`.
+Default features: `std`, `signed`, `encrypted`.
 
-- `setup`: protocol-round helpers in `sl_messages::setup`.
+`setup` and relay helpers that depend on Tokio are disabled unless you explicitly enable their feature flags.
+
+The `setup` feature requires atomic pointer support (`target_has_atomic = "ptr"`) because it uses `alloc::sync::Arc`.
+
+- `signed`: signed message helpers in `sl_messages::signed`.
+- `encrypted`: encryption helpers in `sl_messages::encrypted`.
+- `setup`: protocol-round helpers in `sl_messages::setup` (requires `signed`).
 - `mux`: relay multiplexer (`relay::mux`) for fan-in/fan-out message routing.
 - `fast-ws`: websocket relay (`ws::FastRelay`) based on `fastwebsockets`.
-- `simple-relay`: marker feature used by downstream integrations.
 
 ## Basic usage
 

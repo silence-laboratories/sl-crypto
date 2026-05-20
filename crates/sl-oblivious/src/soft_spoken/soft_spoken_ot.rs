@@ -9,10 +9,11 @@
 ///     where X = Z^{OT_WIDTH}_{q} and l_OT = L
 ///  Fiat-Shamir transform applied according to Section 5.1 of https://eprint.iacr.org/2023/765.pdf
 ///
-use std::array;
+use alloc::boxed::Box;
+use core::array;
 
-use elliptic_curve::{rand_core::CryptoRngCore, subtle::ConstantTimeEq};
-use rand::Rng;
+use elliptic_curve::subtle::ConstantTimeEq;
+use rand_core::{CryptoRngCore, RngCore};
 
 use sl_transcript::{Transcript, TranscriptProtocol};
 
@@ -453,14 +454,18 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
 
     for i in 0..LAMBDA_C_DIV_SOFT_SPOKEN_K {
         let ot_sender_messages: [[u8; LAMBDA_C_BYTES]; SOFT_SPOKEN_Q] =
-            array::from_fn(|_| rng.gen());
+            array::from_fn(|_| random_bytes(rng));
 
         sender_ot_seed.otp_enc_keys[i] = ot_sender_messages;
         receiver_ot_seed.otp_dec_keys[i] = ot_sender_messages;
     }
 
-    receiver_ot_seed.random_choices =
-        array::from_fn(|_| rng.gen_range(0..=SOFT_SPOKEN_Q - 1) as u8);
+    // Each choice is a 4-bit value in [0, SOFT_SPOKEN_Q), so mask off the
+    // upper bits after sampling random bytes.
+    rng.fill_bytes(&mut receiver_ot_seed.random_choices);
+    for choice in &mut receiver_ot_seed.random_choices {
+        *choice &= (SOFT_SPOKEN_Q - 1) as u8;
+    }
 
     for i in 0..(LAMBDA_C_DIV_SOFT_SPOKEN_K) {
         let choice = receiver_ot_seed.random_choices[i];
@@ -469,6 +474,12 @@ pub fn generate_all_but_one_seed_ot<R: CryptoRngCore>(
     }
 
     (sender_ot_seed, receiver_ot_seed)
+}
+
+fn random_bytes<const N: usize, R: RngCore>(rng: &mut R) -> [u8; N] {
+    let mut out = [0u8; N];
+    rng.fill_bytes(&mut out);
+    out
 }
 
 #[cfg(test)]

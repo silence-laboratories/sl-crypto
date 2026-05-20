@@ -1,3 +1,5 @@
+#![no_std]
+
 use elliptic_curve::{
     ff::PrimeField,
     ops::Reduce,

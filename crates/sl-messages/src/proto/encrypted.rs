@@ -1,7 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::{marker::PhantomData, ops::Deref, time::Duration};
+use alloc::{vec, vec::Vec};
+use core::{marker::PhantomData, ops::Deref, time::Duration};
 
 use bytemuck::{AnyBitPattern, NoUninit};
 use chacha20poly1305::ChaCha20Poly1305;
@@ -254,7 +255,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use core::time::Duration;
 
     use crate::proto::scheme::{
         passthrough::PassThroughEncryptionBuilder, EncryptionSchemeBuilder,

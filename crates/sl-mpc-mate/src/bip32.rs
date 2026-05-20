@@ -1,6 +1,11 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
+use alloc::string::String;
+
+#[cfg(not(feature = "std"))]
+use core::fmt;
+
 use base64::{engine::general_purpose, Engine as _};
 use bs58::Alphabet;
 use derivation_path::{ChildIndex, DerivationPath};
@@ -14,7 +19,6 @@ use elliptic_curve::{
 use hmac::{Hmac, Mac};
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
-use thiserror::Error;
 
 /// 4-byte Key fingerprint
 pub type KeyFingerPrint = [u8; 4];
@@ -99,21 +103,52 @@ fn base58_encode(serialized: &[u8; 78]) -> String {
 }
 
 /// Errors while performing keygen
-#[derive(Error, Debug)]
+#[cfg_attr(feature = "std", derive(thiserror::Error))]
+#[derive(Debug, Clone, Copy)]
 pub enum BIP32Error {
     /// Hardened child index is not supported
-    #[error("Hardened child index is not supported (yet)")]
+    #[cfg_attr(
+        feature = "std",
+        error("Hardened child index is not supported (yet)")
+    )]
     HardenedChildNotSupported,
     /// Invalid chain code
-    #[error("Invalid chain code")]
+    #[cfg_attr(feature = "std", error("Invalid chain code"))]
     InvalidChainCode,
     /// Invalid public key, it cannot be the point at infinity
-    #[error("Invalid public key, cannot be the point at infinity")]
+    #[cfg_attr(
+        feature = "std",
+        error("Invalid public key, cannot be the point at infinity")
+    )]
     PubkeyPointAtInfinity,
     /// Invalid child key, it cannot be greater than the group order (extremely unlikely)
-    #[error("Invalid child key, cannot be greater than the group order")]
+    #[cfg_attr(
+        feature = "std",
+        error("Invalid child key, cannot be greater than the group order")
+    )]
     InvalidChildScalar,
 }
+
+#[cfg(not(feature = "std"))]
+impl fmt::Display for BIP32Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            BIP32Error::HardenedChildNotSupported => {
+                "Hardened child index is not supported (yet)"
+            }
+            BIP32Error::InvalidChainCode => "Invalid chain code",
+            BIP32Error::PubkeyPointAtInfinity => {
+                "Invalid public key, cannot be the point at infinity"
+            }
+            BIP32Error::InvalidChildScalar => {
+                "Invalid child key, cannot be greater than the group order"
+            }
+        })
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl core::error::Error for BIP32Error {}
 
 impl<C> XPubKey<C>
 where
@@ -315,18 +350,24 @@ mod tests {
         )
         .unwrap();
 
+        #[cfg(feature = "std")]
         let xpub_string = xpub.to_string(true);
 
         assert_eq!(xpub.child_number, 0);
         assert_eq!(xpub.depth, 0);
         assert_eq!(xpub.parent_fingerprint, [0u8; 4]);
 
-        println!("{}", xpub_string);
-        println!("{}", hex::encode(root_chain_code));
-        println!(
-            "{}",
-            hex::encode(root_public_key.to_encoded_point(true).as_bytes())
-        );
+        #[cfg(feature = "std")]
+        {
+            println!("{}", xpub_string);
+            println!("{}", hex::encode(root_chain_code));
+            println!(
+                "{}",
+                hex::encode(
+                    root_public_key.to_encoded_point(true).as_bytes()
+                )
+            );
+        }
     }
 
     #[test]

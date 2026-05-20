@@ -1,7 +1,7 @@
 [package]
 name = "sl-verifiable-enc"
 license-file = "../../LICENSE"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 rust-version = "1.88"
 repository = "https://github.com/silence-laboratories/sl-crypto"
@@ -14,6 +14,7 @@ ff = { workspace = true }
 group = { workspace = true }
 num-traits = { workspace = true }
 rand = { workspace = true }
+rand_core = { workspace = true }
 rand_chacha = { workspace = true }
 rsa = { workspace = true }
 sha2 = { workspace = true }
@@ -23,3 +24,5 @@ thiserror = { workspace = true }
 [dev-dependencies]
 curve25519-dalek = { workspace = true, features = ["group"] }
 k256 = { workspace = true, features = ["alloc", "arithmetic", "serde"] }
+rand = { workspace = true, features = ["std", "std_rng"] }
+rsa  = { workspace = true, features = ["std"] }

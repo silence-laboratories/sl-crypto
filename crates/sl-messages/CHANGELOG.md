@@ -2,6 +2,22 @@
 
 All notable changes to `sl-messages` are documented in this file.
 
+## [1.3.0-pre.1] - 2026-05-23
+
+### Added
+
+- Added a `std` feature and made the crate `no_std`-friendly when it is disabled.
+- Added explicit `signed` and `encrypted` feature flags for the message signing and encryption APIs.
+
+### Changed
+
+- Reworked the default feature set to `std`, `signed`, and `encrypted`.
+- Made the signing and encryption dependencies optional and enabled them only through the corresponding feature flags.
+- Gated relay backends and helpers (`adversary`, `simple`, `stats`, `trace`, `mux`, and `fast-ws`) behind `std`.
+- Updated `setup` and `aead-p256` to depend on the appropriate feature gates.
+- Switched internal message, relay, and setup code to `core`/`alloc` so it builds without `std`.
+- Documented that `setup` requires `target_has_atomic = "ptr"` because it uses `alloc::sync::Arc`.
+
 ## [1.2.1] - 2026-03-10
 
 ### Fixed

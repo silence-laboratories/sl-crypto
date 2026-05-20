@@ -1,6 +1,6 @@
 [package]
 name = "sl-oblivious"
-version = "1.1.1-pre.1"
+version = "1.2.0-pre.1"
 license-file = "../../LICENSE"
 edition = "2021"
 rust-version = "1.88"
@@ -13,13 +13,20 @@ elliptic-curve = { workspace = true }
 k256 = { workspace = true, features = [ "arithmetic" ]}
 sl-transcript = { workspace = true }
 rand = { workspace = true }
+rand_core = { workspace = true }
 serde = { workspace = true, optional = true }
 serde_arrays = { workspace = true, optional = true }
-thiserror = { workspace = true }
-zeroize = { workspace = true, features = ["zeroize_derive"] }
+zeroize = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-p256 = { workspace = true }
+rand = { workspace = true, features = ["std", "std_rng"] }
+p256 = { workspace = true, features = ["arithmetic"] }
 
 [features]
+default = ["merlin"]
+merlin = ["sl-transcript/merlin"]
+shake128 = ["sl-transcript/shake128"]
 serde = [ "dep:serde", "serde_arrays", "serde/derive", "k256/serde" ]
+
+[package.metadata.xtask.feature-matrix]
+require_one_of = [["merlin", "shake128"]]

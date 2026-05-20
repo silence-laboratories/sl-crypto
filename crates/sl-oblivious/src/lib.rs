@@ -1,6 +1,10 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
+#![no_std]
+
+extern crate alloc;
+
 /// Domain labels
 pub mod constants;
 
@@ -18,7 +22,8 @@ pub mod rvole;
 
 /// Utility functions
 pub mod utils {
-    use std::ops::Index;
+    use alloc::vec::Vec;
+    use core::ops::Index;
 
     pub use sl_transcript::TranscriptProtocol;
 
