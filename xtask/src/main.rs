@@ -154,6 +154,7 @@ struct Package {
     features: Vec<String>,
     default_features: Vec<String>,
     require_one_of: Vec<Vec<String>>,
+    feature_map: serde_json::Map<String, Value>,
 }
 
 fn implicit_optional_dependency_features(
@@ -213,12 +214,14 @@ fn workspace_packages(metadata: &Value) -> Result<Vec<Package>, String> {
                     "cargo metadata package is missing name".to_owned()
                 })?
                 .to_owned();
-            let feature_map =
-                package["features"].as_object().ok_or_else(|| {
+            let feature_map = package["features"]
+                .as_object()
+                .ok_or_else(|| {
                     "cargo metadata package is missing features".to_owned()
-                })?;
+                })?
+                .clone();
             let implicit_optional_features =
-                implicit_optional_dependency_features(package, feature_map);
+                implicit_optional_dependency_features(package, &feature_map);
             let mut features = feature_map
                 .keys()
                 .filter(|feature| feature.as_str() != "default")
@@ -253,6 +256,7 @@ fn workspace_packages(metadata: &Value) -> Result<Vec<Package>, String> {
                 features,
                 default_features,
                 require_one_of,
+                feature_map,
             }))
         })
         .collect::<Result<Vec<_>, _>>()?
@@ -400,11 +404,17 @@ fn add_combination(
     args: Vec<String>,
     enabled_features: Vec<String>,
 ) {
-    if !satisfies_require_one_of(&enabled_features, &package.require_one_of) {
+    let normalized_enabled_features =
+        resolve_feature_closure(&package.feature_map, &enabled_features);
+
+    if !satisfies_require_one_of(
+        &normalized_enabled_features,
+        &package.require_one_of,
+    ) {
         return;
     }
 
-    if seen.insert(args.clone()) {
+    if seen.insert(normalized_enabled_features) {
         combinations.push((label, args));
     }
 }
@@ -468,6 +478,42 @@ fn parse_require_one_of_groups(
     }
 
     Ok(groups)
+}
+
+fn resolve_feature_closure(
+    feature_map: &serde_json::Map<String, Value>,
+    enabled_features: &[String],
+) -> Vec<String> {
+    let mut closure =
+        enabled_features.iter().cloned().collect::<BTreeSet<_>>();
+
+    loop {
+        let mut changed = false;
+        let current = closure.clone();
+        for feature in current {
+            let Some(members) =
+                feature_map.get(&feature).and_then(Value::as_array)
+            else {
+                continue;
+            };
+
+            for member in members {
+                let Some(member) = member.as_str() else {
+                    continue;
+                };
+
+                if closure.insert(member.to_owned()) {
+                    changed = true;
+                }
+            }
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    closure.into_iter().collect()
 }
 
 fn subsets(items: &[String]) -> Vec<Vec<String>> {
@@ -610,6 +656,14 @@ mod tests {
             features: vec!["a".to_owned(), "b".to_owned()],
             default_features: vec!["a".to_owned()],
             require_one_of: vec![vec!["a".to_owned()]],
+            feature_map: serde_json::json!({
+                "default": ["a"],
+                "a": [],
+                "b": [],
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
         };
 
         let combinations = feature_combinations(&package).unwrap();
@@ -618,11 +672,7 @@ mod tests {
             .map(|(label, _)| label)
             .collect::<Vec<_>>();
 
-        assert!(!labels.contains(&"no-default".to_owned()));
-        assert!(labels.contains(&"default".to_owned()));
-        assert!(labels.contains(&"default+b".to_owned()));
-        assert!(labels.contains(&"no-default+a".to_owned()));
-        assert!(!labels.contains(&"no-default+b".to_owned()));
+        assert_eq!(labels, vec!["default", "no-default+a,b"]);
     }
 
     #[test]
@@ -637,5 +687,31 @@ mod tests {
 
         let missing = vec!["shake128".to_owned()];
         assert!(!satisfies_require_one_of(&missing, &groups));
+    }
+
+    #[test]
+    fn deduplicates_feature_combinations_with_same_effective_features() {
+        let package = Package {
+            name: "demo".to_owned(),
+            features: vec!["rayon".to_owned(), "std".to_owned()],
+            default_features: vec!["std".to_owned()],
+            require_one_of: Vec::new(),
+            feature_map: serde_json::json!({
+                "default": ["std"],
+                "std": [],
+                "rayon": ["std"],
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        };
+
+        let labels = feature_combinations(&package)
+            .unwrap()
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect::<Vec<_>>();
+
+        assert_eq!(labels, vec!["default", "no-default", "no-default+rayon"]);
     }
 }
