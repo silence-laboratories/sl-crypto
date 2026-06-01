@@ -7,7 +7,8 @@
 //! [`crate::setup::PreSignSetupMessage`] and
 //! [`crate::setup::SignSetupMessage`].
 
-use std::{marker::PhantomData, str::FromStr, sync::Arc, time::Duration};
+use alloc::{sync::Arc, vec::Vec};
+use core::{marker::PhantomData, str::FromStr, time::Duration};
 
 use derivation_path::DerivationPath;
 use signature::{SignatureEncoding, Signer, Verifier};

@@ -4,10 +4,11 @@
 use std::mem;
 use std::ops::Index;
 
-use aead::rand_core::SeedableRng;
 use crypto_bigint::U64;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 mod constants;
@@ -282,7 +283,9 @@ impl BinaryArithmeticShare {
         }
     }
 }
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq)]
+
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct BinaryString {
     pub length: u64,
     pub value: Vec<u8>,
@@ -449,7 +452,9 @@ impl BinaryString {
         self.value.extend_from_slice(other);
     }
 }
-#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
+
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, Copy)]
 pub struct BinaryShare {
     pub value1: Binary,
     pub value2: Binary,
@@ -500,7 +505,8 @@ impl BinaryShare {
     }
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Default, Debug)]
 pub struct BinaryStringShare {
     pub length: u64,
     pub value1: Vec<u8>,

@@ -10,55 +10,59 @@ members = [
     "crates/sl-messages",
     "crates/sl-shamir",
     "crates/sl-compute-common",
+    "crates/sl-transcript",
 ]
 
 [profile.bench]
 debug = true
 
 [workspace.dependencies]
-aead = { version = "0.5.2" }
-aes-gcm = { version = "0.10.3" }
-base64 = "0.22"
+aead = { version = "0.5.2", default-features = false }
+aes-gcm = { version = "0.10.3", default-features = false }
+base64 = { version = "0.22", default-features = false }
 bincode = "1"
-bs58 = "0.5.0"
-bytemuck = { version = "1.22" }
-bytes = "1"
-ciborium = "0.2.2"
-chacha20 = { version = "0.9" }
-chacha20poly1305 = { version = "0.10.1" }
-criterion = "0.5"
+bs58 = { version = "0.5.0", default-features = false }
+bytemuck = { version = "1.22", default-features = false }
+bytes = {version = "1", default-features = false }
+chacha20 = { version = "0.9", default-features = false }
+chacha20poly1305 = { version = "0.10.1", default-features = false }
+ciborium = { version = "0.2.2", default-features = false }
+criterion = { version = "0.5", default-features = false }
 crypto-bigint = { version = "0.6.1", default-features = false }
 crypto-primes = { version = "0.6", default-features = false }
 curve25519-dalek = { version = "4.1.3", default-features = false }
-derivation-path = "0.2.0"
-digest = "0.10"
-elliptic-curve = { version = "0.13" }
-fastwebsockets = { version = "0.10" }
-ff = "0.13.0"
-generic-array = { version = "0.14.7" }
-group = "0.13.0"
-hex = "0.4.3"
-hmac = { version = "0.12.1" }
+derivation-path = { version = "0.2.0", default-features = false }
+digest = { version = "0.10", default-features = false }
+elliptic-curve = { version = "0.13", default-features = false }
+fastwebsockets = { version = "0.10", default-features = false }
+ff = { version = "0.13.0", default-features = false }
+generic-array = { version = "0.14.7", default-features = false }
+group = { version = "0.13.0", default-features = false }
+hex = { version = "0.4.3", default-features = false }
+hmac = { version = "0.12.1", default-features = false }
 k256 = { version = "0.13", default-features = false }
-lazy_static = "1.4"
-merlin = "3.0.0"
+lazy_static = { version = "1.4", default-features = false }
+merlin = { version = "3.0.0", default-features = false }
 num-bigint-dig = "0.8.6"
-num-traits = "0.2"
-p256 = { version = "0.13" }
+num-traits = { version = "0.2", default-features = false }
+p256 = { version = "0.13", default-features = false }
 quickcheck = "1"
-rand = "0.8.5"
-rand_chacha = "0.3.1"
+rand = { version = "0.8.5", default-features = false }
+rand_chacha = { version = "0.3.1", default-features = false }
 rand_core = { version = "0.6", default-features = false }
-rayon = { version = "1" }
-ripemd = "0.1.3"
-rsa = "0.9.10"
+rayon = { version = "1", default-features = false }
+ripemd = { version = "0.1.3", default-features = false }
+rsa = { version = "0.9.10", default-features = false }
 serde = { version = "1.0.218", default-features = false }
 serde_arrays = { version = "0.1" }
-serde_json = "1.0"
-sha2 = "0.10.8"
-signature = { version = "2.2.0" }
+serde_json = { version = "1.0", default-features = false }
+sha2 = { version = "0.10.9", default-features = false }
+sha3 = { version = "0.10.9", default-features = false }
+signature = { version = "2.2.0", default-features = false }
 subtle = { version = "2.5", default-features = false }
-thiserror = "1"
-tokio = { version = "1.44" }
-x25519-dalek = { version = "2.0.0" }
-zeroize = { version = "1.6" }
+thiserror = { version = "1", default-features = false }
+tokio = { version = "1.44", default-features = false }
+x25519-dalek = { version = "2.0.0", default-features = false }
+zeroize = { version = "1.6", default-features = false }
+
+sl-transcript = { path = "crates/sl-transcript", version = "0.1.0-pre.2", default-features = false }

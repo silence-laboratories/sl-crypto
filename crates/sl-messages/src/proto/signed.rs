@@ -1,7 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::{marker::PhantomData, ops::Range, time::Duration};
+use alloc::{vec, vec::Vec};
+use core::{marker::PhantomData, ops::Range, time::Duration};
 
 use bytemuck::{AnyBitPattern, NoUninit};
 use bytes::Bytes;

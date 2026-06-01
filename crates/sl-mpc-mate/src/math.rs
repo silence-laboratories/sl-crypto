@@ -1,7 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::{
+use alloc::{vec, vec::Vec};
+use core::{
     fmt::Debug,
     hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
@@ -17,6 +18,13 @@ use crate::matrix::matrix_inverse;
 
 /// A polynomial with coefficients of type `Scalar`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "G::Scalar: serde::Serialize",
+        deserialize = "G::Scalar: serde::de::DeserializeOwned"
+    ))
+)]
 #[derive(PartialEq, Eq)]
 pub struct Polynomial<G>
 where
@@ -42,9 +50,9 @@ where
     G: Group,
     G::Scalar: ser::Serializable,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list()
-            .entry(&format!("Polynomial length {}", self.coeffs.len()))
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Polynomial")
+            .field("len", &self.coeffs.len())
             .finish()
     }
 }
@@ -380,8 +388,6 @@ mod ser {
 
 #[cfg(feature = "serde")]
 mod ser {
-    use std::mem::size_of;
-
     use super::*;
 
     pub trait Serializable:
@@ -421,16 +427,18 @@ mod ser {
         where
             D: serde::de::Deserializer<'de>,
         {
-            let data = <Vec<Vec<u8>>>::deserialize(deserializer)?;
+            let data: Vec<Vec<u8>> =
+                serde::Deserialize::deserialize(deserializer)?;
             let mut coeffs = Vec::with_capacity(data.len());
 
             for coeff_data in &data {
-                if coeff_data.len() != size_of::<G::Repr>() {
+                let repr = G::Repr::default();
+                if coeff_data.len() != repr.as_ref().len() {
                     return Err(serde::de::Error::custom(
                         "Invalid group element",
                     ));
                 }
-                let mut repr = G::Repr::default();
+                let mut repr = repr;
                 repr.as_mut().copy_from_slice(coeff_data);
                 let opt = G::from_bytes(&repr);
 

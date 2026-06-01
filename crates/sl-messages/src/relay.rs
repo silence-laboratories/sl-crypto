@@ -1,7 +1,7 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::{future::Future, time::Duration};
+use core::{future::Future, time::Duration};
 
 pub use bytes::{Bytes, BytesMut};
 
@@ -9,9 +9,13 @@ use crate::message::*;
 
 mod buffered;
 
+#[cfg(feature = "std")]
 pub mod adversary;
+#[cfg(feature = "std")]
 pub mod simple;
+#[cfg(feature = "std")]
 pub mod stats;
+#[cfg(feature = "std")]
 pub mod trace;
 
 #[cfg(feature = "mux")]
@@ -20,6 +24,7 @@ pub mod mux;
 #[cfg(feature = "setup")]
 pub use buffered::BufferedError;
 pub use buffered::BufferedMsgRelay;
+#[cfg(feature = "std")]
 pub use simple::SimpleMessageRelay;
 
 #[derive(Debug, Copy, Clone)]
@@ -156,24 +161,32 @@ impl<R: Relay> Relay for SkipAsk<R> {
         ttl: Duration,
     ) -> Result<(), MessageSendError> {
         if self.skip {
-            return Ok(());
+            Ok(())
+        } else {
+            self.relay.ask(id, ttl).await
         }
-        self.feed(allocate_message(id, ttl, 0, &[])).await
+    }
+
+    async fn send(&self, message: Bytes) -> Result<(), MessageSendError> {
+        self.relay.send(message).await
     }
 
     async fn feed(&self, message: Bytes) -> Result<(), MessageSendError> {
-        if self.skip && message.len() == MESSAGE_HEADER_SIZE {
-            return Ok(());
-        }
         self.relay.feed(message).await
     }
 
-    fn flush(&self) -> impl Future<Output = Result<(), MessageSendError>> {
-        self.relay.flush()
+    async fn flush(&self) -> Result<(), MessageSendError> {
+        self.relay.flush().await
     }
 
-    fn next(&mut self) -> impl Future<Output = Option<BytesMut>> {
-        self.relay.next()
+    async fn next(&mut self) -> Option<BytesMut> {
+        self.relay.next().await
+    }
+}
+
+impl<R: SplitSender> SplitSender for SkipAsk<R> {
+    fn split_sender(&self) -> impl Sender + 'static {
+        self.relay.split_sender()
     }
 }
 

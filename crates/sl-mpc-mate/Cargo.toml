@@ -1,6 +1,6 @@
 [package]
 name = "sl-mpc-mate"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 license-file = "../../LICENSE"
 description = "Utilities for secure multi-party computation"
@@ -8,31 +8,29 @@ rust-version = "1.88"
 repository = "https://github.com/silence-laboratories/sl-crypto"
 
 [dependencies]
-base64 = { workspace = true }
-bs58 = { workspace = true }
+base64 = { workspace = true, features = ["alloc"] }
+bs58 = { workspace = true, features = ["alloc"] }
 derivation-path = { workspace = true }
-elliptic-curve = { workspace = true }
-hex = { workspace = true }
+elliptic-curve = { workspace = true, features = ["arithmetic", "sec1"] }
+hex = { workspace = true, features = ["alloc"] }
 hmac = { workspace = true }
-k256 = { workspace = true, features = ["arithmetic"] }
-rand = { workspace = true }
 rand_core = { workspace = true }
 ripemd = { workspace = true }
 sha2 = { workspace = true }
-subtle = { workspace = true, features = ["const-generics",] }
-thiserror = { workspace = true }
-zeroize = { workspace = true, features = [ "derive" ] }
+subtle = { workspace = true, features = ["const-generics"] }
+zeroize = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true, optional = true }
 
 rayon = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, features = ["derive"] }
 
 [dev-dependencies]
 ciborium = { workspace = true }
+k256 = { workspace = true, features = ["arithmetic"] }
+rand = { workspace = true, features = ["std", "std_rng"] }
 
 [features]
-serde = [
-  "dep:serde",
-  "serde/serde_derive",
-  "elliptic-curve/arithmetic",
-  "k256/serde",
-]
+default = ["std"]
+std = ["dep:thiserror"]
+rayon = ["std", "dep:rayon"]
+serde = ["dep:serde", "k256/serde", "elliptic-curve/serde"]

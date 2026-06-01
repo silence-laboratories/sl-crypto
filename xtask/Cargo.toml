@@ -7,4 +7,4 @@ rust-version = "1.88"
 license = "Apache-2.0"
 
 [dependencies]
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["alloc"] }

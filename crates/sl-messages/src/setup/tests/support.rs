@@ -1,7 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::{sync::Mutex, time::Duration};
+use core::time::Duration;
+use std::sync::Mutex;
 
 use crate::{
     message::{InstanceId, MsgId},

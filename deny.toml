@@ -69,6 +69,13 @@ license-files = [
     { path = "../../LICENSE", hash = 0x44125835 },
 ]
 
+[[licenses.clarify]]
+crate = "sl-transcript"
+expression = "LicenseRef-Silence-Labs"
+license-files = [
+    { path = "../../LICENSE", hash = 0x44125835 },
+]
+
 [bans]
 skip = [
     "crypto-bigint",

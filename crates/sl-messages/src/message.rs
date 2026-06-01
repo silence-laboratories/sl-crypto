@@ -1,8 +1,9 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::{fmt, ops::Deref, time::Duration};
+use core::{fmt, ops::Deref, time::Duration};
 
+use alloc::vec::Vec;
 use bytemuck::{AnyBitPattern, NoUninit};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroize;
@@ -283,6 +284,8 @@ pub fn allocate_message(
 
 #[cfg(test)]
 mod test {
+    use core::time::Duration;
+
     use super::*;
 
     #[test]
@@ -341,6 +344,7 @@ mod test {
         ] {
             MsgHdr::encode(&mut hdr, &id, Duration::from_secs(s), 0);
 
+            #[cfg(feature = "std")]
             eprintln!("{} {:?}", s, hdr);
 
             let h1 = <&MsgHdr>::try_from(hdr.as_slice()).unwrap();
