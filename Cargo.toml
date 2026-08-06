@@ -65,4 +65,4 @@ tokio = { version = "1.44", default-features = false }
 x25519-dalek = { version = "2.0.0", default-features = false }
 zeroize = { version = "1.6", default-features = false }
 
-sl-transcript = { path = "crates/sl-transcript", version = "0.1.0-pre.2", default-features = false }
+sl-transcript = { path = "crates/sl-transcript", version = "0.1.0-pre.2" }
