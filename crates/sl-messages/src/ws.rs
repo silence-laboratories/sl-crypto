@@ -113,16 +113,14 @@ impl FastRelay {
                         Payload::Bytes(msg) => msg,
 
                         Payload::Owned(vec) => {
-                            // There is no direct way to build
-                            // BytesMut from Vec<u8>.  But we can
-                            // create Bytes::from(vec)
-                            let bytes = Bytes::from(vec);
-
-                            // and then convert Bytes to BytesMut
-                            bytes.try_into_mut().unwrap()
+                            BytesMut::from(Bytes::from(vec))
                         }
 
-                        payload => BytesMut::from(&*payload),
+                        Payload::BorrowedMut(payload) => {
+                            BytesMut::from(&*payload)
+                        }
+
+                        Payload::Borrowed(payload) => BytesMut::from(payload),
                     };
 
                     if tx.send(msg).await.is_err() {
