@@ -20,6 +20,7 @@ x25519-dalek = { workspace = true, features = ["alloc", "reusable_secrets", "zer
 zeroize = { workspace = true, features = [ "derive" ] }
 
 [dev-dependencies]
+hex = { workspace = true, features = ["alloc"] }
 rand = { workspace = true, features = ["std", "std_rng"] }
 rand_chacha = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time"] }

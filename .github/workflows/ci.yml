@@ -62,5 +62,9 @@ jobs:
         run: rustup toolchain install 1.88 --profile minimal
       - name: Use Rust 1.88
         run: rustup default 1.88
+      - name: Run published-version compatibility tests
+        run: |
+          cargo test --locked --release --package sl-msg-encrypt --test published_pre3_compatibility
+          cargo test --locked --release --package sl-messages --test published_pre1_compatibility
       - name: Run tests for every crate and feature combination
         run: cargo run --locked --package xtask -- feature-matrix test -- --locked --release
