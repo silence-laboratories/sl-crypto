@@ -21,6 +21,7 @@ dependencies = [
  "cfg-if",
  "cipher",
  "cpufeatures",
+ "zeroize",
 ]
 
 [[package]]
@@ -35,6 +36,7 @@ dependencies = [
  "ctr",
  "ghash",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -593,6 +595,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hybrid-array"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2d35805454dc9f8662a98d6d61886ffe26bd465f5960e0e55345c70d5c0d2a9"
+dependencies = [
+ "typenum",
+ "zeroize",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -649,6 +661,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kem"
+version = "0.3.0-pre.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b8645470337db67b01a7f966decf7d0bafedbae74147d33e641c67a91df239f"
+dependencies = [
+ "rand_core",
+ "zeroize",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -702,6 +724,19 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "ml-kem"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8de49b3df74c35498c0232031bb7e85f9389f913e2796169c8ab47a53993a18f"
+dependencies = [
+ "hybrid-array",
+ "kem",
+ "rand_core",
+ "sha3",
+ "zeroize",
 ]
 
 [[package]]
@@ -814,6 +849,7 @@ dependencies = [
  "cpufeatures",
  "opaque-debug",
  "universal-hash",
+ "zeroize",
 ]
 
 [[package]]
@@ -1139,22 +1175,17 @@ dependencies = [
 
 [[package]]
 name = "sl-messages"
-version = "1.3.0-pre.1"
+version = "1.3.0-pre.2"
 dependencies = [
- "aead",
- "aes-gcm",
  "bytemuck",
  "bytes",
- "chacha20",
- "chacha20poly1305",
  "derivation-path",
  "fastwebsockets",
- "generic-array",
- "p256",
  "rand",
- "rand_core",
+ "rand_chacha",
  "sha2",
  "signature",
+ "sl-msg-encrypt",
  "tokio",
  "x25519-dalek",
  "zeroize",
@@ -1189,6 +1220,29 @@ version = "1.0.1-beta.1"
 dependencies = [
  "bincode",
  "serde",
+]
+
+[[package]]
+name = "sl-msg-encrypt"
+version = "0.2.0-pre.5"
+dependencies = [
+ "aead",
+ "aes",
+ "aes-gcm",
+ "bytemuck",
+ "chacha20",
+ "chacha20poly1305",
+ "generic-array",
+ "hybrid-array",
+ "ml-kem",
+ "p256",
+ "poly1305",
+ "rand",
+ "rand_chacha",
+ "rand_core",
+ "sha2",
+ "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]

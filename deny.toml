@@ -28,6 +28,13 @@ license-files = [
 ]
 
 [[licenses.clarify]]
+crate = "sl-msg-encrypt"
+expression = "LicenseRef-Silence-Labs"
+license-files = [
+    { path = "../../LICENSE", hash = 0x44125835 },
+]
+
+[[licenses.clarify]]
 crate = "sl-mpc-mate"
 expression = "LicenseRef-Silence-Labs"
 license-files = [

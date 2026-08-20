@@ -8,8 +8,6 @@ extern crate alloc;
 pub mod message;
 pub mod relay;
 
-pub(crate) mod proto;
-
 pub mod pairs;
 
 #[cfg(feature = "setup")]
@@ -18,33 +16,10 @@ pub mod setup;
 pub use bytes::{Bytes, BytesMut};
 
 #[cfg(feature = "signed")]
-pub mod signed {
-    pub use crate::proto::signed::SignedMessage;
-}
+pub mod signed;
 
 #[cfg(feature = "encrypted")]
-pub mod encrypted {
-    pub use crate::proto::{
-        encrypted::{
-            EncryptedMessage, MessageBuilder, MessageKey,
-            Scheme as DefaultEncryptionScheme,
-        },
-        scheme::aead::AeadX25519Builder,
-        scheme::passthrough::{
-            PassThroughEncryption, PassThroughEncryptionBuilder,
-        },
-        scheme::{
-            EncryptionError, EncryptionScheme, EncryptionSchemeBuilder,
-            PublicKeyError,
-        },
-    };
-
-    #[cfg(feature = "aead-p256")]
-    pub use crate::proto::scheme::aead_p256::{
-        AeadP256Aes256Gcm, AeadP256Aes256GcmBuilder, AeadP256Builder,
-        AeadP256ChaChaPoly1305, AeadP256ChaChaPoly1305Builder,
-    };
-}
+pub mod encrypted;
 
 #[cfg(feature = "fast-ws")]
 pub mod ws;
