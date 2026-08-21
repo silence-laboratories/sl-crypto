@@ -28,8 +28,11 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "tim
 [features]
 default = ["std", "signed", "encrypted"]
 std = []
-encrypted = ["dep:sl-msg-encrypt", "sl-msg-encrypt/aead-x25519", "sl-msg-encrypt/chacha20poly1305"]
-aead-p256 = ["encrypted", "sl-msg-encrypt/aead-p256"]
+encrypted = [
+    "dep:sl-msg-encrypt",
+    "sl-msg-encrypt/aead-x25519",
+    "sl-msg-encrypt/chacha20poly1305"
+]
 mux = [ "std", "tokio/macros", "tokio/sync", "tokio/rt" ]
 fast-ws = [ "std", "fastwebsockets", "tokio/macros", "tokio/sync", "tokio/rt" ]
 signed = ["dep:signature"]

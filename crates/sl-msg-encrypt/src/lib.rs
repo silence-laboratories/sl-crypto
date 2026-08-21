@@ -80,11 +80,16 @@ pub struct PublicKeyError;
 pub struct EncryptionError;
 
 #[cfg(feature = "aead-x25519")]
-pub mod aead;
+pub mod aead_x25519;
+#[cfg(feature = "aead-x25519")]
+pub use aead_x25519 as aead;
 #[cfg(feature = "aead-p256")]
 pub mod aead_p256;
+#[cfg(any(feature = "aead-x25519", feature = "aead-p256"))]
+mod aead_session;
 #[cfg(feature = "ml-kem")]
 pub mod ml;
+
 pub mod passthrough;
 
 /// Builds an [`EncryptionSession`] backed by one or more KEM operations.

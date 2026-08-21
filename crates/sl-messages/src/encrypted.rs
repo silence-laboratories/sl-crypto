@@ -20,7 +20,7 @@ use bytemuck::{AnyBitPattern, NoUninit};
 use zeroize::Zeroize;
 
 pub use sl_msg_encrypt::{
-    aead::AeadX25519Builder,
+    aead_x25519::AeadX25519Builder,
     passthrough::{
         PassThroughEncryption, PassThroughEncryptionBuilder,
         PassThroughEncryptionKey,
@@ -29,18 +29,10 @@ pub use sl_msg_encrypt::{
     EncryptionSessionBuilder, MessageEncryptionKey, PublicKeyError,
 };
 
-#[cfg(feature = "aead-p256")]
-pub use sl_msg_encrypt::aead_p256::{
-    AeadP256, AeadP256Aes256Gcm, AeadP256Aes256GcmBuilder, AeadP256Builder,
-    AeadP256ChaChaPoly1305, AeadP256ChaChaPoly1305Builder,
-    P256AeadMessageKey,
-};
-
 use crate::message::*;
 
-/// Default X25519 and ChaCha20-Poly1305 encryption session builder.
 pub type DefaultEncryptionScheme =
-    sl_msg_encrypt::aead::AeadX25519ChaChaPoly1305Builder;
+    sl_msg_encrypt::aead_x25519::AeadX25519ChaChaPoly1305Builder;
 
 /// Provides access to the authenticated and decrypted parts of a message.
 ///
@@ -413,17 +405,5 @@ mod tests {
     #[test]
     fn pass_through_scheme() {
         enc_dec(PassThroughEncryptionBuilder, PassThroughEncryptionBuilder);
-    }
-
-    #[cfg(feature = "aead-p256")]
-    #[test]
-    fn p256_aes256_gcm_scheme() {
-        use sl_msg_encrypt::aead_p256::AeadP256Aes256GcmBuilder;
-
-        let mut rng = rand::thread_rng();
-        let sender = AeadP256Aes256GcmBuilder::new(&mut rng);
-        let receiver = AeadP256Aes256GcmBuilder::new(&mut rng);
-
-        enc_dec(sender, receiver);
     }
 }

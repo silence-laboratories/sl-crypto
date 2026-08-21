@@ -10,7 +10,6 @@ description = "Message encryption for round-based multiparty protocols"
 [features]
 default = [
     "ml-kem",
-    "aes-gcm",
     "chacha20poly1305",
     "aead-x25519",
 ]
@@ -37,9 +36,7 @@ aead-x25519 = [
 ]
 aead-p256 = [
     "dep:aead",
-    "aes-gcm",
     "dep:chacha20",
-    "chacha20poly1305",
     "dep:generic-array",
     "generic-array/zeroize",
     "dep:p256",
@@ -70,3 +67,6 @@ hex = { workspace = true, features = ["alloc"] }
 poly1305 = { workspace = true, features = ["zeroize"] }
 rand = { workspace = true, features = ["std", "std_rng"] }
 rand_chacha = { workspace = true }
+
+[package.metadata.xtask.feature-matrix]
+require_one_of = [["aes-gcm", "chacha20poly1305"]]
