@@ -1,6 +1,6 @@
 [package]
 name = "sl-messages"
-version = "1.3.0-pre.1"
+version = "1.3.0-pre.2"
 license-file = "../../LICENSE"
 edition = "2021"
 rust-version = "1.88"
@@ -8,32 +8,31 @@ repository = "https://github.com/silence-laboratories/sl-crypto"
 description = "Message exchange for MPC protocols"
 
 [dependencies]
-aead = { workspace = true, optional = true }
-aes-gcm = { workspace = true, optional = true }
 bytemuck = { workspace = true, features = [ "derive", "min_const_generics" ] }
 bytes = { workspace = true }
-chacha20 = { workspace = true, optional = true }
-chacha20poly1305 = { workspace = true, optional = true }
 derivation-path = { workspace = true, optional = true }
 fastwebsockets = { workspace = true, features = ["unstable-split"], optional = true }
-generic-array = { workspace = true, features = [ "zeroize" ], optional = true }
-p256 = { workspace = true, optional = true, features = ["ecdh"] }
-rand_core = { workspace = true, optional = true }
 sha2 = { workspace = true }
 signature = { workspace = true, optional = true }
+sl-msg-encrypt = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 x25519-dalek = { workspace = true, features = ["alloc", "reusable_secrets", "zeroize"], optional = true }
 zeroize = { workspace = true, features = [ "derive" ] }
 
 [dev-dependencies]
+hex = { workspace = true, features = ["alloc"] }
 rand = { workspace = true, features = ["std", "std_rng"] }
+rand_chacha = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time"] }
 
 [features]
 default = ["std", "signed", "encrypted"]
 std = []
-encrypted = ["dep:aead", "dep:chacha20", "dep:chacha20poly1305", "dep:generic-array", "dep:rand_core", "dep:x25519-dalek"]
-aead-p256 = ["encrypted", "dep:aes-gcm", "aes-gcm/aes", "dep:p256"]
+encrypted = [
+    "dep:sl-msg-encrypt",
+    "sl-msg-encrypt/aead-x25519",
+    "sl-msg-encrypt/chacha20poly1305"
+]
 mux = [ "std", "tokio/macros", "tokio/sync", "tokio/rt" ]
 fast-ws = [ "std", "fastwebsockets", "tokio/macros", "tokio/sync", "tokio/rt" ]
 signed = ["dep:signature"]
