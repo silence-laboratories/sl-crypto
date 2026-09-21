@@ -1,6 +1,7 @@
 [package]
 name = "sl-verifiable-enc"
 license-file = "../../LICENSE"
+license = "LicenseRef-Silence-Labs"
 version = "1.1.1"
 edition = "2021"
 rust-version = "1.88"

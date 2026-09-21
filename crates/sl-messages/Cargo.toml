@@ -2,6 +2,7 @@
 name = "sl-messages"
 version = "1.3.0-pre.1"
 license-file = "../../LICENSE"
+license = "LicenseRef-Silence-Labs"
 edition = "2021"
 rust-version = "1.88"
 repository = "https://github.com/silence-laboratories/sl-crypto"
