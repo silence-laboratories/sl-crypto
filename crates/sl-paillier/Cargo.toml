@@ -1,6 +1,7 @@
 [package]
 name = "sl-paillier"
 license-file = "../../LICENSE"
+license = "LicenseRef-Silence-Laboratories"
 version = "1.2.0"
 edition = "2021"
 rust-version = "1.88"
