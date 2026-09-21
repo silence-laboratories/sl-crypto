@@ -4,7 +4,7 @@ version = "0.1.0-pre.2"
 edition = "2021"
 rust-version = "1.88"
 license-file = "../../LICENSE"
-license = "LicenseRef-Silence-Labs"
+license = "LicenseRef-Silence-Laboratories"
 repository = "https://github.com/silence-laboratories/sl-crypto"
 description = "Transcript helpers"
 

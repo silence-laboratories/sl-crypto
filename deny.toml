@@ -8,70 +8,70 @@ ignore = [
 allow = [
     "Apache-2.0",
     "BSD-3-Clause",
-    "LicenseRef-Silence-Labs",
+    "LicenseRef-Silence-Laboratories",
     "MIT",
     "Unicode-3.0",
 ]
 
 [[licenses.clarify]]
 crate = "sl-compute-common"
-expression = "LicenseRef-Silence-Labs"
+expression = "LicenseRef-Silence-Laboratories"
 license-files = [
     { path = "../../LICENSE", hash = 0x44125835 },
 ]
 
 [[licenses.clarify]]
 crate = "sl-messages"
-expression = "LicenseRef-Silence-Labs"
+expression = "LicenseRef-Silence-Laboratories"
 license-files = [
     { path = "../../LICENSE", hash = 0x44125835 },
 ]
 
 [[licenses.clarify]]
 crate = "sl-mpc-mate"
-expression = "LicenseRef-Silence-Labs"
+expression = "LicenseRef-Silence-Laboratories"
 license-files = [
     { path = "../../LICENSE", hash = 0x44125835 },
 ]
 
 [[licenses.clarify]]
 crate = "sl-mpc-traits"
-expression = "LicenseRef-Silence-Labs"
+expression = "LicenseRef-Silence-Laboratories"
 license-files = [
     { path = "../../LICENSE", hash = 0x44125835 },
 ]
 
 [[licenses.clarify]]
 crate = "sl-oblivious"
-expression = "LicenseRef-Silence-Labs"
+expression = "LicenseRef-Silence-Laboratories"
 license-files = [
     { path = "../../LICENSE", hash = 0x44125835 },
 ]
 
 [[licenses.clarify]]
 crate = "sl-paillier"
-expression = "LicenseRef-Silence-Labs"
+expression = "LicenseRef-Silence-Laboratories"
 license-files = [
     { path = "../../LICENSE", hash = 0x44125835 },
 ]
 
 [[licenses.clarify]]
 crate = "sl-shamir"
-expression = "LicenseRef-Silence-Labs"
+expression = "LicenseRef-Silence-Laboratories"
 license-files = [
     { path = "../../LICENSE", hash = 0x44125835 },
 ]
 
 [[licenses.clarify]]
 crate = "sl-verifiable-enc"
-expression = "LicenseRef-Silence-Labs"
+expression = "LicenseRef-Silence-Laboratories"
 license-files = [
     { path = "../../LICENSE", hash = 0x44125835 },
 ]
 
 [[licenses.clarify]]
 crate = "sl-transcript"
-expression = "LicenseRef-Silence-Labs"
+expression = "LicenseRef-Silence-Laboratories"
 license-files = [
     { path = "../../LICENSE", hash = 0x44125835 },
 ]
