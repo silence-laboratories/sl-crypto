@@ -1,7 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::ops::{Deref, DerefMut};
+use alloc::{vec, vec::Vec};
+use core::ops::{Deref, DerefMut};
 
 #[cfg(feature = "setup")]
 use bytemuck::{AnyBitPattern, NoUninit};
@@ -335,9 +336,9 @@ impl<R: Relay> BufferedMsgRelay<R> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
-    use std::time::Duration;
+    use core::time::Duration;
 
     use tokio::time::{sleep, timeout};
 

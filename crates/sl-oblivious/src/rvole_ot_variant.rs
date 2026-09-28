@@ -11,7 +11,8 @@
 //! lambda_c = 256
 //! l = 2, rho = 1, OT_WIDTH = l + rho = 3
 
-use std::array;
+use alloc::boxed::Box;
+use core::array;
 
 use elliptic_curve::{
     bigint::Encoding,
@@ -20,7 +21,8 @@ use elliptic_curve::{
     subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
 };
 use k256::{Scalar, U256};
-use merlin::Transcript;
+
+use sl_transcript::{Transcript, TranscriptProtocol};
 
 use crate::endemic_ot::{
     EndemicOTMsg1, EndemicOTMsg2, EndemicOTReceiver, EndemicOTSender,

@@ -1,7 +1,7 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::ops::Deref;
+use core::ops::Deref;
 
 /// Domain separation lavbel
 pub struct Label([u8; 8]);

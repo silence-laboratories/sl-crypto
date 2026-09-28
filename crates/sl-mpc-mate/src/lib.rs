@@ -1,10 +1,14 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::ops::{Deref, DerefMut};
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use core::ops::{Deref, DerefMut};
 
 use elliptic_curve::subtle::{Choice, ConditionallySelectable};
-use rand::prelude::*;
+use rand_core::{CryptoRng, RngCore};
 
 pub mod math;
 pub mod matrix;
@@ -68,7 +72,7 @@ impl<const T: usize> ByteArray<T> {
     }
 
     /// Function to generate a random session id which is a 32 byte array.
-    pub fn random<R: CryptoRng + Rng>(rng: &mut R) -> Self {
+    pub fn random<R: CryptoRng + RngCore>(rng: &mut R) -> Self {
         let mut bytes = [0; T];
         rng.fill_bytes(&mut bytes);
         ByteArray(bytes)

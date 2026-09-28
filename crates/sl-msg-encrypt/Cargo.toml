@@ -1,0 +1,72 @@
+[package]
+name = "sl-msg-encrypt"
+version = "0.2.0-pre.5"
+edition = "2024"
+rust-version = "1.88"
+license-file = "../../LICENSE"
+repository = "https://github.com/silence-laboratories/sl-crypto"
+description = "Message encryption for round-based multiparty protocols"
+
+[features]
+default = [
+    "ml-kem",
+    "chacha20poly1305",
+    "aead-x25519",
+]
+aes-gcm = [
+    "dep:aes",
+    "dep:aes-gcm",
+]
+chacha20poly1305 = [
+    "dep:chacha20poly1305",
+    "dep:poly1305",
+]
+ml-kem = [
+    "dep:ml-kem",
+    "dep:aead",
+    "dep:hybrid-array",
+    "generic-array/zeroize",
+]
+aead-x25519 = [
+    "dep:aead",
+    "dep:chacha20",
+    "dep:generic-array",
+    "generic-array/zeroize",
+    "dep:x25519-dalek",
+]
+aead-p256 = [
+    "dep:aead",
+    "dep:chacha20",
+    "dep:generic-array",
+    "generic-array/zeroize",
+    "dep:p256",
+]
+
+[dependencies]
+aead = { workspace = true, optional = true }
+aes = { workspace = true, optional = true, features = ["zeroize"] }
+aes-gcm = { workspace = true, optional = true, features = ["aes", "zeroize"] }
+bytemuck = { workspace = true, features = ["derive"] }
+chacha20 = { workspace = true, optional = true }
+chacha20poly1305 = { workspace = true, optional = true }
+generic-array = { workspace = true, optional = true }
+hybrid-array = { workspace = true, optional = true, features = ["zeroize"] }
+ml-kem = { workspace = true, optional = true, features = ["zeroize"] }
+p256 = { workspace = true, optional = true, features = ["ecdh"] }
+poly1305 = { workspace = true, optional = true, features = ["zeroize"] }
+rand_core = { workspace = true }
+sha2 = { workspace = true }
+x25519-dalek = { workspace = true, features = ["alloc", "reusable_secrets", "zeroize"], optional = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+aes = { workspace = true, features = ["zeroize"] }
+aes-gcm = { workspace = true, features = ["aes", "zeroize"] }
+chacha20poly1305 = { workspace = true }
+hex = { workspace = true, features = ["alloc"] }
+poly1305 = { workspace = true, features = ["zeroize"] }
+rand = { workspace = true, features = ["std", "std_rng"] }
+rand_chacha = { workspace = true }
+
+[package.metadata.xtask.feature-matrix]
+require_one_of = [["aes-gcm", "chacha20poly1305"]]

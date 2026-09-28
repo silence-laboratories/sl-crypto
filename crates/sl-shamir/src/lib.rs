@@ -22,7 +22,6 @@ pub const SHARE_MAGIC_V1: u8 = 1;
 
 /// A polynomial over GF(256) with coefficients stored as [a0, a1, a2, ...]
 /// representing a0 + a1*x + a2*x^2 + ...
-#[cfg_attr(feature = "zeroize", derive(Zeroize, ZeroizeOnDrop))]
 struct Polynomial {
     coeffs: Vec<Gf256>,
 }
@@ -55,6 +54,16 @@ impl Polynomial {
         }
 
         result
+    }
+}
+
+#[cfg(feature = "zeroize")]
+impl Drop for Polynomial {
+    fn drop(&mut self) {
+        for coeff in &mut self.coeffs {
+            coeff.zeroize();
+        }
+        self.coeffs.clear();
     }
 }
 
@@ -217,7 +226,13 @@ pub fn recover(
 
         // Zeroize intermediate points
         #[cfg(feature = "zeroize")]
-        points.zeroize();
+        {
+            for (x, y) in &mut points {
+                x.zeroize();
+                y.zeroize();
+            }
+            points.clear();
+        }
     }
 
     Ok(secret)

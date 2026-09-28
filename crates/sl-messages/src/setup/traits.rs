@@ -1,7 +1,7 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::time::Duration;
+use core::time::Duration;
 
 use derivation_path::DerivationPath;
 use signature::{SignatureEncoding, Signer, Verifier};

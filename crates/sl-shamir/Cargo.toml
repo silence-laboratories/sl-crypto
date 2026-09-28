@@ -1,15 +1,19 @@
 [package]
 name = "sl-shamir"
-version = "1.1.0"
+version = "1.1.1-pre.1"
 edition = "2021"
 license-file = "../../LICENSE"
+license = "LicenseRef-Silence-Laboratories"
 rust-version = "1.88"
 repository = "https://github.com/silence-laboratories/sl-crypto"
 description = "Shamir Secret Sharing"
 
 [dependencies]
 rand = { workspace = true }
-zeroize = { workspace = true, features = ["zeroize_derive"], optional = true }
+zeroize = { workspace = true, features = ["derive", "zeroize_derive"], optional = true }
+
+[dev-dependencies]
+rand = { workspace = true, features = ["std", "std_rng"] }
 
 [features]
 default = ["zeroize"]

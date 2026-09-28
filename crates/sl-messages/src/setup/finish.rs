@@ -6,7 +6,8 @@
 //! The [`SetupMessage`] type implements
 //! [`crate::setup::FinalSignSetupMessage`].
 
-use std::{marker::PhantomData, time::Duration};
+use alloc::vec::Vec;
+use core::{marker::PhantomData, time::Duration};
 
 use signature::{SignatureEncoding, Signer, Verifier};
 

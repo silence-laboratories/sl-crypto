@@ -1,7 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::{collections::HashSet, time::Duration};
+use core::time::Duration;
+use std::collections::HashSet;
 
 use crate::{
     message::{allocate_message, MessageTag},

@@ -1,7 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::ops::{MulAssign, Sub};
+use alloc::{vec, vec::Vec};
+use core::ops::{MulAssign, Sub};
 
 use elliptic_curve::{CurveArithmetic, Field};
 #[cfg(feature = "rayon")]

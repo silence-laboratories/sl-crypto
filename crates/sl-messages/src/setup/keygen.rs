@@ -7,7 +7,8 @@
 //! [`crate::setup::KeygenSetupMessage`] and [`crate::setup::ProtocolParticipant`]
 //! using signer/verifier generics.
 
-use std::{marker::PhantomData, time::Duration};
+use alloc::{vec, vec::Vec};
+use core::{marker::PhantomData, time::Duration};
 
 use sha2::{Digest, Sha256};
 use signature::{SignatureEncoding, Signer, Verifier};

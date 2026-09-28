@@ -7,6 +7,7 @@
 //! by the transport channel (for example, mTLS or authenticated in-process
 //! channels) and protocol wiring still requires signing/verifying types.
 
+use alloc::vec::Vec;
 use signature::{SignatureEncoding, Signer, Verifier};
 
 /// An empty signature type.

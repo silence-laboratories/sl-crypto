@@ -1,7 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::{borrow::Borrow, time::Duration};
+use alloc::vec::Vec;
+use core::{borrow::Borrow, time::Duration};
 
 use crate::{
     message::{MessageTag, MsgHdr, MsgId},

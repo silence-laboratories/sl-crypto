@@ -43,5 +43,5 @@ pub use traits::{
     WeightedKeygenSetupMessage, WeightedQuorumChangeSetupMessage,
 };
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;

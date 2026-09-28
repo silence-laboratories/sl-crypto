@@ -1,0 +1,13 @@
+[package]
+name = "sl-msg-published-pre3-vector-generator"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rand_chacha = "=0.3.1"
+rand_core = "=0.6.4"
+hex = "=0.4.3"
+sl-msg-encrypt = { version = "=0.2.0-pre.3", registry = "sl", default-features = false, features = ["ml-kem", "aes-gcm"] }
+
+[workspace]

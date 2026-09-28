@@ -2,20 +2,24 @@
 // This software is licensed under the Silence Laboratories License Agreement.
 //
 
-//! # Verifiable RSA Encryption
-//! This crate provides a simple implementation of verifiable RSA encryption. The implementation is based on the paper [Verifiable RSA Encryption](https://eprint.iacr.org/1999/008)
+//! # Verifiable RSA Encryption This crate provides a simple
+//! implementation of verifiable RSA encryption. The implementation is
+//! based on the paper [Verifiable RSA
+//! Encryption](https://eprint.iacr.org/1999/008)
+//
+#[doc = include_str!("../README.md")]
+//
+use core::{marker::PhantomData, mem::size_of, ops::Index};
 
-use core::mem::size_of;
 use crypto_bigint::BoxedUint;
 use digest::{Digest, OutputSizeUser};
-#[doc = include_str!("../README.md")]
 use ff::{Field, PrimeField};
 use group::{Group, GroupEncoding};
 use rand::{Rng, SeedableRng};
-use rand_chacha::{rand_core::CryptoRngCore, ChaCha20Rng};
+use rand_chacha::ChaCha20Rng;
+use rand_core::CryptoRngCore;
 use rsa::{traits::PublicKeyParts, Oaep, RsaPrivateKey, RsaPublicKey};
 use sha2::Sha256;
-use std::{collections::HashSet, ops::Index};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use thiserror::Error;
 
@@ -61,7 +65,7 @@ impl HashFunction for Sha256 {
     const MAX_SECURITY_PARAM: u16 = 256;
 }
 
-//Re-Exports
+// Re-Exports
 pub use rsa;
 
 // Intentionally not giving too much information about the error
@@ -101,7 +105,7 @@ where
     proofs: Vec<ProofData<G>>,
     open_scalars: Vec<G::Scalar>,
     security_param: u16,
-    _phantom: core::marker::PhantomData<H>,
+    _phantom: PhantomData<H>,
 }
 
 impl<G, H> VerifiableRsaEncryption<G, H>
@@ -125,11 +129,14 @@ where
         if security_param < H::COLLISION_RESISTANCE_BITS {
             return Err(RsaError::InvalidSecurityParam);
         }
+
         if security_param > H::MAX_SECURITY_PARAM {
             return Err(RsaError::InvalidSecurityParam);
         }
-        let mut proofs = Vec::with_capacity(security_param as usize);
+
         let q_point = G::generator() * x;
+
+        let mut proofs = Vec::with_capacity(security_param as usize);
         let mut r_list = Vec::with_capacity(security_param as usize);
         let mut x_plus_r_list = Vec::with_capacity(security_param as usize);
 
@@ -140,6 +147,7 @@ where
             Digest::update(&mut hasher, seed);
             Digest::update(&mut hasher, round.to_be_bytes());
             let hash_output = hasher.finalize();
+
             // Convert hash output to seed array (pad or truncate as needed)
             let mut seed_bytes = [0u8; 32];
             let hash_bytes = hash_output.as_slice();
@@ -189,7 +197,7 @@ where
             proofs,
             seed,
             security_param,
-            _phantom: core::marker::PhantomData,
+            _phantom: PhantomData,
         })
     }
 
@@ -235,10 +243,12 @@ where
 
         // Check proof uniqueness to prevent nonce reuse attacks
         // Allowing early return as there is no leakage of sensitive information
-        let mut seen = HashSet::new();
-        for proof in &self.proofs {
-            if !seen.insert(proof.g_r.as_ref()) {
-                return Err(RsaError::VerificationFailed);
+        for (i, proof) in self.proofs.iter().enumerate() {
+            let gr = proof.g_r.as_ref();
+            if let Some(rest) = self.proofs.get(i + 1..) {
+                if rest.iter().any(|p| p.g_r.as_ref() == gr) {
+                    return Err(RsaError::VerificationFailed);
+                }
             }
         }
 
@@ -510,7 +520,7 @@ where
                 proofs,
                 open_scalars,
                 security_param,
-                _phantom: core::marker::PhantomData,
+                _phantom: PhantomData,
             })
         };
         res().map_err(|e| RsaError::SerdeError(e.to_string()))
@@ -693,25 +703,20 @@ impl ExtractBit for Vec<u8> {
 }
 
 fn decode_scalar<S: PrimeField>(bytes: &[u8]) -> Option<S> {
-    if bytes.len() != size_of::<S::Repr>() {
+    let mut encoding = S::Repr::default();
+    if bytes.len() != encoding.as_mut().len() {
         return None;
     }
-    let mut encoding = <S as PrimeField>::Repr::default();
     encoding.as_mut().copy_from_slice(bytes);
     S::from_repr(encoding).into()
 }
 
 #[cfg(test)]
 mod tests {
-    use curve25519_dalek::EdwardsPoint;
-    use group::Group;
-    use k256::{ProjectivePoint, Scalar};
-    use rand::SeedableRng;
-    use rand_chacha::ChaCha20Rng;
-    use rsa::RsaPrivateKey;
-    use subtle::Choice;
+    use super::*;
 
-    use crate::*;
+    use curve25519_dalek::EdwardsPoint;
+    use k256::{ProjectivePoint, Scalar};
 
     #[test]
     fn test_verifiable_rsa_ecdsa() -> Result<(), RsaError> {

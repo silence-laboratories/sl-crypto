@@ -1,7 +1,8 @@
 // Copyright (c) Silence Laboratories Pte. Ltd. All Rights Reserved.
 // This software is licensed under the Silence Laboratories License Agreement.
 
-use std::{marker::PhantomData, sync::Arc, time::Duration};
+use alloc::{sync::Arc, vec::Vec};
+use core::{marker::PhantomData, time::Duration};
 
 use signature::{SignatureEncoding, Signer, Verifier};
 use x25519_dalek::{PublicKey, ReusableSecret};
