@@ -4,9 +4,43 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      routine-version-updates:
+        applies-to: version-updates
+        patterns:
+          - '*'
+    open-pull-requests-limit: 5
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
+    groups:
+      routine-version-updates:
+        applies-to: version-updates
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 5
+  - package-ecosystem: cargo
+    directories:
+      - /crates/sl-messages/tests/vectors/published-pre1/generator
+      - /crates/sl-msg-encrypt/tests/vectors/published-pre3/generator
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      routine-version-updates:
+        applies-to: version-updates
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
