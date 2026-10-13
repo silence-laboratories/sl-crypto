@@ -308,7 +308,7 @@ impl BinaryString {
     }
 
     pub fn length_in_bytes(&self) -> usize {
-        if (self.length % 8) == 0 {
+        if self.length.is_multiple_of(8) {
             (self.length / 8) as usize
         } else {
             (self.length / 8) as usize + 1
@@ -423,8 +423,8 @@ impl BinaryString {
     }
 
     pub fn split(&self, index: usize) -> (Self, Self) {
-        assert_eq!(self.length % 8, 0);
-        assert_eq!(index % 8, 0);
+        assert!(self.length.is_multiple_of(8));
+        assert!(index.is_multiple_of(8));
         assert!(
             index <= self.length as usize,
             "End index exceeds BinaryString length"
@@ -562,7 +562,7 @@ impl BinaryStringShare {
     }
 
     pub fn length_in_bytes(&self) -> usize {
-        if (self.length % 8) == 0 {
+        if self.length.is_multiple_of(8) {
             (self.length / 8) as usize
         } else {
             (self.length / 8) as usize + 1
@@ -799,16 +799,16 @@ impl BinaryStringShare {
     }
 
     pub fn append(&mut self, other: &Self) {
-        assert_eq!(self.length % 8, 0);
-        assert_eq!(other.length % 8, 0);
+        assert!(self.length.is_multiple_of(8));
+        assert!(other.length.is_multiple_of(8));
         self.length += other.length;
         self.value1.extend_from_slice(&other.value1);
         self.value2.extend_from_slice(&other.value2);
     }
 
     pub fn split(&self, index: usize) -> (Self, Self) {
-        assert_eq!(self.length % 8, 0);
-        assert_eq!(index % 8, 0);
+        assert!(self.length.is_multiple_of(8));
+        assert!(index.is_multiple_of(8));
         assert!(
             index <= self.length as usize,
             "End index exceeds BinaryStringShare length"
@@ -1031,7 +1031,7 @@ pub fn binary_string_to_u8_vec(input: BinaryString) -> Vec<u8> {
             byte = 0;
         }
     }
-    if input.length % 8 != 0 {
+    if !input.length.is_multiple_of(8) {
         vec_u8.push(byte);
     }
 

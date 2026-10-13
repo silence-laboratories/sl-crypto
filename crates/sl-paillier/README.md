@@ -3,7 +3,7 @@
 `sl-paillier` provides a Paillier cryptosystem implementation built on
 [`crypto-bigint`](https://docs.rs/crypto-bigint).
 
-The crate currently targets Rust `1.88` and ships a 2048-bit configuration as
+The crate currently targets Rust `1.91` and ships a 2048-bit configuration as
 its main public API.
 
 ## Main types

@@ -22,9 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.88 --profile minimal --component rustfmt
-      - name: Use Rust 1.88
-        run: rustup default 1.88
+        run: rustup toolchain install 1.91 --profile minimal --component rustfmt
+      - name: Use Rust 1.91
+        run: rustup default 1.91
       - name: Check formatting
         run: cargo fmt --all --check
 
@@ -33,9 +33,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.88 --profile minimal
-      - name: Use Rust 1.88
-        run: rustup default 1.88
+        run: rustup toolchain install 1.91 --profile minimal
+      - name: Use Rust 1.91
+        run: rustup default 1.91
       - name: Install cargo-deny
         uses: taiki-e/install-action@v2
         with:
@@ -48,9 +48,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.88 --profile minimal --component clippy
-      - name: Use Rust 1.88
-        run: rustup default 1.88
+        run: rustup toolchain install 1.91 --profile minimal --component clippy
+      - name: Use Rust 1.91
+        run: rustup default 1.91
       - name: Run clippy for every crate and feature combination
         run: cargo run --locked --package xtask -- feature-matrix clippy -- --locked
 
@@ -59,9 +59,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.88 --profile minimal
-      - name: Use Rust 1.88
-        run: rustup default 1.88
+        run: rustup toolchain install 1.91 --profile minimal
+      - name: Use Rust 1.91
+        run: rustup default 1.91
       - name: Run published-version compatibility tests
         run: |
           cargo test --locked --release --package sl-msg-encrypt --test published_pre3_compatibility

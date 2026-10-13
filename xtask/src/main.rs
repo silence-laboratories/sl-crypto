@@ -220,13 +220,24 @@ fn workspace_packages(metadata: &Value) -> Result<Vec<Package>, String> {
                     "cargo metadata package is missing features".to_owned()
                 })?
                 .clone();
+            let feature_matrix =
+                &package["metadata"]["xtask"]["feature-matrix"];
+            let require_one_of = parse_require_one_of_groups(
+                &feature_matrix["require_one_of"],
+            )?;
             let implicit_optional_features =
                 implicit_optional_dependency_features(package, &feature_map);
+            let configured_features = require_one_of
+                .iter()
+                .flatten()
+                .cloned()
+                .collect::<BTreeSet<_>>();
             let mut features = feature_map
                 .keys()
                 .filter(|feature| feature.as_str() != "default")
                 .filter(|feature| {
                     !implicit_optional_features.contains(feature.as_str())
+                        || configured_features.contains(feature.as_str())
                 })
                 .cloned()
                 .collect::<Vec<_>>();
@@ -240,16 +251,11 @@ fn workspace_packages(metadata: &Value) -> Result<Vec<Package>, String> {
                 .filter_map(Value::as_str)
                 .filter(|feature| {
                     !implicit_optional_features.contains(*feature)
+                        || configured_features.contains(*feature)
                 })
                 .map(ToOwned::to_owned)
                 .collect::<Vec<_>>();
             default_features.sort();
-
-            let feature_matrix =
-                &package["metadata"]["xtask"]["feature-matrix"];
-            let require_one_of = parse_require_one_of_groups(
-                &feature_matrix["require_one_of"],
-            )?;
 
             Ok(Some(Package {
                 name,
@@ -426,7 +432,9 @@ fn satisfies_require_one_of(
     groups.iter().all(|group| {
         group
             .iter()
-            .any(|feature| enabled_features.contains(feature))
+            .filter(|feature| enabled_features.contains(feature))
+            .count()
+            == 1
     })
 }
 
@@ -623,30 +631,51 @@ mod tests {
     }
 
     #[test]
-    fn filters_implicit_optional_dependency_features() {
-        let package = serde_json::json!({
+    fn includes_configured_optional_dependency_features_in_matrix() {
+        let package = Package {
+            name: "sl-transcript".to_owned(),
+            features: vec!["merlin".to_owned(), "shake128".to_owned()],
+            default_features: Vec::new(),
+            require_one_of: vec![vec![
+                "merlin".to_owned(),
+                "shake128".to_owned(),
+            ]],
+            feature_map: serde_json::json!({
+                "default": [],
+                "merlin": ["dep:merlin"],
+                "shake128": ["dep:sha3"],
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        };
+
+        let combinations = feature_combinations(&package).unwrap();
+        let labels = combinations
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect::<Vec<_>>();
+
+        assert_eq!(labels, vec!["merlin", "shake128"]);
+    }
+
+    #[test]
+    fn excludes_unconfigured_implicit_optional_dependency_features() {
+        let package_json = serde_json::json!({
             "dependencies": [
-                { "name": "tokio", "optional": true },
-                { "name": "fastwebsockets", "optional": true },
-                { "name": "serde", "optional": false }
+                { "name": "serde_arrays", "optional": true }
             ],
             "features": {
                 "default": [],
-                "tokio": ["dep:tokio"],
-                "fastwebsockets": ["dep:fastwebsockets"],
-                "mux": ["tokio/macros", "tokio/rt"],
-                "fast-ws": ["fastwebsockets", "tokio/macros"]
+                "serde_arrays": ["dep:serde_arrays"],
+                "serde": ["serde_arrays"]
             }
         });
-
-        let feature_map = package["features"].as_object().unwrap();
+        let feature_map = package_json["features"].as_object().unwrap();
         let implicit =
-            implicit_optional_dependency_features(&package, feature_map);
+            implicit_optional_dependency_features(&package_json, feature_map);
 
-        assert_eq!(
-            implicit,
-            BTreeSet::from(["fastwebsockets".to_owned(), "tokio".to_owned()])
-        );
+        assert_eq!(implicit, BTreeSet::from(["serde_arrays".to_owned()]));
     }
 
     #[test]
@@ -676,17 +705,24 @@ mod tests {
     }
 
     #[test]
-    fn requires_at_least_one_feature_from_each_group() {
-        let enabled = vec!["std".to_owned(), "shake128".to_owned()];
+    fn requires_exactly_one_feature_from_each_group() {
         let groups = vec![
-            vec!["std".to_owned(), "merlin".to_owned()],
-            vec!["shake128".to_owned()],
+            vec!["merlin".to_owned(), "shake128".to_owned()],
+            vec!["std".to_owned()],
         ];
 
-        assert!(satisfies_require_one_of(&enabled, &groups));
+        let exactly_one = vec!["merlin".to_owned(), "std".to_owned()];
+        assert!(satisfies_require_one_of(&exactly_one, &groups));
 
-        let missing = vec!["shake128".to_owned()];
-        assert!(!satisfies_require_one_of(&missing, &groups));
+        let neither = vec!["std".to_owned()];
+        assert!(!satisfies_require_one_of(&neither, &groups));
+
+        let both = vec![
+            "merlin".to_owned(),
+            "shake128".to_owned(),
+            "std".to_owned(),
+        ];
+        assert!(!satisfies_require_one_of(&both, &groups));
     }
 
     #[test]
