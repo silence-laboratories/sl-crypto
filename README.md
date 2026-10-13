@@ -21,7 +21,7 @@ Additional crate-specific documentation is available in:
 
 ## Toolchain
 
-The workspace currently targets Rust `1.88`.
+The workspace currently targets Rust `1.91`.
 
 ## Development
 

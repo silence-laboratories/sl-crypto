@@ -252,8 +252,10 @@ fn transpose_bool_matrix(
     input: &[[u8; L_PRIME_BYTES]; LAMBDA_C],
 ) -> [[u8; LAMBDA_C_BYTES]; L_PRIME] {
     let mut output = [[0u8; LAMBDA_C_BYTES]; L_PRIME];
+    #[allow(clippy::needless_range_loop)]
     for row_byte in 0..LAMBDA_C_BYTES {
         for row_bit_byte in 0..8 {
+            #[allow(clippy::needless_range_loop)]
             for column_byte in 0..L_PRIME_BYTES {
                 for column_bit_byte in 0..8 {
                     let row_bit_index = (row_byte << 3) + row_bit_byte;
@@ -332,6 +334,7 @@ impl SoftSpokenOTSender {
 
                 let delta_i = (delta >> bit_index) & 0x01;
                 let delta_i_mask = bit_to_bit_mask(delta_i);
+                #[allow(clippy::needless_range_loop)]
                 for k in 0..L_PRIME_BYTES {
                     w_matrix[i * SOFT_SPOKEN_K + bit_index][k] ^=
                         delta_i_mask & message.u[i][k];

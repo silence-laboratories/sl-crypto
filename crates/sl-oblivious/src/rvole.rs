@@ -186,6 +186,7 @@ impl RVOLEReceiver {
 
         for j in 0..XI {
             let j_bit = self.beta.extract_bit(j);
+            #[allow(clippy::needless_range_loop)]
             for i in 0..L_BATCH {
                 let option_0 = decode_scalar::<C>(
                     &self.receiver_extended_output.v_x[j][i],
@@ -198,6 +199,7 @@ impl RVOLEReceiver {
                 );
                 d_dot[j][i] = chosen
             }
+            #[allow(clippy::needless_range_loop)]
             for k in 0..RHO {
                 let option_0 = decode_scalar::<C>(
                     &self.receiver_extended_output.v_x[j][L_BATCH + k],

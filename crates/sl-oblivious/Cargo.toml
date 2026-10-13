@@ -2,9 +2,8 @@
 name = "sl-oblivious"
 version = "1.2.0-pre.1"
 license-file = "../../LICENSE"
-license = "LicenseRef-Silence-Laboratories"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.91"
 repository = "https://github.com/silence-laboratories/sl-crypto"
 description = "OT protocols"
 

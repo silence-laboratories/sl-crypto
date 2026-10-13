@@ -2,9 +2,8 @@
 name = "sl-transcript"
 version = "0.1.0-pre.2"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.91"
 license-file = "../../LICENSE"
-license = "LicenseRef-Silence-Laboratories"
 repository = "https://github.com/silence-laboratories/sl-crypto"
 description = "Transcript helpers"
 

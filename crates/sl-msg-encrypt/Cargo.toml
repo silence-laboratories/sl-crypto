@@ -2,7 +2,7 @@
 name = "sl-msg-encrypt"
 version = "0.2.0-pre.5"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.91"
 license-file = "../../LICENSE"
 repository = "https://github.com/silence-laboratories/sl-crypto"
 description = "Message encryption for round-based multiparty protocols"
