@@ -23,7 +23,7 @@ use sha2::Sha256;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 use thiserror::Error;
 
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 
 /// Maximum byte length of (m * label) mod n when m and label are 32-byte values.
 const PLAINTEXT_FIXED_LEN: usize = 64;
@@ -101,9 +101,9 @@ where
     G::Scalar: ConditionallySelectable,
     H: HashFunction,
 {
-    seed: [u8; 32],
     proofs: Vec<ProofData<G>>,
     open_scalars: Vec<G::Scalar>,
+    seeds: Vec<[u8; 32]>,
     security_param: u16,
     _phantom: PhantomData<H>,
 }
@@ -121,7 +121,6 @@ where
         security_param: Option<usize>,
         rng: &mut R,
     ) -> Result<Self, RsaError> {
-        let seed = rng.gen::<[u8; 32]>();
         let security_param: u16 = security_param
             .map(|s| s as u16)
             .unwrap_or(H::DEFAULT_SECURITY_PARAM);
@@ -136,43 +135,37 @@ where
 
         let q_point = G::generator() * x;
 
+        let r_list: Vec<<G as Group>::Scalar> = (0..security_param as usize)
+            .map(|_| G::Scalar::random(&mut *rng))
+            .collect();
+
+        let x_plus_r_list: Vec<<G as Group>::Scalar> =
+            r_list.iter().map(|r| *x + r).collect();
+
+        let seed_0_list: Vec<[u8; 32]> =
+            (0..security_param as usize).map(|_| rng.gen()).collect();
+
+        let seed_1_list: Vec<[u8; 32]> =
+            (0..security_param as usize).map(|_| rng.gen()).collect();
+
         let mut proofs = Vec::with_capacity(security_param as usize);
-        let mut r_list = Vec::with_capacity(security_param as usize);
-        let mut x_plus_r_list = Vec::with_capacity(security_param as usize);
-
-        for round in 0..security_param {
-            // Derive r deterministically using round index to ensure uniqueness
-            let mut hasher = H::new();
-            Digest::update(&mut hasher, b"SL-verifiable-enc-round");
-            Digest::update(&mut hasher, seed);
-            Digest::update(&mut hasher, round.to_be_bytes());
-            let hash_output = hasher.finalize();
-
-            // Convert hash output to seed array (pad or truncate as needed)
-            let mut seed_bytes = [0u8; 32];
-            let hash_bytes = hash_output.as_slice();
-            let copy_len = core::cmp::min(32, hash_bytes.len());
-            seed_bytes[..copy_len].copy_from_slice(&hash_bytes[..copy_len]);
-            let mut round_rng = ChaCha20Rng::from_seed(seed_bytes);
-            let r = G::Scalar::random(&mut round_rng);
+        for i in 0..security_param as usize {
+            let r = r_list[i];
+            let x_plus_r = x_plus_r_list[i];
 
             let g_r = G::generator() * r;
-            let x_plus_r = *x + r;
             let enc_r = rsa_encrypt_with_label::<H>(
                 r.to_repr(),
                 label,
                 rsa_pubkey,
-                seed,
+                seed_0_list[i],
             )?;
             let enc_x_plus_r = rsa_encrypt_with_label::<H>(
                 x_plus_r.to_repr(),
                 label,
                 rsa_pubkey,
-                seed,
+                seed_1_list[i],
             )?;
-
-            r_list.push(r);
-            x_plus_r_list.push(x_plus_r);
 
             proofs.push(ProofData {
                 g_r: g_r.to_bytes(),
@@ -182,6 +175,7 @@ where
         }
         let challenge = Self::challenge(&q_point, label, &proofs);
         let mut open_scalars = Vec::with_capacity(security_param as usize);
+        let mut seeds = Vec::with_capacity(security_param as usize);
         for i in 0..security_param as usize {
             let choice_bit = challenge.extract_bit(i);
             let selected = G::Scalar::conditional_select(
@@ -190,20 +184,26 @@ where
                 choice_bit,
             );
             open_scalars.push(selected);
+            let selected_seed = <[u8; 32]>::conditional_select(
+                &seed_0_list[i],
+                &seed_1_list[i],
+                choice_bit,
+            );
+            seeds.push(selected_seed);
         }
 
         Ok(Self {
             open_scalars,
             proofs,
-            seed,
+            seeds,
             security_param,
             _phantom: PhantomData,
         })
     }
 
-    /// Get a reference to the seed.
-    pub fn seed(&self) -> &[u8; 32] {
-        &self.seed
+    /// Get a reference to the seeds.
+    pub fn seeds(&self) -> &[[u8; 32]] {
+        &self.seeds
     }
 
     /// Get a reference to the proofs.
@@ -263,7 +263,7 @@ where
                 open_scalar.to_repr(),
                 label,
                 rsa_pubkey,
-                self.seed,
+                self.seeds[i],
             )?;
 
             let g_r_option = G::from_bytes(&proof.g_r);
@@ -359,6 +359,11 @@ where
             self.security_param as usize,
             "open_scalars length must match security_param"
         );
+        debug_assert_eq!(
+            self.seeds.len(),
+            self.security_param as usize,
+            "seeds length must match security_param"
+        );
         debug_assert!(!self.proofs.is_empty(), "proofs must not be empty");
 
         // In release builds, if invariants are violated, we still try to serialize
@@ -369,7 +374,6 @@ where
 
         let mut bytes = Vec::new();
         bytes.push(VERSION);
-        bytes.extend_from_slice(&self.seed);
         // Adding the sizes
         // Security parameter, g_r size, enc_x_r size (will be same as enc_r size) and scalar size
         bytes.extend_from_slice(&self.security_param.to_be_bytes());
@@ -391,6 +395,9 @@ where
         for scalar in &self.open_scalars {
             bytes.extend_from_slice(scalar.to_repr().as_ref());
         }
+        for seed in &self.seeds {
+            bytes.extend_from_slice(seed);
+        }
 
         bytes
     }
@@ -410,12 +417,6 @@ where
 
         let res = || {
             let mut offset = 1;
-
-            // Read seed
-            let mut seed = [0u8; 32];
-            seed.copy_from_slice(&data[offset..offset + 32]);
-            offset += 32;
-
             // Read sizes
             let security_param =
                 u16::from_be_bytes([data[offset], data[offset + 1]]);
@@ -443,7 +444,7 @@ where
             // Calculate number of proofs and open scalars
             let proof_size = g_r_size + 2 * enc_size;
             let remaining_data = data.len() - offset;
-            let num_proofs = remaining_data / (proof_size + scalar_size);
+            let num_proofs = remaining_data / (proof_size + scalar_size + 32);
 
             if security_param < H::COLLISION_RESISTANCE_BITS {
                 return Err("Security param must be at least the hash function's collision resistance");
@@ -456,7 +457,7 @@ where
                 return Err("Inconsistent number of proofs, must be equal to the security parameter");
             }
 
-            if remaining_data % (proof_size + scalar_size) != 0 {
+            if remaining_data % (proof_size + scalar_size + 32) != 0 {
                 return Err("Inconsistent data length");
             }
 
@@ -503,6 +504,20 @@ where
                 open_scalars.push(scalar);
             }
 
+            // Read seeds
+            let mut seeds = Vec::with_capacity(num_proofs);
+            for _ in 0..num_proofs {
+                if offset + 32 > data.len() {
+                    return Err(
+                        "Unexpected end of data while reading scalars",
+                    );
+                }
+                let mut seed = [0u8; 32];
+                seed.copy_from_slice(&data[offset..offset + 32]);
+                offset += 32;
+                seeds.push(seed);
+            }
+
             // Final validation: ensure lengths match security_param
             if proofs.len() != security_param as usize {
                 return Err(
@@ -514,11 +529,14 @@ where
                     "Open scalars length does not match security parameter",
                 );
             }
+            if seeds.len() != security_param as usize {
+                return Err("Seeds length does not match security parameter");
+            }
 
             Ok(Self {
-                seed,
                 proofs,
                 open_scalars,
+                seeds,
                 security_param,
                 _phantom: PhantomData,
             })

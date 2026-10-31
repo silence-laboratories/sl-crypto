@@ -19,7 +19,7 @@ rand_core = { workspace = true }
 rand_chacha = { workspace = true }
 rsa = { workspace = true }
 sha2 = { workspace = true }
-subtle = { workspace = true }
+subtle = { workspace = true, features = ["const-generics"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
