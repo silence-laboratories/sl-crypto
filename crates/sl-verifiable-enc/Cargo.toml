@@ -2,7 +2,7 @@
 name = "sl-verifiable-enc"
 license-file = "../../LICENSE"
 license = "LicenseRef-Silence-Laboratories"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.88"
 repository = "https://github.com/silence-laboratories/sl-crypto"
@@ -19,7 +19,7 @@ rand_core = { workspace = true }
 rand_chacha = { workspace = true }
 rsa = { workspace = true }
 sha2 = { workspace = true }
-subtle = { workspace = true }
+subtle = { workspace = true, features = ["const-generics"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
