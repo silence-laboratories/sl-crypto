@@ -133,6 +133,10 @@ where
             return Err(RsaError::InvalidSecurityParam);
         }
 
+        if rsa_pubkey.n().bits() < 2048 {
+            return Err(RsaError::InvalidSecurityParam);
+        }
+
         let q_point = G::generator() * x;
 
         let r_list: Vec<<G as Group>::Scalar> = (0..security_param as usize)
