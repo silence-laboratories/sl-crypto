@@ -12,7 +12,7 @@
 use alloc::boxed::Box;
 use core::array;
 
-use elliptic_curve::subtle::ConstantTimeEq;
+use elliptic_curve::subtle::{Choice, ConstantTimeEq};
 use rand_core::{CryptoRngCore, RngCore};
 
 use sl_transcript::{Transcript, TranscriptProtocol};
@@ -374,6 +374,7 @@ impl SoftSpokenOTSender {
         let from_index = SOFT_SPOKEN_M * S_BYTES;
         let to_index = (SOFT_SPOKEN_M + 1) * S_BYTES;
 
+        let mut error = Choice::from(0);
         for (i, w_matrix_i) in w_matrix.iter().enumerate() {
             let mut q_row = [0u8; S_BYTES];
 
@@ -405,9 +406,10 @@ impl SoftSpokenOTSender {
                     message.t[i][k] ^ (bit_mask & message.x[k])
                 });
 
-            if q_row.ct_ne(&t_i_plus_delta_i_times_x).into() {
-                return Err(SoftSpokenOTError::AbortProtocolAndBanReceiver);
-            }
+            error |= q_row.ct_ne(&t_i_plus_delta_i_times_x);
+        }
+        if error.into() {
+            return Err(SoftSpokenOTError::AbortProtocolAndBanReceiver);
         }
 
         // 20k
