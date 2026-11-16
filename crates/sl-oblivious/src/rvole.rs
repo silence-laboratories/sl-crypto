@@ -95,6 +95,35 @@ impl Default for RVOLEOutput {
     }
 }
 
+/// Receiver state of one RVOLE execution.
+///
+/// # Single use
+///
+/// A value of this type must be passed to [RVOLEReceiver::process]
+/// exactly once, with the first RVOLEOutput received for this
+/// session. After that call the state must be discarded, whether the call
+/// returned Ok or Err.
+///
+/// The consistency check in process succeeds or fails depending on the
+/// secret choice bits beta. The protocol tolerates this only because a
+/// failed check ends the session: a sender who guesses k bits of beta
+/// passes with probability 2^-k and is detected otherwise. If the same
+/// state is checked against a second message, every call answers one more
+/// question about beta, and a malicious sender can recover beta
+/// (and therefore the receiver's share b) in at most XI attempts.
+///
+/// Callers must therefore:
+///
+/// - treat Err("Consistency check failed") as final for this session and
+///   ban the sender; never wait for, or accept, a replacement message;
+/// - reject duplicate round-2 messages for a session that has already
+///   called process;
+/// - never copy, clone, or serialize and later restore this state in order
+///   to call process again;
+/// - never reuse the state across sessions.
+///
+/// This type is Copy only because of its bytemuck derives. Copying it
+/// does not make a second call to process safe.
 #[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 #[repr(C)]
 pub struct RVOLEReceiver {
@@ -151,6 +180,10 @@ impl RVOLEReceiver {
 }
 
 impl RVOLEReceiver {
+    /// Verifies the sender's message and returns the receiver's shares.
+    ///
+    /// Must be called at most once per receiver state; see the type-level
+    /// documentation. Any error is terminal for the session.
     pub fn process<C>(
         &self,
         rvole_output: &RVOLEOutput,
