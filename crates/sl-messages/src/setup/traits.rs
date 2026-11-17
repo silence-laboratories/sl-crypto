@@ -411,4 +411,8 @@ pub trait WeightedQuorumChangeSetupMessage<KS, PK>:
 {
     /// New participant weight.
     fn new_participant_weight(&self, party_id: usize) -> u16;
+
+    /// Weighted threshold of the new key. Do NOT use `new_threshold()`
+    /// (u8) for weighted protocols.
+    fn new_weighted_threshold(&self) -> u16;
 }

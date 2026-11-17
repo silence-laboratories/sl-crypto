@@ -67,6 +67,7 @@ impl<SK, VK, MS, KS, PK> SetupMessage<SK, VK, MS, KS, PK> {
                 < total_parties
         );
 
+        assert!(new_t >= 2);
         assert!(new_t <= new_parties.len());
 
         Self {
@@ -112,6 +113,11 @@ impl<SK, VK, MS, KS, PK> SetupMessage<SK, VK, MS, KS, PK> {
                 .unwrap_or(usize::MAX)
                 < total_parties
         );
+
+        let total_weights: usize = new_parties.iter().map(|&(_, i)| i).sum();
+
+        assert!(new_t >= 2);
+        assert!(new_t <= total_weights);
 
         let new_ranks = new_parties.iter().map(|p| p.1).collect();
 
@@ -194,7 +200,11 @@ where
     }
 
     fn new_threshold(&self) -> u8 {
-        self.new_t as u8
+        u8::try_from(self.new_t).expect("validated in constructor")
+    }
+
+    fn new_weighted_threshold(&self) -> u16 {
+        u16::try_from(self.new_t).expect("validated in constructor")
     }
 
     fn new_participant_rank(&self, party_id: u8) -> u8 {

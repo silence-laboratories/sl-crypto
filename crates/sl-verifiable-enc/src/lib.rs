@@ -133,6 +133,10 @@ where
             return Err(RsaError::InvalidSecurityParam);
         }
 
+        if rsa_pubkey.n().bits() < 2048 {
+            return Err(RsaError::InvalidSecurityParam);
+        }
+
         let q_point = G::generator() * x;
 
         let r_list: Vec<<G as Group>::Scalar> = (0..security_param as usize)
@@ -316,7 +320,11 @@ where
             let enc_r = &proof.enc_r;
             let enc_x_r = &proof.enc_x_r;
 
-            let r = rsa_decrypt_with_label::<H>(enc_r, label, rsa_privkey)?;
+            let Ok(r) =
+                rsa_decrypt_with_label::<H>(enc_r, label, rsa_privkey)
+            else {
+                continue;
+            };
 
             // If r is not a valid scalar, continue. We expect at least one of the proofs to be valid, assuming the proofs are verified.
             let r = if let Some(r) = decode_scalar::<G::Scalar>(&r) {
@@ -325,8 +333,11 @@ where
                 continue;
             };
 
-            let x_plus_r =
-                rsa_decrypt_with_label::<H>(enc_x_r, label, rsa_privkey)?;
+            let Ok(x_plus_r) =
+                rsa_decrypt_with_label::<H>(enc_x_r, label, rsa_privkey)
+            else {
+                continue;
+            };
 
             let x_plus_r = if let Some(x_plus_r) =
                 decode_scalar::<G::Scalar>(&x_plus_r)
