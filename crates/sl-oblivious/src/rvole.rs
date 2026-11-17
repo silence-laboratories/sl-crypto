@@ -21,9 +21,12 @@ use elliptic_curve::{
     subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
     CurveArithmetic, FieldBytes, FieldBytesEncoding, PrimeField,
 };
-
 use sl_transcript::{Transcript, TranscriptProtocol};
 
+use crate::constants::SOFT_SPOKEN_SESSION_ID_LABEL;
+use crate::soft_spoken::{
+    randomize_ot_output, RECEIVER_NONCE_BYTES, SENDER_NONCE_BYTES,
+};
 use crate::{
     constants::{
         RANDOM_VOLE_GADGET_VECTOR_LABEL, RANDOM_VOLE_MU_LABEL,
@@ -31,8 +34,8 @@ use crate::{
     },
     params::consts::*,
     soft_spoken::{
-        ReceiverExtendedOutput, ReceiverOTSeed, Round1Output, SenderOTSeed,
-        SoftSpokenOTError, SoftSpokenOTReceiver, SoftSpokenOTSender,
+        ReceiverOTSeed, Round1Output, SenderOTSeed, SoftSpokenOTError,
+        SoftSpokenOTReceiver, SoftSpokenOTSender,
     },
     utils::ExtractBit,
 };
@@ -71,6 +74,7 @@ where
 #[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 #[repr(C)]
 pub struct RVOLEOutput {
+    sender_nonce: [u8; SENDER_NONCE_BYTES],
     a_tilde: [[[u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
     eta: [[u8; KAPPA_BYTES]; RHO],
     mu_hash: [u8; 64],
@@ -88,6 +92,7 @@ impl RVOLEOutput {
 impl Default for RVOLEOutput {
     fn default() -> Self {
         RVOLEOutput {
+            sender_nonce: [0u8; SENDER_NONCE_BYTES],
             a_tilde: [[[0u8; KAPPA_BYTES]; L_BATCH_PLUS_RHO]; XI],
             eta: [[0u8; KAPPA_BYTES]; RHO],
             mu_hash: [0u8; 64],
@@ -129,7 +134,7 @@ impl Default for RVOLEOutput {
 pub struct RVOLEReceiver {
     session_id: [u8; 32],
     beta: [u8; L_BYTES],
-    receiver_extended_output: ReceiverExtendedOutput,
+    psi_output: [[u8; LAMBDA_C_BYTES]; L_PRIME],
 }
 
 impl RVOLEReceiver {
@@ -145,6 +150,12 @@ impl RVOLEReceiver {
     {
         let mut beta = [0u8; L_BYTES];
         rng.fill_bytes(&mut beta);
+
+        // generate receiver_nonce
+        rng.fill_bytes(&mut round1_output.receiver_nonce);
+
+        let session_id =
+            derive_session_id(&session_id, &round1_output.receiver_nonce);
 
         // b = <g, /beta>
         let b = generate_gadget_vec::<C>(&session_id).enumerate().fold(
@@ -162,16 +173,15 @@ impl RVOLEReceiver {
         );
 
         let mut next = bytemuck::allocation::zeroed_box::<RVOLEReceiver>();
-
         next.session_id = session_id;
         next.beta = beta;
-        next.receiver_extended_output.choices = beta;
 
-        SoftSpokenOTReceiver::process(
+        SoftSpokenOTReceiver::create(
             &session_id,
             seed_ot_results,
+            &beta,
             round1_output,
-            &mut next.receiver_extended_output,
+            &mut next.psi_output,
             rng,
         );
 
@@ -191,8 +201,24 @@ impl RVOLEReceiver {
     where
         C: CurveArithmetic<FieldBytesSize = U32>,
     {
+        let sender_nonce = &rvole_output.sender_nonce;
+
+        let mut v_x = bytemuck::allocation::zeroed_box::<
+            [[[u8; KAPPA_BYTES]; OT_WIDTH]; XI],
+        >();
+        for j in 0..XI {
+            randomize_ot_output(
+                &self.session_id,
+                sender_nonce,
+                j,
+                &self.psi_output[j],
+                &mut v_x[j],
+            )
+        }
+
         let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
         t.append_message(b"session-id", &self.session_id);
+        t.append_message(b"sender-nonce", sender_nonce);
 
         for j in 0..XI {
             t.append_u64(b"row of a tilde", j as u64);
@@ -220,9 +246,7 @@ impl RVOLEReceiver {
         for j in 0..XI {
             let j_bit = self.beta.extract_bit(j);
             for i in 0..L_BATCH {
-                let option_0 = decode_scalar::<C>(
-                    &self.receiver_extended_output.v_x[j][i],
-                );
+                let option_0 = decode_scalar::<C>(&v_x[j][i]);
                 let option_1 = option_0 + rvole_output.get_a_tilde::<C>(j, i);
                 let chosen = C::Scalar::conditional_select(
                     &option_0,
@@ -232,9 +256,7 @@ impl RVOLEReceiver {
                 d_dot[j][i] = chosen
             }
             for k in 0..RHO {
-                let option_0 = decode_scalar::<C>(
-                    &self.receiver_extended_output.v_x[j][L_BATCH + k],
-                );
+                let option_0 = decode_scalar::<C>(&v_x[j][L_BATCH + k]);
                 let option_1 =
                     option_0 + rvole_output.get_a_tilde::<C>(j, L_BATCH + k);
                 let chosen = C::Scalar::conditional_select(
@@ -249,6 +271,7 @@ impl RVOLEReceiver {
         // mu_prime hash
         let mut t = Transcript::new(&RANDOM_VOLE_MU_LABEL);
         t.append_message(b"session-id", &self.session_id);
+        t.append_message(b"sender-nonce", sender_nonce);
 
         #[allow(clippy::needless_range_loop)]
         for j in 0..XI {
@@ -307,10 +330,17 @@ impl RVOLESender {
     where
         C: CurveArithmetic<FieldBytesSize = U32>,
     {
+        rng.fill_bytes(&mut output.sender_nonce);
+        let sender_nonce = output.sender_nonce;
+
+        let session_id =
+            &derive_session_id(session_id, &round1_output.receiver_nonce);
+
         let sender_extended_output = SoftSpokenOTSender::process(
             session_id,
             seed_ot_results,
             round1_output,
+            &sender_nonce,
         )?;
 
         let alpha_0 = |j: usize, i: usize| {
@@ -335,6 +365,7 @@ impl RVOLESender {
 
         let mut t = Transcript::new(&RANDOM_VOLE_THETA_LABEL);
         t.append_message(b"session-id", session_id);
+        t.append_message(b"sender-nonce", &sender_nonce);
 
         for (j, a_tilde_j_ref) in output.a_tilde.iter_mut().enumerate() {
             t.append_u64(b"row of a tilde", j as u64);
@@ -380,6 +411,7 @@ impl RVOLESender {
 
         let mut t = Transcript::new(&RANDOM_VOLE_MU_LABEL);
         t.append_message(b"session-id", session_id);
+        t.append_message(b"sender-nonce", &sender_nonce);
 
         #[allow(clippy::needless_range_loop)]
         for j in 0..XI {
@@ -396,6 +428,20 @@ impl RVOLESender {
 
         Ok(c)
     }
+}
+
+/// sid' = H(sid, receiver_nonce)
+fn derive_session_id(
+    session_id: &[u8],
+    receiver_nonce: &[u8; RECEIVER_NONCE_BYTES],
+) -> [u8; 32] {
+    let mut t = Transcript::new(&SOFT_SPOKEN_SESSION_ID_LABEL);
+    t.append_message(b"session-id", session_id);
+    t.append_message(b"receiver-nonce", receiver_nonce);
+
+    let mut derived = [0u8; 32];
+    t.challenge_bytes(b"derived-session-id", &mut derived);
+    derived
 }
 
 #[cfg(test)]
@@ -456,5 +502,49 @@ mod tests {
     #[test]
     fn pairwise_spec256r1() {
         pairwise::<p256::NistP256>()
+    }
+
+    #[test]
+    fn sender_pads_are_fresh_per_execution() {
+        let mut rng = rand::thread_rng();
+        let (sender_seed, receiver_seed) =
+            generate_all_but_one_seed_ot(&mut rng);
+        let sid: [u8; 32] = rng.gen();
+        let a = [
+            <k256::Secp256k1 as CurveArithmetic>::Scalar::random(&mut rng),
+            <k256::Secp256k1 as CurveArithmetic>::Scalar::random(&mut rng),
+        ];
+
+        let mut r1 = Round1Output::default();
+        let _ = RVOLEReceiver::new::<k256::Secp256k1, _>(
+            sid,
+            &sender_seed,
+            &mut r1,
+            &mut rng,
+        );
+
+        let (mut o1, mut o2) =
+            (RVOLEOutput::default(), RVOLEOutput::default());
+        RVOLESender::process::<k256::Secp256k1, _>(
+            &sid,
+            &receiver_seed,
+            &a,
+            &r1,
+            &mut o1,
+            &mut rng,
+        )
+        .unwrap();
+        RVOLESender::process::<k256::Secp256k1, _>(
+            &sid,
+            &receiver_seed,
+            &a,
+            &r1,
+            &mut o2,
+            &mut rng,
+        )
+        .unwrap();
+
+        assert_ne!(o1.sender_nonce, o2.sender_nonce);
+        assert_ne!(o1.a_tilde[0], o2.a_tilde[0]);
     }
 }

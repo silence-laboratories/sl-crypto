@@ -4,7 +4,7 @@
 use crate::label::Label;
 
 /// Domain labels version
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
 
 /// LABEL for Discrete Log Proof challenge
 pub const DLOG_CHALLENGE_LABEL: Label = Label::new(VERSION, 1);
@@ -47,3 +47,6 @@ pub const RANDOM_VOLE_MU_LABEL: Label = Label::new(VERSION, 13);
 
 /// LABEL for baseOT in RandomVOLE OT variant
 pub const RANDOM_VOLE_BASE_OT: Label = Label::new(VERSION, 14);
+
+/// LABEL for the per-execution session id of SoftSpokenOT
+pub const SOFT_SPOKEN_SESSION_ID_LABEL: Label = Label::new(VERSION, 15);

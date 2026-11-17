@@ -63,9 +63,12 @@ impl Default for ReceiverOTSeed {
     }
 }
 
+pub const RECEIVER_NONCE_BYTES: usize = 32;
+
 #[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 #[repr(C)]
 pub struct Round1Output {
+    pub receiver_nonce: [u8; RECEIVER_NONCE_BYTES],
     u: [[u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K],
     x: [u8; S_BYTES],
     t: [[u8; S_BYTES]; LAMBDA_C], // U128
@@ -74,6 +77,7 @@ pub struct Round1Output {
 impl Default for Round1Output {
     fn default() -> Self {
         Self {
+            receiver_nonce: [0; RECEIVER_NONCE_BYTES],
             u: [[0; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K],
             x: [0; S_BYTES],
             t: [[0; S_BYTES]; LAMBDA_C],
@@ -115,16 +119,17 @@ impl ReceiverExtendedOutput {
 pub struct SoftSpokenOTReceiver;
 
 impl SoftSpokenOTReceiver {
-    pub fn process<R: CryptoRngCore>(
+    pub fn create<R: CryptoRngCore>(
         session_id: &[u8],
         seed_ot_results: &SenderOTSeed,
+        choices: &[u8; L_BYTES],
         output: &mut Round1Output,
-        extended_output: &mut ReceiverExtendedOutput,
+        psi_output: &mut [[u8; LAMBDA_C_BYTES]; L_PRIME],
         rng: &mut R,
     ) {
         let extended_packed_choices = {
             let mut buf = [0u8; L_PRIME_BYTES];
-            buf[..L_BYTES].copy_from_slice(&extended_output.choices);
+            buf[..L_BYTES].copy_from_slice(choices);
             rng.fill_bytes(&mut buf[L_BYTES..]);
             buf
         };
@@ -234,16 +239,17 @@ impl SoftSpokenOTReceiver {
         }
 
         let psi = transpose_bool_matrix(&v);
+        psi_output.copy_from_slice(psi.as_slice());
+    }
 
+    pub fn process(
+        session_id: &[u8],
+        psi: &[[u8; LAMBDA_C_BYTES]; L_PRIME],
+        sender_nonce: &[u8; SENDER_NONCE_BYTES],
+        extended_output: &mut ReceiverExtendedOutput,
+    ) {
         for (j, v_x_j) in extended_output.v_x.iter_mut().enumerate() {
-            let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
-            t.append_message(b"session-id", session_id);
-            t.append_u64(b"index", j as u64);
-            t.append_message(&SOFT_SPOKEN_RANDOMIZE_LABEL, &psi[j]);
-
-            for k in v_x_j.iter_mut() {
-                t.challenge_bytes(b"", k);
-            }
+            randomize_ot_output(session_id, sender_nonce, j, &psi[j], v_x_j);
         }
     }
 }
@@ -283,6 +289,7 @@ impl SoftSpokenOTSender {
         session_id: &[u8],
         seed_ot_results: &ReceiverOTSeed,
         message: &Round1Output,
+        sender_nonce: &[u8; SENDER_NONCE_BYTES],
     ) -> Result<Box<SenderExtendedOutput>, SoftSpokenOTError> {
         // let mut r_x = [[[0u8; L_PRIME_BYTES]; LAMBDA_C_DIV_SOFT_SPOKEN_K];
         //     SOFT_SPOKEN_Q];
@@ -420,31 +427,49 @@ impl SoftSpokenOTSender {
         let v_1 = &mut output.v_1;
 
         for j in 0..L {
-            let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
-            t.append_message(b"session-id", session_id);
-            t.append_u64(b"index", j as u64);
-            t.append_message(&SOFT_SPOKEN_RANDOMIZE_LABEL, &zeta[j]);
-
-            for k in &mut v_0[j] {
-                t.challenge_bytes(b"", k);
-            }
+            randomize_ot_output(
+                session_id,
+                sender_nonce,
+                j,
+                &zeta[j],
+                &mut v_0[j],
+            );
 
             packed_nabla
                 .iter()
                 .zip(&mut zeta[j])
                 .for_each(|(b, z)| *z ^= b);
 
-            let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
-            t.append_message(b"session-id", session_id);
-            t.append_u64(b"index", j as u64);
-            t.append_message(&SOFT_SPOKEN_RANDOMIZE_LABEL, &zeta[j]);
-
-            for k in &mut v_1[j] {
-                t.challenge_bytes(b"", k);
-            }
+            randomize_ot_output(
+                session_id,
+                sender_nonce,
+                j,
+                &zeta[j],
+                &mut v_1[j],
+            );
         }
 
         Ok(output)
+    }
+}
+
+pub const SENDER_NONCE_BYTES: usize = 32;
+
+pub(crate) fn randomize_ot_output(
+    session_id: &[u8],
+    sender_nonce: &[u8; SENDER_NONCE_BYTES],
+    j: usize,
+    column: &[u8; LAMBDA_C_BYTES],
+    out: &mut [[u8; KAPPA_BYTES]; OT_WIDTH],
+) {
+    let mut t = Transcript::new(&SOFT_SPOKEN_LABEL);
+    t.append_message(b"session-id", session_id);
+    t.append_message(b"sender-nonce", sender_nonce);
+    t.append_u64(b"index", j as u64);
+    t.append_message(&SOFT_SPOKEN_RANDOMIZE_LABEL, column);
+
+    for k in out.iter_mut() {
+        t.challenge_bytes(b"", k);
     }
 }
 
@@ -488,6 +513,7 @@ fn random_bytes<const N: usize, R: RngCore>(rng: &mut R) -> [u8; N] {
 mod tests {
     use rand::prelude::*;
 
+    use crate::soft_spoken::SENDER_NONCE_BYTES;
     use crate::{
         params::consts::*,
         soft_spoken::{
@@ -516,23 +542,35 @@ mod tests {
             ReceiverExtendedOutput::new(&choices);
 
         // let start = std::time::Instant::now();
-        SoftSpokenOTReceiver::process(
+        let mut psi_output = [[0u8; LAMBDA_C_BYTES]; L_PRIME];
+        SoftSpokenOTReceiver::create(
             &session_id,
             &sender_ot_results,
+            &choices,
             &mut round1,
-            &mut receiver_extended_output,
+            &mut psi_output,
             &mut rng,
         );
         // println!("Round1: {:?}", start.elapsed());
 
         // let start = std::time::Instant::now();
+        let mut sender_nonce = [0u8; SENDER_NONCE_BYTES];
+        rng.fill_bytes(&mut sender_nonce);
         let sender_extended_output = SoftSpokenOTSender::process(
             &session_id,
             &receiver_ot_results,
             &round1,
+            &sender_nonce,
         )
         .unwrap();
         // println!("Round2: {:?}", start.elapsed());
+
+        SoftSpokenOTReceiver::process(
+            &session_id,
+            &psi_output,
+            &sender_nonce,
+            &mut receiver_extended_output,
+        );
 
         for i in 0..L {
             let bit = choices.extract_bit(i);
